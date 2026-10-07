@@ -8,9 +8,13 @@ import {
   GenerationParams,
   UserRole,
   ImageQualityTier,
+  PostDraft,
+  PendingRelease,
+  ImageSelection,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
 import { setProxyCapabilities } from "../services/proxyCapabilities";
+import { adoptStoreImageSettings } from "../utils/storeImageSettings";
 import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 // Removed duplicate import
 import { logEvent, logError } from "../utils/telemetry";
@@ -34,6 +38,10 @@ import {
 } from "../services/apiErrors";
 import { AUTH_SESSION_REJECTED_EVENT, setActiveAuthEpoch } from "../utils/authBoundary";
 import { setActiveSalespersonName } from "../utils/identityContext";
+import {
+  isSettingsSectionId,
+  type SettingsSectionId,
+} from "../utils/dealerSetupStatus";
 
 export interface LoginResult {
   ok: boolean;
@@ -41,6 +49,21 @@ export interface LoginResult {
   message?: string;
   retryAfterSeconds?: number;
 }
+
+/**
+ * Why the Post screen cannot be left right now (amendments A4): a paid image
+ * render or caption update is still running ("image"), or the final website
+ * handoff is in flight ("website"). Published by usePostLeaveGuard; every exit
+ * from POST refuses to leave while it is set.
+ */
+export type PostBusyReason = "image" | "website" | null;
+
+/** The surfaces a saved post can be reopened from, so Back returns there. */
+const POST_OPEN_SURFACES: readonly AppStep[] = [
+  AppStep.HOME,
+  AppStep.WORK,
+  AppStep.DEALER_ADMIN,
+];
 
 export type SessionLoginRequest =
   | { authType: "code"; dealerCode: string }
@@ -83,10 +106,24 @@ interface AppState {
   selectedImage: string | null;
   generatedPost: GeneratedPost | null;
   generationParams: GenerationParams | null;
+  postDraft: PostDraft | null;
+  pendingRelease: PendingRelease | null;
+  pendingPhoto: ImageSelection | null;
+  postWorkAtRisk: boolean;
+  postBusy: PostBusyReason;
+  postReturnStep: AppStep | null;
   error: string | null;
   isRestoringSession: boolean;
   /** Monotonic identity boundary used to discard stale async provider results. */
   authEpoch: number;
+  /**
+   * The deep link from the system admin's setup board into one store's
+   * settings: the hub sets it, then opens the store as its manager; the
+   * manager dashboard reads it on mount, opens Settings on that section and
+   * clears it. Memory only: never written to the session snapshot or to any
+   * browser storage, so a reload or a new tab never replays it.
+   */
+  managerEntry: { section: SettingsSectionId } | null;
 
   // Preferences
   theme: "dark" | "light" | "system";
@@ -98,9 +135,27 @@ interface AppState {
   setStep: (step: AppStep) => void;
   setCurrentDealer: (dealer: Dealer | null) => void;
   setSelectedImage: (image: string | null) => void;
-  setGeneratedPost: (post: GeneratedPost | null) => void;
+  setGeneratedPost: (
+    post: GeneratedPost | null,
+    options?: { archive?: boolean },
+  ) => void;
   setGenerationParams: (params: GenerationParams | null) => void;
   setError: (error: string | null) => void;
+  setPostDraft: (draft: PostDraft | null) => void;
+  setPendingRelease: (release: PendingRelease | null) => void;
+  setPendingPhoto: (photo: ImageSelection | null) => void;
+  setPostWorkAtRisk: (atRisk: boolean) => void;
+  setPostBusy: (reason: PostBusyReason) => void;
+  setPostReturnStep: (step: AppStep | null) => void;
+  setManagerEntry: (entry: { section: SettingsSectionId } | null) => void;
+  /**
+   * Replace the workspace with a saved post and open it (amendments B13). The
+   * one way every surface reopens a post, so Back always returns to the surface
+   * it was opened from (Home, My work or the dealership dashboard) and no stale
+   * photo, draft or signature survives under it. The caller supersedes any
+   * generation still running first; the store cannot reach it.
+   */
+  openSavedPost: (post: GeneratedPost) => void;
   setPreferences: (
     prefs: Partial<{
       theme: "dark" | "light" | "system";
@@ -124,6 +179,13 @@ interface AppState {
    */
   startRemix: () => void;
   restoreSession: () => Promise<void>;
+  /**
+   * Re-read the session and adopt the store's image settings (image quality,
+   * logo corner and size, logo) when a manager changed them after this app
+   * signed in. Nothing else in the session or the workflow changes, and a
+   * failed or mismatched read changes nothing.
+   */
+  refreshStoreImageSettings: () => Promise<void>;
   applyAuthPayload: (body: {
     role?: string;
     dealer?: Dealer;
@@ -142,6 +204,9 @@ const stepForRole = (role: UserRole): AppStep => {
 };
 
 const SESSION_REQUEST_TIMEOUT_MS = 8_000;
+
+/** The store image settings read in flight (refreshStoreImageSettings). */
+let storeImageSettingsRead: Promise<void> | null = null;
 
 export const resolveRestoredCustomerIdentityRequired = (
   generatedPostValue?: boolean,
@@ -214,6 +279,7 @@ export const resolveRestoredStep = (
         ? AppStep.RESULT
         : AppStep.CAPTURE;
 
+  if (requestedStep === AppStep.WORK) return AppStep.WORK;
   if (requestedStep === AppStep.RESULT && hasGeneratedPost) {
     return AppStep.RESULT;
   }
@@ -237,9 +303,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedImage: null,
   generatedPost: null,
   generationParams: null,
+  postDraft: null,
+  pendingRelease: null,
+  pendingPhoto: null,
+  postWorkAtRisk: false,
+  postBusy: null,
+  postReturnStep: null,
   error: null,
   isRestoringSession: true,
   authEpoch: 0,
+  managerEntry: null,
   // Seed the theme synchronously from the persisted session so light-mode
   // users don't flash dark between mount and the async restore resolving.
   // New installs still open in the dealership-studio dark theme.
@@ -270,6 +343,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedImage: null,
       generatedPost: null,
       generationParams: null,
+      postDraft: null,
+      pendingRelease: null,
+      pendingPhoto: null,
+      postWorkAtRisk: false,
+      postBusy: null,
+      postReturnStep: null,
       error: null,
       authEpoch: get().authEpoch + 1,
     });
@@ -282,6 +361,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedImage: undefined,
         generatedPost: undefined,
         generationParams: undefined,
+        postDraft: undefined,
         imageQualityTier: preferences.imageQualityTier,
         theme: preferences.theme,
         preferredStyle: preferences.preferredStyle,
@@ -292,9 +372,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   impersonatePerson: async (personId: string) => {
-    const body = await impersonatePersonApi(personId);
+    let body: Awaited<ReturnType<typeof impersonatePersonApi>>;
+    try {
+      body = await impersonatePersonApi(personId);
+    } catch (error) {
+      // The hub stays where it is; a stale entry must not steer the next,
+      // unrelated "Open as manager" to a section nobody asked for.
+      set({ managerEntry: null });
+      throw error;
+    }
     clearSession();
     await clearAllCreatives();
+    // The deep link crosses this session swap (applyAuthPayload leaves it
+    // alone) but only into a manager session, the one screen that reads it.
+    if (body.role !== "dealer_admin") set({ managerEntry: null });
     get().applyAuthPayload({
       role: body.role,
       dealer: body.dealer as Dealer,
@@ -308,6 +399,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const body = await exitImpersonationApi();
     clearSession();
     await clearAllCreatives();
+    set({ managerEntry: null });
     get().applyAuthPayload({
       role: body.role,
       dealer: body.dealer as Dealer,
@@ -324,6 +416,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         ? {
             step,
             generationParams: null,
+            postDraft: null,
+            pendingRelease: null,
+            pendingPhoto: null,
+            postWorkAtRisk: false,
+            postBusy: null,
+            postReturnStep: null,
           }
         : { step },
     );
@@ -334,6 +432,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         dealerId: currentDealer.id,
         generatedPost: generatedPost || undefined,
         selectedImage: selectedImage || undefined,
+        postDraft: startsNewCapture ? undefined : get().postDraft || undefined,
         generationParams: startsNewCapture
           ? undefined
           : get().generationParams || undefined,
@@ -358,13 +457,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  setGeneratedPost: (post) => {
+  setGeneratedPost: (post, options) => {
     const previousImage = get().generatedPost?.image;
     set({ generatedPost: post });
     const { currentDealer, step, selectedImage } = get();
     if (currentDealer) {
       void saveDealerCreative(currentDealer.id, "generated", post?.image || null);
-      if (post?.image && post.image !== previousImage) {
+      if (post?.image && post.image !== previousImage && options?.archive !== false) {
         void archiveDealerMedia(currentDealer.id, {
           kind: "generated-image",
           source: post.image,
@@ -395,6 +494,40 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  setPostDraft: (postDraft) => {
+    set({ postDraft });
+    saveSession({ postDraft: postDraft || undefined });
+  },
+  setPendingRelease: (pendingRelease) => set({ pendingRelease }),
+  setPendingPhoto: (pendingPhoto) => set({ pendingPhoto }),
+  setPostWorkAtRisk: (postWorkAtRisk) => set({ postWorkAtRisk }),
+  setPostBusy: (postBusy) => {
+    if (get().postBusy !== postBusy) set({ postBusy });
+  },
+  setPostReturnStep: (postReturnStep) => set({ postReturnStep }),
+  setManagerEntry: (entry) =>
+    set({
+      // Copied, never shared, and only for a real section: the entry steers
+      // which settings section opens, so an unknown id is dropped.
+      managerEntry:
+        entry && isSettingsSectionId(entry.section) ? { section: entry.section } : null,
+    }),
+  openSavedPost: (post) => {
+    const { step, role } = get();
+    const returnStep = POST_OPEN_SURFACES.includes(step)
+      ? step
+      : role === "salesperson"
+        ? AppStep.WORK
+        : AppStep.DEALER_ADMIN;
+    get().setPostReturnStep(returnStep);
+    get().setGeneratedPost(post);
+    get().setSelectedImage(null);
+    get().setGenerationParams(null);
+    get().setPostDraft(null);
+    get().setPendingRelease(null);
+    get().setError(null);
+    get().setStep(AppStep.POST);
+  },
   setError: (error) => set({ error }),
 
   setPreferences: (prefs) => {
@@ -456,6 +589,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // with another dealer id and restored after the next reload.
         clearSession();
         await clearAllCreatives();
+        set({ managerEntry: null });
         get().applyAuthPayload({
           role: body.role,
           dealer,
@@ -542,9 +676,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       isImpersonating: false,
       selectedImage: null,
       generatedPost: null,
+      generationParams: null,
+      postDraft: null,
+      pendingRelease: null,
+      pendingPhoto: null,
+      postWorkAtRisk: false,
+      postBusy: null,
+      postReturnStep: null,
       error: null,
       step: AppStep.LOGIN,
       role: "salesperson",
+      managerEntry: null,
       authEpoch: get().authEpoch + 1,
     });
     clearSession();
@@ -573,6 +715,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       generatedPost: null,
       selectedImage: null,
       generationParams: null,
+      postDraft: null,
+      pendingRelease: null,
+      pendingPhoto: null,
+      postWorkAtRisk: false,
+      postBusy: null,
+      postReturnStep: null,
       error: null,
       step: nextStep,
     });
@@ -585,6 +733,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedImage: undefined,
         generatedPost: undefined,
         generationParams: undefined,
+        postDraft: undefined,
       });
     }
     if (dealerId) void clearDealerCreatives(dealerId);
@@ -688,6 +837,22 @@ export const useAppStore = create<AppState>((set, get) => ({
             selectedImage: restoredSelectedImage,
             generatedPost: restoredGeneratedPost,
             generationParams: restoredGenerationParams,
+            postDraft: matchesPersistedDealer
+              ? session?.postDraft ||
+                (restoredSelectedImage
+                  ? {
+                      categoryId: "deliveries",
+                      scenarioId:
+                        restoredGenerationParams?.scenarioId || "customer_delivery",
+                      decodedVehicle: restoredGenerationParams?.decodedVehicle,
+                    }
+                  : null)
+              : null,
+            pendingRelease: null,
+            pendingPhoto: null,
+            postWorkAtRisk: false,
+            postBusy: null,
+            postReturnStep: null,
             step: restoredStep,
             imageQualityTier: session?.imageQualityTier ?? "standard",
             ...(session?.theme
@@ -737,6 +902,46 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ isRestoringSession: false });
     }
   },
+
+  refreshStoreImageSettings: () => {
+    const started = get();
+    const dealer = started.currentDealer;
+    if (!dealer || started.isRestoringSession) return Promise.resolve();
+    // The app regaining the screen fires both visibilitychange and focus.
+    if (storeImageSettingsRead) return storeImageSettingsRead;
+    storeImageSettingsRead = (async () => {
+      try {
+        const res = await fetchSession({ method: "GET" });
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          role?: unknown;
+          dealer?: unknown;
+          person?: { id?: unknown } | null;
+          is_impersonation?: unknown;
+        };
+        const now = get();
+        // Apply only to the same signed-in person and the same dealer object
+        // the read started from: a sign-out, a switch of person, or a local
+        // settings save or logo upload during the read wins over it.
+        if (
+          now.authEpoch !== started.authEpoch ||
+          now.currentDealer !== dealer ||
+          ((body.role as UserRole) || "salesperson") !== now.role ||
+          (body.person?.id ?? null) !== (now.currentPerson?.id ?? null) ||
+          !!body.is_impersonation !== now.isImpersonating
+        ) {
+          return;
+        }
+        const next = adoptStoreImageSettings(dealer, body.dealer);
+        if (next !== dealer) set({ currentDealer: next });
+      } catch {
+        // Nothing changes; the next return to the app reads again.
+      } finally {
+        storeImageSettingsRead = null;
+      }
+    })();
+    return storeImageSettingsRead;
+  },
 }));
 
 setActiveAuthEpoch(useAppStore.getState().authEpoch);
@@ -770,9 +975,16 @@ if (typeof window !== "undefined") {
       selectedImage: null,
       generatedPost: null,
       generationParams: null,
+      postDraft: null,
+      pendingRelease: null,
+      pendingPhoto: null,
+      postWorkAtRisk: false,
+      postBusy: null,
+      postReturnStep: null,
       error: null,
       role: "salesperson",
       step: AppStep.LOGIN,
+      managerEntry: null,
       isRestoringSession: true,
       authEpoch: state.authEpoch + 1,
     });

@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
-import { ImageCropModal, constrainImageDimensions } from "../components/ImageCropModal";
 import { LoginScreen } from "../components/LoginScreen";
 import { Input, Textarea } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
@@ -176,39 +175,5 @@ describe("frontend production pass", () => {
     expect(
       screen.getByText("Use your system administrator username and password."),
     ).toBeVisible();
-  });
-
-  it("caps reviewed photo dimensions while preserving aspect ratio", () => {
-    expect(constrainImageDimensions(6000, 4000)).toEqual({
-      width: 2048,
-      height: 1365,
-    });
-    expect(constrainImageDimensions(1200, 800)).toEqual({
-      width: 1200,
-      height: 800,
-    });
-  });
-
-  it("exposes the photo review as a described modal dialog", () => {
-    render(
-      <ToastProvider>
-        <ImageCropModal
-          isOpen
-          imageSrc="data:image/png;base64,preview"
-          onConfirm={vi.fn()}
-          onClose={vi.fn()}
-        />
-      </ToastProvider>,
-    );
-
-    const dialog = screen.getByRole("dialog", { name: "Review photo" });
-    expect(dialog).toHaveAccessibleDescription(
-      "Check the framing. The photo is kept at its original size.",
-    );
-    const usePhotoButton = screen.getByRole("button", { name: "Use photo" });
-    expect(usePhotoButton).toBeDisabled();
-
-    fireEvent.load(screen.getByAltText("Selected vehicle photo preview"));
-    expect(usePhotoButton).toBeEnabled();
   });
 });

@@ -6,6 +6,7 @@ import { AppStep, StyleOption, ToneOption, type GeneratedPost } from "../types";
 import type { CapturedRelease } from "../services/photoReleases";
 import { createBlockedContentError } from "../utils/errorHandler";
 import { logEvent } from "../utils/telemetry";
+import { resolveHistoryPlatformIds } from "../services/platformCopy";
 import {
   isReleaseAlreadyLinked,
   useGeneration,
@@ -125,6 +126,19 @@ vi.mock("../utils/multiFormatExport", () => ({
   renderFormat: mocks.renderFormat,
 }));
 
+/** Argument positions of generateSocialPost (services/geminiService.ts). */
+const POST_ARG = {
+  tier: 8,
+  aspectRatio: 9,
+  signal: 11,
+  onPartReady: 12,
+  logoPlacement: 13,
+} as const;
+/** Argument positions of generateFunSocialPostImage. */
+const FUN_ARG = { tier: 4, signal: 7, logoPlacement: 8 } as const;
+/** Argument positions of editSocialPostImage. */
+const EDIT_ARG = { tier: 4, aspectRatio: 5, signal: 6, logoPlacement: 7 } as const;
+
 const imageMeta = {
   task: "image_studio",
   tier: "studio" as const,
@@ -225,6 +239,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       id: "release-stored-1",
       post_id: "post-77",
       has_release: true,
+      post_revision: "revision-linked-1",
     });
     mocks.loadGeminiService.mockResolvedValue({
       generateSocialPost: mocks.generateSocialPost,
@@ -255,25 +270,265 @@ describe("useGeneration model-tier and provenance wiring", () => {
     });
 
     expect(mocks.generateSocialPost).toHaveBeenCalledTimes(2);
-    // The first call is the staged Create post: it carries onPartReady after
-    // the signal, so its tail positions sit one further from the end.
-    expect(mocks.generateSocialPost.mock.calls[0].at(-5)).toBe("studio");
-    expect(mocks.generateSocialPost.mock.calls[1].at(-4)).toBe("studio");
-    expect(mocks.generateSocialPost.mock.calls[0].at(-4)).toBe("1:1");
-    expect(mocks.generateSocialPost.mock.calls[1].at(-3)).toBe("1:1");
-    expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBeInstanceOf(AbortSignal);
-    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBeTypeOf("function");
-    expect(mocks.generateFunSocialPostImage.mock.calls[0].slice(4)).toEqual([
+    // The first call is the staged Create post, the only one with an
+    // onPartReady; Regenerate image leaves that slot undefined.
+    expect(mocks.generateSocialPost.mock.calls[0][POST_ARG.tier]).toBe("studio");
+    expect(mocks.generateSocialPost.mock.calls[1][POST_ARG.tier]).toBe("studio");
+    expect(mocks.generateSocialPost.mock.calls[0][POST_ARG.aspectRatio]).toBe("1:1");
+    expect(mocks.generateSocialPost.mock.calls[1][POST_ARG.aspectRatio]).toBe("1:1");
+    expect(mocks.generateSocialPost.mock.calls[0][POST_ARG.signal]).toBeInstanceOf(
+      AbortSignal,
+    );
+    expect(mocks.generateSocialPost.mock.calls[0][POST_ARG.onPartReady]).toBeTypeOf(
+      "function",
+    );
+    expect(
+      mocks.generateSocialPost.mock.calls[1][POST_ARG.onPartReady],
+    ).toBeUndefined();
+    expect(mocks.generateFunSocialPostImage.mock.calls[0].slice(4, 8)).toEqual([
       "studio",
       "1:1",
       "Post scenario: Service Promotion. Target platforms (dealership priority): Instagram Story.",
       expect.any(AbortSignal),
     ]);
-    expect(mocks.editSocialPostImage.mock.calls[0].at(-3)).toBe("studio");
-    expect(mocks.editSocialPostImage.mock.calls[0].at(-2)).toBe("1:1");
-    expect(mocks.editSocialPostImage.mock.calls[0].at(-1)).toBeInstanceOf(AbortSignal);
+    expect(mocks.editSocialPostImage.mock.calls[0][EDIT_ARG.tier]).toBe("studio");
+    expect(mocks.editSocialPostImage.mock.calls[0][EDIT_ARG.aspectRatio]).toBe("1:1");
+    expect(mocks.editSocialPostImage.mock.calls[0][EDIT_ARG.signal]).toBeInstanceOf(
+      AbortSignal,
+    );
     expect(mocks.renderFormat).toHaveBeenCalledTimes(4);
 
+    cleanup();
+  });
+
+  /** Runs Create post, Regenerate image, Fun mode and Edit image once each. */
+  const runEveryImagePath = async () => {
+    const { result, cleanup } = renderGeneration();
+    await act(async () => {
+      await result.current.handleGenerate(
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Alex",
+      );
+      await result.current.handleRegenerateImage();
+      await result.current.handleFunMode("Golden Delivery");
+      await result.current.handleEditImage("Add a subtle spotlight");
+    });
+    cleanup();
+    expect(mocks.generateSocialPost).toHaveBeenCalledTimes(2);
+    expect(mocks.generateFunSocialPostImage).toHaveBeenCalledTimes(1);
+    expect(mocks.editSocialPostImage).toHaveBeenCalledTimes(1);
+    return [
+      mocks.generateSocialPost.mock.calls[0][POST_ARG.tier],
+      mocks.generateSocialPost.mock.calls[1][POST_ARG.tier],
+      mocks.generateFunSocialPostImage.mock.calls[0][FUN_ARG.tier],
+      mocks.editSocialPostImage.mock.calls[0][EDIT_ARG.tier],
+    ];
+  };
+
+  it.each([
+    { store: "studio", device: "standard", expected: "studio" },
+    { store: "standard", device: "studio", expected: "standard" },
+  ] as const)(
+    "requests the store's $store tier over this device's $device on every image path",
+    async ({ store, device, expected }) => {
+      mocks.store.currentDealer = {
+        id: "dealer-1",
+        name: "Example Motors",
+        image_quality_tier: store,
+      };
+      mocks.store.imageQualityTier = device;
+      expect(await runEveryImagePath()).toEqual([
+        expected,
+        expected,
+        expected,
+        expected,
+      ]);
+    },
+  );
+
+  it.each([
+    { label: "an empty store tier", storeTier: "" as const, device: "studio" as const },
+    { label: "no store tier", storeTier: undefined, device: "standard" as const },
+  ])(
+    "requests this device's tier on every image path when the store has $label",
+    async ({ storeTier, device }) => {
+      mocks.store.currentDealer = {
+        id: "dealer-1",
+        name: "Example Motors",
+        image_quality_tier: storeTier,
+      };
+      mocks.store.imageQualityTier = device;
+      expect(await runEveryImagePath()).toEqual([device, device, device, device]);
+    },
+  );
+
+  it.each(["a regenerated caption", "an AI caption edit"] as const)(
+    "records the store's tier on an older post's image provenance after %s",
+    async (path) => {
+      // An older post with no provenance: mergeCaptionProvenance fills in the
+      // tier, which must be the one generation uses, not this device's.
+      mocks.store.currentDealer = {
+        id: "dealer-1",
+        name: "Example Motors",
+        image_quality_tier: "studio",
+      };
+      mocks.store.imageQualityTier = "standard";
+      mocks.store.generatedPost = { ...existingPost, aiMeta: undefined };
+      const captionResult = {
+        text: "Fresh delivery-day caption.",
+        captionSource: "ai" as const,
+        aiMeta: {
+          task: path === "an AI caption edit" ? "caption_edit" : "caption_regenerate",
+          tier: "fast",
+          provider: "gemini",
+          model: "gemini-3.5-flash-lite",
+          fallbackCount: 0,
+          lastSuccessAt: "2026-10-06T12:00:00.000Z",
+        },
+      };
+      mocks.generateSocialPostTextDetailed.mockResolvedValue(captionResult);
+      mocks.editSocialPostTextDetailed.mockResolvedValue(captionResult);
+      const { result, cleanup } = renderGeneration();
+
+      await act(async () => {
+        if (path === "an AI caption edit") {
+          await result.current.handleEditText("Make it warmer.", "Original caption");
+        } else {
+          await result.current.handleRegenerateText();
+        }
+      });
+      cleanup();
+
+      const updated = mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as
+        GeneratedPost | undefined;
+      expect(updated?.aiMeta).toMatchObject({
+        selectedTier: "studio",
+        image: { task: "image_studio", tier: "studio", provider: "unknown" },
+      });
+    },
+  );
+
+  it("asks for the store's logo corner and size on every image path", async () => {
+    const logoPlacement = { corner: "top_left", scale: 0.25 } as const;
+    mocks.store.currentDealer = {
+      id: "dealer-1",
+      name: "Example Motors",
+      logo: "/api/files/dealers/dealer-1/logo.png",
+      logo_placement: logoPlacement,
+    };
+    await runEveryImagePath();
+    expect([
+      mocks.generateSocialPost.mock.calls[0][POST_ARG.logoPlacement],
+      mocks.generateSocialPost.mock.calls[1][POST_ARG.logoPlacement],
+      mocks.generateFunSocialPostImage.mock.calls[0][FUN_ARG.logoPlacement],
+      mocks.editSocialPostImage.mock.calls[0][EDIT_ARG.logoPlacement],
+    ]).toEqual([logoPlacement, logoPlacement, logoPlacement, logoPlacement]);
+  });
+
+  it("notes the new image's logo corner after Regenerate image and drops the old note after Fun mode and Edit image", async () => {
+    const asked = {
+      requested: "top_left",
+      observed: "top_left",
+      matched: true,
+    } as const;
+    const missed = {
+      requested: "top_left",
+      observed: "bottom_right",
+      matched: false,
+    } as const;
+    mocks.store.currentDealer = {
+      id: "dealer-1",
+      name: "Example Motors",
+      logo: "/api/files/dealers/dealer-1/logo.png",
+      logo_placement: { corner: "top_left", scale: 0.18 },
+    };
+    const notedPost: GeneratedPost = {
+      ...existingPost,
+      aiMeta: {
+        ...existingPost.aiMeta!,
+        image: { ...imageMeta, attemptId: "attempt-1", logoCorner: asked },
+      },
+    };
+    mocks.store.generatedPost = notedPost;
+    mocks.generateSocialPost.mockResolvedValue({
+      ...generatedResult,
+      aiMeta: {
+        ...generatedResult.aiMeta,
+        image: { ...imageMeta, attemptId: "attempt-2", logoCorner: missed },
+      },
+    });
+    const { result, cleanup } = renderGeneration();
+    const lastImage = () =>
+      (mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as GeneratedPost).aiMeta?.image;
+
+    await act(async () => {
+      await result.current.handleRegenerateImage();
+    });
+    // Only the note changes: the attempt id still keys this unsaved post.
+    expect(lastImage()).toEqual({
+      ...imageMeta,
+      attemptId: "attempt-1",
+      logoCorner: missed,
+    });
+
+    for (const run of [
+      () => result.current.handleFunMode("Golden Delivery"),
+      () => result.current.handleEditImage("Add a subtle spotlight"),
+    ]) {
+      mocks.setGeneratedPost.mockClear();
+      await act(async () => {
+        await run();
+      });
+      expect(lastImage()).toEqual({ ...imageMeta, attemptId: "attempt-1" });
+    }
+    cleanup();
+  });
+
+  it("still shows the new image on an older post whose metadata has no image provenance", async () => {
+    mocks.store.currentDealer = {
+      id: "dealer-1",
+      name: "Example Motors",
+      logo: "/api/files/dealers/dealer-1/logo.png",
+      logo_placement: { corner: "top_left", scale: 0.18 },
+    };
+    // A session restored from a build before image provenance existed.
+    const { image: _image, ...captionOnlyMeta } = existingPost.aiMeta!;
+    const olderMeta = captionOnlyMeta as GeneratedPost["aiMeta"];
+    mocks.store.generatedPost = { ...existingPost, aiMeta: olderMeta };
+    mocks.generateSocialPost.mockResolvedValue({
+      ...generatedResult,
+      aiMeta: {
+        ...generatedResult.aiMeta,
+        image: {
+          ...imageMeta,
+          logoCorner: { requested: "top_left", observed: "top_left", matched: true },
+        },
+      },
+    });
+    const { result, cleanup } = renderGeneration();
+
+    for (const [run, image] of [
+      [() => result.current.handleRegenerateImage(), generatedResult.image],
+      [
+        () => result.current.handleFunMode("Golden Delivery"),
+        "data:image/png;base64,ZnVu",
+      ],
+      [
+        () => result.current.handleEditImage("Add a subtle spotlight"),
+        "data:image/png;base64,ZWRpdA==",
+      ],
+    ] as const) {
+      mocks.setGeneratedPost.mockClear();
+      await act(async () => {
+        await run();
+      });
+      const shown = mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as
+        GeneratedPost | undefined;
+      expect(shown?.image).toBe(image);
+      expect(shown?.aiMeta).toEqual(olderMeta);
+    }
+    expect(mocks.toastError).not.toHaveBeenCalled();
     cleanup();
   });
 
@@ -292,7 +547,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       );
     });
 
-    expect(mocks.generateSocialPost.mock.calls[0].at(-4)).toBe("4:3");
+    expect(mocks.generateSocialPost.mock.calls[0][POST_ARG.aspectRatio]).toBe("4:3");
     expect(mocks.setGenerationParams).toHaveBeenCalledWith(
       expect.objectContaining({
         platformIds: ["gbp"],
@@ -329,7 +584,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       );
     });
 
-    expect(mocks.generateSocialPost.mock.calls[0].at(-4)).toBe("16:9");
+    expect(mocks.generateSocialPost.mock.calls[0][POST_ARG.aspectRatio]).toBe("16:9");
     expect(mocks.setGenerationParams).toHaveBeenCalledWith(
       expect.objectContaining({
         platformIds: ["facebook_feed", "gbp"],
@@ -349,13 +604,16 @@ describe("useGeneration model-tier and provenance wiring", () => {
     cleanup();
   });
 
-  it("persists disclosures triggered only by a platform caption variant", async () => {
+  it("creates a post for several channels with one caption and no per-channel variants", async () => {
+    // The Post screen ships the caption on screen to every channel, so a
+    // per-channel pack would be a model call nobody sees.
     mocks.generatePlatformCaptionPack.mockResolvedValue(
       JSON.stringify({
         facebook_feed: "Lease for $299/mo with approved credit.",
         instagram_feed: "A great delivery day at Example Motors.",
       }),
     );
+    mocks.logPost.mockResolvedValueOnce({ id: "post-90" });
     const { result, cleanup } = renderGeneration();
 
     await act(async () => {
@@ -366,30 +624,128 @@ describe("useGeneration model-tier and provenance wiring", () => {
         undefined,
         undefined,
         undefined,
-        ["facebook_feed", "instagram_feed"],
+        ["facebook_feed", "instagram_feed", "tiktok"],
       );
     });
 
+    expect(mocks.generatePlatformCaptionPack).not.toHaveBeenCalled();
+    expect(mocks.runGeminiTask.mock.calls.map(([name]) => name)).toEqual([
+      "ai.generate",
+    ]);
     const finalPost = mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as
       GeneratedPost | undefined;
+    expect(finalPost?.postId).toBe("post-90");
     expect(finalPost?.text).toContain("Generated caption");
-    expect(finalPost?.text).not.toContain("— Disclosures —");
-    expect(finalPost?.platformCaptions?.facebook_feed).toContain("$299/mo");
-    expect(finalPost?.disclosures).toContain("Lease offer with approved credit");
-    expect(mocks.logPost).toHaveBeenCalledWith(
-      expect.objectContaining({
-        disclosures: expect.stringContaining("Lease offer with approved credit"),
-      }),
-      1,
-    );
-    expect(mocks.generatePlatformCaptionPack).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.stringContaining("CAPTION PACK"),
-      "Alex",
-      true,
-      expect.any(AbortSignal),
-    );
+    expect(finalPost?.platformIds).toEqual([
+      "facebook_feed",
+      "instagram_feed",
+      "tiktok",
+    ]);
+    expect(finalPost).not.toHaveProperty("platformCaptions");
+    // Disclosures follow the one caption that ships, never an unseen variant.
+    expect(finalPost?.disclosures ?? "").not.toContain("Lease offer");
+    const logged = mocks.logPost.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(logged.platformIds).toEqual(["facebook_feed", "instagram_feed", "tiktok"]);
+    expect(logged.platformCaptions).toBeUndefined();
 
+    cleanup();
+  });
+
+  it.each([
+    {
+      label: "a regenerated caption",
+      run: (current: ReturnType<typeof useGeneration>) =>
+        current.handleRegenerateText(),
+    },
+    {
+      label: "an AI caption edit",
+      run: (current: ReturnType<typeof useGeneration>) =>
+        current.handleEditText("Make it warmer.", "Original caption"),
+    },
+  ])(
+    "$label makes no per-channel call and puts the new caption on an older post's saved channels",
+    async ({ run }) => {
+      mocks.store.generatedPost = {
+        ...existingPost,
+        platformIds: ["facebook_feed", "instagram_feed"],
+        platformCaptions: {
+          facebook_feed: "Lease for $299/mo with approved credit.",
+          instagram_feed: "Original caption #ExampleMotors",
+        },
+        disclosures: "— Disclosures —\nLease offer with approved credit.",
+      };
+      mocks.store.generationParams = {
+        ...(mocks.store.generationParams as Record<string, unknown>),
+        platformIds: ["facebook_feed", "instagram_feed"],
+      };
+      const fresh = {
+        text: "A fresh delivery-day caption for Example Motors.",
+        captionSource: "ai" as const,
+        aiMeta: {
+          task: "caption_regenerate",
+          tier: "fast",
+          provider: "gemini",
+          model: "gemini-3.5-flash-lite",
+          fallbackCount: 0,
+          lastSuccessAt: "2026-10-06T12:00:00.000Z",
+        },
+      };
+      mocks.generateSocialPostTextDetailed.mockResolvedValue(fresh);
+      mocks.editSocialPostTextDetailed.mockResolvedValue(fresh);
+      const { result, cleanup } = renderGeneration();
+
+      await act(async () => {
+        await run(result.current);
+      });
+
+      expect(mocks.generatePlatformCaptionPack).not.toHaveBeenCalled();
+      expect(mocks.runGeminiTask.mock.calls.map(([name]) => name)).not.toContain(
+        "ai.caption.pack",
+      );
+      const updated = mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as
+        GeneratedPost | undefined;
+      expect(updated?.text).toContain("A fresh delivery-day caption");
+      // The saved variants were written for the caption this replaced, so
+      // each channel now carries the new caption. The keys stay: a draft saved
+      // before platform_ids existed reopens its channels from them.
+      expect(updated?.platformCaptions).toEqual({
+        facebook_feed: updated?.text,
+        instagram_feed: updated?.text,
+      });
+      expect(updated?.disclosures ?? "").not.toContain("Lease offer");
+      expect(updated?.platformIds).toEqual(["facebook_feed", "instagram_feed"]);
+      expect(resolveHistoryPlatformIds(undefined, updated?.platformCaptions)).toEqual([
+        "facebook_feed",
+        "instagram_feed",
+      ]);
+
+      cleanup();
+    },
+  );
+
+  it("adds no per-channel captions when a post without saved ones gets a new caption", async () => {
+    mocks.generateSocialPostTextDetailed.mockResolvedValue({
+      text: "A fresh delivery-day caption for Example Motors.",
+      captionSource: "ai" as const,
+      aiMeta: {
+        task: "caption_regenerate",
+        tier: "fast",
+        provider: "gemini",
+        model: "gemini-3.5-flash-lite",
+        fallbackCount: 0,
+        lastSuccessAt: "2026-10-06T12:00:00.000Z",
+      },
+    });
+    const { result, cleanup } = renderGeneration();
+
+    await act(async () => {
+      await result.current.handleRegenerateText();
+    });
+
+    const updated = mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as
+      GeneratedPost | undefined;
+    expect(updated?.text).toContain("A fresh delivery-day caption");
+    expect(updated?.platformCaptions).toBeUndefined();
     cleanup();
   });
 
@@ -879,20 +1235,30 @@ describe("useGeneration model-tier and provenance wiring", () => {
       const stages: GenerationStage[] = [];
       const signature = deferred<{ id: string } | undefined>();
       const provider = deferred<typeof generatedResult>();
-      const pack = deferred<string>();
+      const websiteDraft = deferred<string>();
       const saving = deferred<{ id: string } | null>();
       mocks.saveRelease.mockImplementationOnce(() => signature.promise);
       mocks.generateSocialPost.mockImplementationOnce(() => provider.promise);
-      mocks.generatePlatformCaptionPack.mockImplementationOnce(() => pack.promise);
+      // Drop answers queued by earlier tests that never asked for them.
+      mocks.generateWebsiteDraftMetadata.mockReset();
+      mocks.generateWebsiteDraftMetadata.mockImplementationOnce(
+        () => websiteDraft.promise,
+      );
       mocks.logPost.mockImplementationOnce(() => saving.promise);
       const { result, cleanup } = renderGeneration(({ generationStage }) => {
         if (stages.at(-1) !== generationStage) stages.push(generationStage);
       });
 
-      const run = startGeneration(result, { capturedRelease: signedRelease() }, [
-        "facebook_feed",
-        "instagram_feed",
-      ]);
+      const run = startGeneration(
+        result,
+        // A site update, so the website step asks the model for its copy.
+        {
+          capturedRelease: signedRelease(),
+          scenarioId: "preowned_spotlight",
+          websiteEnabled: true,
+        },
+        ["facebook_feed", "instagram_feed"],
+      );
 
       await advanceUntil(() => expect(mocks.saveRelease).toHaveBeenCalledTimes(1));
       expect(result.current.generationStage).toBe("signature");
@@ -906,9 +1272,9 @@ describe("useGeneration model-tier and provenance wiring", () => {
       );
       expect(result.current.generationStage).toBe("design");
 
-      const onPartReady = mocks.generateSocialPost.mock.calls[0].at(-1) as (
-        part: "caption" | "image",
-      ) => void;
+      const onPartReady = mocks.generateSocialPost.mock.calls[0][
+        POST_ARG.onPartReady
+      ] as (part: "caption" | "image") => void;
       act(() => onPartReady("caption"));
       expect(result.current.partsReady).toEqual({ image: false, caption: true });
       act(() => onPartReady("image"));
@@ -916,15 +1282,18 @@ describe("useGeneration model-tier and provenance wiring", () => {
 
       provider.resolve(generatedResult);
       await advanceUntil(() =>
-        expect(mocks.generatePlatformCaptionPack).toHaveBeenCalledTimes(1),
+        expect(mocks.generateWebsiteDraftMetadata).toHaveBeenCalledTimes(1),
       );
       expect(result.current.generationStage).toBe("checks");
       expect(mocks.logPost).not.toHaveBeenCalled();
 
-      pack.resolve(
+      websiteDraft.resolve(
         JSON.stringify({
-          facebook_feed: "A great delivery day at Example Motors.",
-          instagram_feed: "Delivery day at Example Motors.",
+          title: "Community update",
+          body: "A private community update for review.",
+          altText: "A dealership community image.",
+          category: "community",
+          privacyFlags: [],
         }),
       );
       await advanceUntil(() => expect(mocks.logPost).toHaveBeenCalledTimes(1));
@@ -951,7 +1320,8 @@ describe("useGeneration model-tier and provenance wiring", () => {
       });
       // The legacy overlay still gets its values until Creating replaces it.
       expect(result.current.generationProgress).toBe(100);
-      expect(result.current.progressMessage).toBe("Finishing destination copy...");
+      expect(result.current.progressMessage).toBe("Preparing the website draft...");
+      expect(mocks.generatePlatformCaptionPack).not.toHaveBeenCalled();
 
       cleanup();
     });
@@ -1051,21 +1421,31 @@ describe("useGeneration model-tier and provenance wiring", () => {
     });
 
     it("Cancel during checks discards the late result and creates nothing", async () => {
-      const pack = deferred<string>();
-      mocks.generatePlatformCaptionPack.mockImplementationOnce(() => pack.promise);
+      const websiteDraft = deferred<string>();
+      // Drop answers queued by earlier tests that never asked for them.
+      mocks.generateWebsiteDraftMetadata.mockReset();
+      mocks.generateWebsiteDraftMetadata.mockImplementationOnce(
+        () => websiteDraft.promise,
+      );
       const { result, cleanup } = renderGeneration();
 
-      const run = startGeneration(result, {}, ["facebook_feed", "instagram_feed"]);
+      const run = startGeneration(
+        result,
+        { scenarioId: "preowned_spotlight", websiteEnabled: true },
+        ["facebook_feed", "instagram_feed"],
+      );
       await advanceUntil(() =>
-        expect(mocks.generatePlatformCaptionPack).toHaveBeenCalledTimes(1),
+        expect(mocks.generateWebsiteDraftMetadata).toHaveBeenCalledTimes(1),
       );
       expect(result.current.generationStage).toBe("checks");
       mocks.setStep.mockClear();
 
       expect(cancel(result)).toEqual({ status: "cancelled" });
       await act(async () => {
+        // The website draft call does not take the cancel signal; its late
+        // answer is discarded by the cancelled run.
+        websiteDraft.resolve("{}");
         await run;
-        pack.resolve("{}");
       });
 
       expect(mocks.logPost).not.toHaveBeenCalled();
@@ -1454,9 +1834,9 @@ describe("useGeneration model-tier and provenance wiring", () => {
         expect(mocks.generateSocialPost).toHaveBeenCalledTimes(1),
       );
       expect(result.current.generationStage).toBe("design");
-      const onStalePartReady = mocks.generateSocialPost.mock.calls[0].at(-1) as (
-        part: "caption" | "image",
-      ) => void;
+      const onStalePartReady = mocks.generateSocialPost.mock.calls[0][
+        POST_ARG.onPartReady
+      ] as (part: "caption" | "image") => void;
 
       // Sign-out and sign-in (or another tab's session change) bump the epoch.
       mocks.store.authEpoch = 2;
@@ -1647,5 +2027,138 @@ describe("useGeneration model-tier and provenance wiring", () => {
 
       cleanup();
     });
+  });
+
+  describe("device recovery copy of a new post", () => {
+    const generate = async () => {
+      const { result, cleanup } = renderGeneration();
+      await act(async () => {
+        await result.current.handleGenerate(
+          StyleOption.Modern,
+          ToneOption.Professional,
+          "Alex",
+        );
+      });
+      cleanup();
+      expect(mocks.setStep).toHaveBeenLastCalledWith(AppStep.RESULT);
+      return mocks.setGeneratedPost.mock.calls.at(-1) as
+        [GeneratedPost, { archive?: boolean }?] | undefined;
+    };
+
+    it("keeps the recovery copy of a post that opens unlocked", async () => {
+      mocks.logPost.mockResolvedValueOnce({ id: "post-open", approval_status: "n_a" });
+
+      const call = await generate();
+
+      expect(call?.[0]).toMatchObject({ postId: "post-open", approvalStatus: "n_a" });
+      expect(call?.[1]?.archive).not.toBe(false);
+    });
+
+    it.each([
+      [
+        "waiting for manager approval",
+        { requires_approval: true },
+        { id: "post-pending", approval_status: "pending" },
+        { approvalStatus: "pending" },
+      ],
+      [
+        "whose approval submission failed",
+        { requires_approval: true },
+        null,
+        { approvalStatus: "submission_failed" },
+      ],
+      [
+        "held for image review",
+        {},
+        { id: "post-image", image_review_required: true },
+        { imageReviewRequired: true },
+      ],
+      [
+        "whose photo release did not save",
+        {},
+        { id: "post-release", release_required: true, release_status: "pending" },
+        { releaseStatus: "save_failed" },
+      ],
+    ])(
+      "leaves no recovery copy of a post %s",
+      async (_label, dealer, persisted, expected) => {
+        mocks.store.currentDealer = {
+          id: "dealer-1",
+          name: "Example Motors",
+          ...dealer,
+        };
+        mocks.logPost.mockResolvedValueOnce(persisted);
+
+        const call = await generate();
+
+        expect(call?.[0]).toMatchObject(expected);
+        expect(call?.[1]).toEqual({ archive: false });
+      },
+    );
+
+    type Generation = ReturnType<typeof useGeneration>;
+    const imagePaths: [string, (generation: Generation) => Promise<void>][] = [
+      ["Try another", (generation) => generation.handleRegenerateImage()],
+      ["Playful", (generation) => generation.handleFunMode("Golden Delivery")],
+      ["an image edit", (generation) => generation.handleEditImage("Add a spotlight")],
+    ];
+    const replaceImage = async (
+      current: GeneratedPost,
+      run: (generation: Generation) => Promise<void>,
+    ) => {
+      mocks.store.generatedPost = current;
+      const { result, cleanup } = renderGeneration();
+      await act(async () => {
+        await run(result.current);
+      });
+      cleanup();
+      return mocks.setGeneratedPost.mock.calls.at(-1) as
+        [GeneratedPost, { archive?: boolean }?] | undefined;
+    };
+
+    it.each(imagePaths)(
+      "keeps the recovery copy of a new image from %s on an unlocked post",
+      async (_label, run) => {
+        const call = await replaceImage(
+          { ...existingPost, approvalStatus: "n_a", releaseStatus: "saved" },
+          run,
+        );
+
+        expect(call?.[0].image).not.toBe(existingPost.image);
+        expect(call?.[1]?.archive).not.toBe(false);
+      },
+    );
+
+    it.each(
+      imagePaths.flatMap(([label, run]) =>
+        (
+          [
+            ["whose photo release did not save", { releaseStatus: "save_failed" }],
+            ["held for image review", { imageReviewRequired: true }],
+            ["waiting for approval", { approvalStatus: "pending" }],
+          ] as [string, Partial<GeneratedPost>][]
+        ).map(
+          ([lock, state]) =>
+            [label, lock, state, run] as [
+              string,
+              string,
+              Partial<GeneratedPost>,
+              (generation: Generation) => Promise<void>,
+            ],
+        ),
+      ),
+    )(
+      "leaves no recovery copy of a new image from %s on a post %s",
+      async (_label, _lock, state, run) => {
+        const call = await replaceImage(
+          { ...existingPost, approvalStatus: "n_a", releaseStatus: "saved", ...state },
+          run,
+        );
+
+        expect(call?.[0]).toMatchObject(state);
+        expect(call?.[0].image).not.toBe(existingPost.image);
+        expect(call?.[1]).toEqual({ archive: false });
+      },
+    );
   });
 });

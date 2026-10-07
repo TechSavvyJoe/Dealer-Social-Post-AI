@@ -169,4 +169,27 @@ describe("applyDealerBrandKit", () => {
       ).toBe(true);
     });
   });
+
+  it.each([
+    ["named delivery", "Nice car!", "Sunrise Ford of Howell", true],
+    [
+      "named delivery with store in body",
+      "Sunrise Ford of Howell helped today!",
+      "Sunrise Ford of Howell",
+      true,
+    ],
+    ["unnamed delivery", "Nice car!", undefined, true],
+    ["named non-delivery", "Nice car!", "Sunrise Ford of Howell", false],
+    ["unnamed non-delivery", "Nice car!", undefined, false],
+    ["empty named non-delivery", "", "Sunrise Ford of Howell", false],
+    ["empty unnamed non-delivery", "", undefined, false],
+  ])(
+    "is stable across autosave normalization for %s",
+    (_label, input, name, deliveryLanguageAllowed) => {
+      const kit = name ? { name } : undefined;
+      const once = applyDealerBrandKit(input, kit, deliveryLanguageAllowed);
+      const twice = applyDealerBrandKit(once, kit, deliveryLanguageAllowed);
+      expect(twice).toBe(once);
+    },
+  );
 });

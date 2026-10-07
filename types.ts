@@ -4,15 +4,33 @@ import type { DecodedVehicle } from "./services/vinDecoder";
 import type { CapturedRelease } from "./services/photoReleases";
 
 export enum AppStep {
-  LOGIN,
-  CAPTURE,
-  CUSTOMIZE,
-  GENERATING,
-  RESULT,
+  LOGIN = 0,
+  HOME = 1,
+  DETAILS = 2,
+  CREATING = 3,
+  POST = 4,
   /** Super-admin (Joe): manages dealerships across all tenants. */
-  ADMIN,
+  ADMIN = 5,
   /** Per-dealership admin (GSM/GM): manages their own dealership only. */
-  DEALER_ADMIN,
+  DEALER_ADMIN = 6,
+  WORK = 7,
+  /** Compatibility names for older integrations and stored numeric steps. */
+  CAPTURE = HOME,
+  CUSTOMIZE = DETAILS,
+  GENERATING = CREATING,
+  RESULT = POST,
+}
+
+export interface PostDraft {
+  categoryId: BrandCategoryId;
+  scenarioId: string;
+  decodedVehicle?: DecodedVehicle;
+  personalLine?: string;
+}
+
+/** A signature is session-memory only and can be linked to just one post. */
+export interface PendingRelease extends CapturedRelease {
+  linked?: boolean;
 }
 
 export type UserRole = "salesperson" | "dealer_admin" | "super_admin";
@@ -45,6 +63,19 @@ export interface LogoPlacement {
   corner: LogoCorner;
   /** Logo width as a fraction of the canvas width (0.04-0.5). */
   scale: number;
+}
+/**
+ * Where the image review saw the supplied logo, against the corner the store
+ * set (services/logoPlacement.ts). Diagnostic only: a miss never fails or
+ * regenerates an image.
+ */
+export interface LogoCornerCheck {
+  /** The store's corner the image prompt asked for. */
+  requested: LogoCorner;
+  /** The corner the review saw; absent when it did not say (unknown). */
+  observed?: LogoCorner | "not_in_corner";
+  /** Whether the logo landed in the requested corner; absent when unknown. */
+  matched?: boolean;
 }
 export type MotionAspect = "9:16" | "16:9";
 export type MotionAudio = "none" | "celebration" | "cinematic" | "anthemic" | "funk";
@@ -151,6 +182,13 @@ export interface PostShareRecord {
 }
 
 export interface GeneratedPost {
+  /** Per-post creative retry budget survives session restore. */
+  tryAnotherUsed?: boolean;
+  /**
+   * Server `posts.updated` value for optimistic writes and share receipts.
+   * It is an opaque compare-and-set token, never a client-generated timestamp.
+   */
+  postRevision?: string;
   image: string; // base64 data URL
   text: string;
   /** Public-safe first name/family label; never the protected full release name. */
@@ -256,6 +294,8 @@ export interface GeneratedPost {
       attemptId?: string;
       fallbackCount: number;
       lastSuccessAt: string | null;
+      /** Present only when the store set a logo corner and a logo was supplied. */
+      logoCorner?: LogoCornerCheck;
     };
     modelPolicyVersion: string;
   };
@@ -366,6 +406,8 @@ export interface Dealer {
    * this polarity keeps every pre-existing dealership on the compliant side.
    */
   employee_disclosure_disabled?: boolean;
+  /** System administrators only. Never part of a session payload. */
+  setup_notes?: string;
 }
 
 // FIX: Added User interface to resolve import error in UserModal.tsx.

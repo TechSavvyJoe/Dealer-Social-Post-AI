@@ -20,6 +20,9 @@ vi.mock("../utils/telemetry", () => ({
 }));
 
 import { useDraftAutosave } from "./useDraftAutosave";
+import { useAppStore } from "../stores/appStore";
+import { ApiError } from "../services/apiErrors";
+import { logError } from "../utils/telemetry";
 
 const basePost: GeneratedPost = {
   image: "data:image/png;base64,aW1hZ2U=",
@@ -27,6 +30,7 @@ const basePost: GeneratedPost = {
   captionSource: "ai",
   isBasicFallback: false,
   postId: "post-1",
+  postRevision: "rev-0",
 };
 
 const analysisFor = (caption: string): DeliveryCaption => ({
@@ -62,6 +66,7 @@ const baseOptions = (
 describe("useDraftAutosave", () => {
   beforeEach(() => {
     mocks.updatePostDraft.mockReset();
+    useAppStore.setState({ generatedPost: { ...basePost } });
   });
 
   afterEach(() => {
@@ -109,11 +114,15 @@ describe("useDraftAutosave", () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(mocks.updatePostDraft).toHaveBeenCalledTimes(1);
+    expect(mocks.updatePostDraft).toHaveBeenCalledWith(
+      "post-1",
+      expect.objectContaining({ expectedPostRevision: "rev-0" }),
+    );
     expect(result.current.status).toBe("saved");
     expect(result.current.lastRevisionRef.current).toBe("rev-1");
   });
 
-  it("never overwrites a newer draft with an older response (serialized ordering)", async () => {
+  it("keeps a newer local draft visible while an older save finishes", async () => {
     let resolveFirst: (value: {
       id: string;
       updated: true;
@@ -124,13 +133,21 @@ describe("useDraftAutosave", () => {
         resolveFirst = resolve;
       },
     );
+    let resolveSecond: (value: {
+      id: string;
+      updated: true;
+      post_revision: string;
+    }) => void = () => {};
+    const secondCall = new Promise<{
+      id: string;
+      updated: true;
+      post_revision: string;
+    }>((resolve) => {
+      resolveSecond = resolve;
+    });
     mocks.updatePostDraft
       .mockImplementationOnce(() => firstCall)
-      .mockImplementationOnce(async () => ({
-        id: "post-1",
-        updated: true as const,
-        post_revision: "rev-2",
-      }));
+      .mockImplementationOnce(() => secondCall);
 
     const options = baseOptions();
     const { result } = renderHook(() => useDraftAutosave(options));
@@ -145,16 +162,91 @@ describe("useDraftAutosave", () => {
     });
     const secondFlush = result.current.flush();
 
-    // Resolve the second (newer) call's underlying request before the first.
     resolveFirst({ id: "post-1", updated: true, post_revision: "rev-1" });
     await act(async () => {
       await firstFlush;
+    });
+    expect(useAppStore.getState().generatedPost).toMatchObject({
+      text: "Original caption",
+      postRevision: "rev-1",
+    });
+    expect(result.current.status).toBe("saving");
+
+    resolveSecond({ id: "post-1", updated: true, post_revision: "rev-2" });
+    await act(async () => {
       await secondFlush;
     });
 
     // The serialized chain guarantees the second save's revision is what's
     // kept, since it only runs after the first has fully settled.
     expect(result.current.lastRevisionRef.current).toBe("rev-2");
+    expect(useAppStore.getState().generatedPost).toMatchObject({
+      text: "Second edit",
+      postRevision: "rev-2",
+    });
+    expect(mocks.updatePostDraft.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ expectedPostRevision: "rev-1" }),
+    );
+  });
+
+  it("treats a saved post with no revision as a conflict, not a failed connection", async () => {
+    const { result } = renderHook(() =>
+      useDraftAutosave(baseOptions({ post: { ...basePost, postRevision: undefined } })),
+    );
+    act(() => {
+      result.current.stage({ caption: "Edited caption", disclosures: "" });
+    });
+    await act(async () => {
+      await expect(result.current.flush()).resolves.toBe(false);
+    });
+    expect(mocks.updatePostDraft).not.toHaveBeenCalled();
+    // "failed" would offer a Retry save that can never succeed.
+    expect(result.current.status).toBe("conflict");
+    expect(logError).toHaveBeenCalledWith(
+      "post.draft_sync_conflict",
+      expect.objectContaining({ postId: "post-1" }),
+    );
+
+    await act(async () => {
+      await expect(result.current.retry()).resolves.toBe(false);
+    });
+    act(() => {
+      result.current.stage({ caption: "Another edit", disclosures: "" });
+    });
+    expect(result.current.status).toBe("conflict");
+    expect(mocks.updatePostDraft).not.toHaveBeenCalled();
+  });
+
+  it("adopts a newer same-post revision before the next save", async () => {
+    mocks.updatePostDraft.mockResolvedValue({
+      id: "post-1",
+      updated: true,
+      post_revision: "rev-3",
+    });
+    const { result, rerender } = renderHook(
+      ({ post }: { post: GeneratedPost }) => useDraftAutosave(baseOptions({ post })),
+      { initialProps: { post: { ...basePost, postRevision: "rev-1" } } },
+    );
+
+    const linkedPost = {
+      ...basePost,
+      postRevision: "rev-2",
+      releaseStatus: "saved" as const,
+    };
+    useAppStore.setState({ generatedPost: linkedPost });
+    rerender({ post: linkedPost });
+    act(() => {
+      result.current.stage({ caption: "Edit after release repair", disclosures: "" });
+    });
+    await act(async () => {
+      await result.current.flush();
+    });
+
+    expect(mocks.updatePostDraft).toHaveBeenCalledWith(
+      "post-1",
+      expect.objectContaining({ expectedPostRevision: "rev-2" }),
+    );
+    expect(result.current.lastRevisionRef.current).toBe("rev-3");
   });
 
   it("never autosaves a caption with a prohibited claim or an identity failure", async () => {
@@ -230,6 +322,214 @@ describe("useDraftAutosave", () => {
       await result.current.retry();
     });
     expect(result.current.status).toBe("saved");
+  });
+
+  it.each(["POST_DRAFT_REVISION_CONFLICT", "POST_DRAFT_REVISION_REQUIRED"])(
+    "stops on %s: status conflict, and Retry save never resends the stale token",
+    async (code) => {
+      mocks.updatePostDraft.mockRejectedValue(
+        new ApiError("This draft changed in another window.", { status: 409, code }),
+      );
+      const options = baseOptions();
+      const { result } = renderHook(() => useDraftAutosave(options));
+
+      act(() => {
+        result.current.stage({ caption: "Edited caption", disclosures: "" });
+      });
+      await act(async () => {
+        await expect(result.current.flush()).resolves.toBe(false);
+      });
+      expect(result.current.status).toBe("conflict");
+      expect(logError).toHaveBeenCalledWith(
+        "post.draft_sync_conflict",
+        expect.objectContaining({ postId: "post-1" }),
+      );
+
+      await act(async () => {
+        await expect(result.current.retry()).resolves.toBe(false);
+        await expect(result.current.retry()).resolves.toBe(false);
+      });
+      expect(mocks.updatePostDraft).toHaveBeenCalledTimes(1);
+      expect(result.current.status).toBe("conflict");
+
+      // A later edit cannot clear it either, and never claims to be saving:
+      // the "changed somewhere else" banner stays up while the edit is kept.
+      act(() => {
+        result.current.stage({ caption: "Another edit", disclosures: "" });
+      });
+      expect(result.current.status).toBe("conflict");
+      await act(async () => {
+        await result.current.flush();
+      });
+      expect(mocks.updatePostDraft).toHaveBeenCalledTimes(1);
+      expect(result.current.status).toBe("conflict");
+    },
+  );
+
+  it("keeps the conflict state while the salesperson keeps typing", async () => {
+    vi.useFakeTimers();
+    mocks.updatePostDraft.mockRejectedValue(
+      new ApiError("changed", { status: 409, code: "POST_DRAFT_REVISION_CONFLICT" }),
+    );
+    const { result, rerender } = renderHook(
+      (props: UseDraftAutosaveOptions) => useDraftAutosave(props),
+      { initialProps: baseOptions() },
+    );
+    rerender(
+      baseOptions({
+        primaryCaption: "First edit",
+        captionAnalysis: analysisFor("First edit"),
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    expect(result.current.status).toBe("conflict");
+    expect(mocks.updatePostDraft).toHaveBeenCalledTimes(1);
+
+    rerender(
+      baseOptions({
+        primaryCaption: "Second edit",
+        captionAnalysis: analysisFor("Second edit"),
+      }),
+    );
+    expect(result.current.status).toBe("conflict");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    expect(result.current.status).toBe("conflict");
+    expect(mocks.updatePostDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a different post without the previous post's conflict", async () => {
+    mocks.updatePostDraft.mockRejectedValueOnce(
+      new ApiError("changed", { status: 409, code: "POST_DRAFT_REVISION_CONFLICT" }),
+    );
+    const secondPost: GeneratedPost = {
+      ...basePost,
+      postId: "post-2",
+      postRevision: "rev-9",
+    };
+    const first = baseOptions();
+    const second = baseOptions({ post: secondPost });
+    const { result, rerender } = renderHook(
+      (props: UseDraftAutosaveOptions) => useDraftAutosave(props),
+      { initialProps: first },
+    );
+    act(() => {
+      result.current.stage({ caption: "Edited caption", disclosures: "" });
+    });
+    await act(async () => {
+      await result.current.flush();
+    });
+    expect(result.current.status).toBe("conflict");
+
+    useAppStore.setState({ generatedPost: { ...secondPost } });
+    mocks.updatePostDraft.mockResolvedValueOnce({
+      id: "post-2",
+      updated: true,
+      post_revision: "rev-10",
+    });
+    rerender(second);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe("idle");
+    // The first post's queued save (flushed by the switch) stayed blocked.
+    expect(mocks.updatePostDraft).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      result.current.stage({ caption: "Second post edit", disclosures: "" });
+    });
+    await act(async () => {
+      await expect(result.current.retry()).resolves.toBe(true);
+    });
+    expect(mocks.updatePostDraft).toHaveBeenCalledTimes(2);
+    expect(mocks.updatePostDraft).toHaveBeenLastCalledWith(
+      "post-2",
+      expect.objectContaining({
+        caption: "Second post edit",
+        expectedPostRevision: "rev-9",
+      }),
+    );
+    expect(result.current.status).toBe("saved");
+  });
+
+  it("treats a network error as failed, and Retry save resends the same draft", async () => {
+    mocks.updatePostDraft
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({ id: "post-1", updated: true, post_revision: "rev-1" });
+    const options = baseOptions();
+    const { result } = renderHook(() => useDraftAutosave(options));
+
+    act(() => {
+      result.current.stage({ caption: "Edited caption", disclosures: "" });
+    });
+    await act(async () => {
+      await result.current.flush();
+    });
+    expect(result.current.status).toBe("failed");
+    expect(logError).toHaveBeenCalledWith(
+      "post.draft_sync_failed",
+      expect.objectContaining({ postId: "post-1" }),
+    );
+
+    // No re-stage: Retry save alone must send the edit that failed.
+    await act(async () => {
+      await expect(result.current.retry()).resolves.toBe(true);
+    });
+    expect(mocks.updatePostDraft).toHaveBeenCalledTimes(2);
+    expect(mocks.updatePostDraft.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        caption: "Edited caption",
+        expectedPostRevision: "rev-0",
+      }),
+    );
+    expect(result.current.status).toBe("saved");
+    expect(result.current.lastRevisionRef.current).toBe("rev-1");
+  });
+
+  it("keeps a revision adopted into the store while a save is in flight", async () => {
+    let resolveSave: (value: {
+      id: string;
+      updated: true;
+      post_revision: string;
+    }) => void = () => {};
+    mocks.updatePostDraft.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const options = baseOptions();
+    const { result } = renderHook(() => useDraftAutosave(options));
+
+    act(() => {
+      result.current.stage({ caption: "Edited caption", disclosures: "" });
+    });
+    let saving!: Promise<boolean>;
+    act(() => {
+      saving = result.current.flush();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.updatePostDraft).toHaveBeenCalledTimes(1);
+
+    // A manager decision lands (adoptPostRevision) before the save answers.
+    useAppStore.setState({
+      generatedPost: { ...basePost, postRevision: "rev-approved" },
+    });
+    resolveSave({ id: "post-1", updated: true, post_revision: "rev-1" });
+    await act(async () => {
+      await saving;
+    });
+
+    expect(result.current.lastRevisionRef.current).toBe("rev-approved");
+    expect(useAppStore.getState().generatedPost).toMatchObject({
+      text: "Edited caption",
+      postRevision: "rev-approved",
+    });
   });
 
   it("flushes the pending save on unmount", async () => {

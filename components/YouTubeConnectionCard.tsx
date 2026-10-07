@@ -1,6 +1,7 @@
 import React from "react";
-import { CheckCircle2, ExternalLink, Video } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Button } from "./ui/Button";
+import { Input } from "./ui/Input";
 import {
   completeYouTubeConnection,
   disconnectYouTubeConnection,
@@ -9,7 +10,13 @@ import {
 } from "../services/walkarounds";
 import { Modal } from "./ui/Modal";
 import { toUiMessage } from "../utils/errorMessages";
+import { DoneMark, ErrorNote, ServiceRow } from "./dealer-settings/SettingsRows";
 
+/**
+ * The store's YouTube channel, as one row under "Connected services". Every
+ * state and action is the one it always had (connected with Disconnect, the
+ * two-step Google authorization, errors); only the chrome changed.
+ */
 export const YouTubeConnectionCard: React.FC = () => {
   const [status, setStatus] = React.useState<{
     connected: boolean;
@@ -47,42 +54,31 @@ export const YouTubeConnectionCard: React.FC = () => {
     }
   };
 
+  const connected = Boolean(status?.connected);
+
   return (
-    <section className="rounded-2xl border border-hairline bg-surface-900/65 p-5 sm:p-6">
-      <div className="flex items-start gap-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-error-500/15">
-          <Video className="h-5 w-5 text-error-300 [.theme-light_&]:text-error-800" />
-        </span>
-        <div>
-          <h2 className="text-lg font-semibold text-surface-50">YouTube channel</h2>
-          <p className="mt-1 text-sm text-surface-400">
-            Connect the dealership-owned channel used for reviewed walkaround videos.
-          </p>
-        </div>
-      </div>
-      {error && (
-        <p
-          role="alert"
-          className="mt-4 rounded-xl border border-error-400/30 bg-error-500/10 p-3 text-sm text-error-100 [.theme-light_&]:text-error-800"
-        >
-          {error}
-        </p>
-      )}
-      {status?.connected ? (
-        <div className="mt-4 space-y-3">
-          <p className="flex items-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 p-3 text-sm font-semibold text-success-200 [.theme-light_&]:text-success-800">
-            <CheckCircle2 className="h-5 w-5" />
-            Connected to {status.channelTitle || "verified dealership channel"}
-          </p>
-          <Button variant="danger" size="sm" onClick={() => setDisconnectOpen(true)}>
-            Disconnect YouTube
-          </Button>
-        </div>
-      ) : (
-        <div className="mt-4 space-y-3">
-          {!authorizationUrl ? (
+    <>
+      <ServiceRow
+        name="YouTube channel"
+        description="For reviewed walkaround videos. You sign in on Google, so this app never sees the password."
+        aside={
+          connected ? (
+            <>
+              <DoneMark>Connected</DoneMark>
+              <Button
+                variant="secondary"
+                size="md"
+                className="px-3.5 text-sm"
+                onClick={() => setDisconnectOpen(true)}
+              >
+                Disconnect YouTube
+              </Button>
+            </>
+          ) : !authorizationUrl ? (
             <Button
-              variant="outline"
+              variant="secondary"
+              size="md"
+              className="px-3.5 text-sm"
               loading={busy}
               onClick={() =>
                 void run(async () => {
@@ -91,52 +87,57 @@ export const YouTubeConnectionCard: React.FC = () => {
                 })
               }
             >
-              Start secure connection
+              Connect
             </Button>
-          ) : (
-            <>
-              <a
-                href={authorizationUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-primary-500 px-4 py-2 font-semibold text-white"
-              >
-                Authorize with Google
-                <ExternalLink className="h-4 w-4" />
-              </a>
-              <label className="block text-sm font-medium text-surface-200">
-                One-time authorization return code
-                <input
-                  className="mt-2 min-h-11 w-full rounded-xl border border-hairline bg-surface-950/45 px-3 py-2 text-surface-50 outline-none focus:border-primary-400"
-                  autoComplete="off"
-                  value={stateReference}
-                  onChange={(event) => setStateReference(event.target.value)}
-                />
-              </label>
-              <Button
-                loading={busy}
-                disabled={!stateReference.trim()}
-                onClick={() =>
-                  void run(async () => {
-                    const result = await completeYouTubeConnection(
-                      stateReference.trim(),
-                    );
-                    setStatus(result);
-                    setAuthorizationUrl("");
-                    setStateReference("");
-                  })
-                }
-              >
-                Complete connection
-              </Button>
-            </>
-          )}
-        </div>
-      )}
-      <p className="mt-3 text-xs text-surface-400">
-        OAuth tokens never enter the browser or PocketBase records; only the trusted
-        broker keeps the credential reference.
-      </p>
+          ) : null
+        }
+      >
+        {error ? <ErrorNote>{error}</ErrorNote> : null}
+        {connected ? (
+          <p className="text-sm text-ink-2">
+            Connected to {status?.channelTitle || "verified dealership channel"}.
+          </p>
+        ) : authorizationUrl ? (
+          <div className="flex flex-col items-start gap-3">
+            <a
+              href={authorizationUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-11 items-center gap-2 rounded-sm border border-strong bg-panel-raised px-4 text-sm font-semibold text-ink hover:no-underline"
+            >
+              Authorize with Google
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </a>
+            <Input
+              label="One-time authorization return code"
+              autoComplete="off"
+              value={stateReference}
+              onChange={(event) => setStateReference(event.target.value)}
+              fullWidth
+            />
+            <Button
+              variant="secondary"
+              size="md"
+              loading={busy}
+              disabled={!stateReference.trim()}
+              onClick={() =>
+                void run(async () => {
+                  const result = await completeYouTubeConnection(stateReference.trim());
+                  setStatus(result);
+                  setAuthorizationUrl("");
+                  setStateReference("");
+                })
+              }
+            >
+              Complete connection
+            </Button>
+            <p className="text-caption text-ink-2">
+              OAuth tokens never enter the browser or PocketBase records; only the
+              trusted broker keeps the credential reference.
+            </p>
+          </div>
+        ) : null}
+      </ServiceRow>
       <Modal
         isOpen={disconnectOpen}
         onClose={() => setDisconnectOpen(false)}
@@ -146,7 +147,7 @@ export const YouTubeConnectionCard: React.FC = () => {
         footer={
           <>
             <Button
-              variant="outline"
+              variant="secondary"
               disabled={busy}
               onClick={() => setDisconnectOpen(false)}
             >
@@ -168,11 +169,11 @@ export const YouTubeConnectionCard: React.FC = () => {
           </>
         }
       >
-        <p className="text-sm text-surface-300">
+        <p className="text-sm text-ink-2">
           Published YouTube videos are retained. This only revokes the dealership
           connection used for future uploads.
         </p>
       </Modal>
-    </section>
+    </>
   );
 };

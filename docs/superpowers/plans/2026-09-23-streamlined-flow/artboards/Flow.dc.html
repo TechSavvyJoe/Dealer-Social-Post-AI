@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Flow — today vs proposed</title>
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&amp;family=Barlow+Semi+Condensed:wght@500;600&amp;display=swap"
+          rel="stylesheet"
+        />
+        <style>
+          body {
+            margin: 0;
+            background: #121416;
+            font-family: Barlow, "Helvetica Neue", Arial, sans-serif;
+            color: #f0f2f4;
+            -webkit-font-smoothing: antialiased;
+          }
+          a {
+            color: #5582f7;
+          }
+          a:hover {
+            color: #618fff;
+          }
+          button {
+            font: inherit;
+          }
+        </style>
+      </helmet>
+      <div
+        style="
+          width: 1760px;
+          height: 900px;
+          box-sizing: border-box;
+          padding: 48px 56px;
+          display: flex;
+          flex-direction: column;
+          gap: 36px;
+          background: #121416;
+        "
+      >
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <h1
+            style="
+              margin: 0;
+              font-family:
+                &quot;Barlow Semi Condensed&quot;, Barlow, &quot;Helvetica Neue&quot;,
+                Arial, sans-serif;
+              font-weight: 600;
+              font-size: 34px;
+              line-height: 38px;
+              letter-spacing: -0.01em;
+            "
+          >
+            Posting a customer delivery to Facebook
+          </h1>
+          <p style="margin: 0; font-size: 16px; line-height: 22px; color: #b2bac2">
+            Salesperson on a phone, already signed in. Taps counted from the code,
+            including the phone&#39;s own camera buttons.
+          </p>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; align-items: baseline; gap: 14px">
+            <span
+              style="
+                font-family:
+                  &quot;Barlow Semi Condensed&quot;, Barlow, &quot;Helvetica Neue&quot;,
+                  Arial, sans-serif;
+                font-weight: 600;
+                font-size: 22px;
+                color: #f0f2f4;
+              "
+              >Today</span
+            ><span style="font-size: 15px; color: #ec8476; font-weight: 500"
+              >19 taps · 4 screens · 3 modals · name typed twice · photo confirmed
+              twice</span
+            >
+          </div>
+          <div style="display: flex; align-items: stretch">
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(236, 132, 118, 0.1);
+                border: 1px solid rgba(236, 132, 118, 0.45);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Start with a photo
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Take photo → shutter → Use Photo
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Dead preview panel, 48-hour &#8220;rescue copies&#8221; strip
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Category unknown
+              </div>
+            </div>
+            <div
+              aria-hidden="true"
+              style="
+                flex: 0 0 22px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #88919a;
+                font-size: 18px;
+              "
+            >
+              &#8594;
+            </div>
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(236, 132, 118, 0.1);
+                border: 1px solid rgba(236, 132, 118, 0.45);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Review photo
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Mandatory modal, nothing to adjust
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                &#8220;Choose another · Save original · Use photo&#8221;
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Second confirmation of the same photo
+              </div>
+            </div>
+            <div
+              aria-hidden="true"
+              style="
+                flex: 0 0 22px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #88919a;
+                font-size: 18px;
+              "
+            >
+              &#8594;
+            </div>
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(236, 132, 118, 0.1);
+                border: 1px solid rgba(236, 132, 118, 0.45);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Post details
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                7 sections, ~40 controls
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                12 scenarios · 5 Looks · tone chips · caption source
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                4 channels pre-selected → 3 deselects
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Name here, then full name again in the release sheet
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Create post enabled while the release is missing
+              </div>
+            </div>
+            <div
+              aria-hidden="true"
+              style="
+                flex: 0 0 22px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #88919a;
+                font-size: 18px;
+              "
+            >
+              &#8594;
+            </div>
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(236, 132, 118, 0.1);
+                border: 1px solid rgba(236, 132, 118, 0.45);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Building your post
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Fake percentage, two progress stories
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                No cancel
+              </div>
+            </div>
+            <div
+              aria-hidden="true"
+              style="
+                flex: 0 0 22px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #88919a;
+                font-size: 18px;
+              "
+            >
+              &#8594;
+            </div>
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(236, 132, 118, 0.1);
+                border: 1px solid rgba(236, 132, 118, 0.45);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Publish studio
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Save is the filled button; Share is outline
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Share → &#8220;Share exact output&#8221; modal → Share now → OS sheet
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Video · Fun mode · Schedule · More (6 tools)
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                No caption typing on phone
+              </div>
+            </div>
+            <div
+              aria-hidden="true"
+              style="
+                flex: 0 0 22px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #88919a;
+                font-size: 18px;
+              "
+            >
+              &#8594;
+            </div>
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(236, 132, 118, 0.1);
+                border: 1px solid rgba(236, 132, 118, 0.45);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Leave
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                &#8220;Create another post? Discard and continue&#8221;
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                …after a successful share
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; align-items: baseline; gap: 14px">
+            <span
+              style="
+                font-family:
+                  &quot;Barlow Semi Condensed&quot;, Barlow, &quot;Helvetica Neue&quot;,
+                  Arial, sans-serif;
+                font-weight: 600;
+                font-size: 22px;
+                color: #f0f2f4;
+              "
+              >Proposed</span
+            ><span style="font-size: 15px; color: #5582f7; font-weight: 500"
+              >10 taps · 3 screens · 1 sheet · name typed once · nothing confirmed
+              twice</span
+            >
+          </div>
+          <div style="display: flex; align-items: stretch">
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(30, 64, 175, 0.18);
+                border: 1px solid rgba(85, 130, 247, 0.5);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Home — what are you posting?
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Six tiles: Delivery · New arrival · Service · Promotion · Community ·
+                Team
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Tap a tile → the camera opens
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                My work below the fold
+              </div>
+            </div>
+            <div
+              aria-hidden="true"
+              style="
+                flex: 0 0 22px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #88919a;
+                font-size: 18px;
+              "
+            >
+              &#8594;
+            </div>
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(30, 64, 175, 0.18);
+                border: 1px solid rgba(85, 130, 247, 0.5);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Details
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                The photo is the hero; Change photo
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Delivery: &#8220;Get customer&#8217;s signature&#8221; → one sheet: full
+                name + sign
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                First name flows from the release
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Scan VIN optional
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Create post enabled only when ready — and says why
+              </div>
+            </div>
+            <div
+              aria-hidden="true"
+              style="
+                flex: 0 0 22px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #88919a;
+                font-size: 18px;
+              "
+            >
+              &#8594;
+            </div>
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(30, 64, 175, 0.18);
+                border: 1px solid rgba(85, 130, 247, 0.5);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Creating
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Honest progress on the photo
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Cancel returns to Details
+              </div>
+            </div>
+            <div
+              aria-hidden="true"
+              style="
+                flex: 0 0 22px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #88919a;
+                font-size: 18px;
+              "
+            >
+              &#8594;
+            </div>
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(30, 64, 175, 0.18);
+                border: 1px solid rgba(85, 130, 247, 0.5);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Post
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Preview exactly as it will look
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Share is the one primary → OS sheet, caption on the clipboard
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Edit caption inline · Try another · Add video (if the store allows)
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Channels are the store&#39;s defaults; toggle here if needed
+              </div>
+            </div>
+            <div
+              aria-hidden="true"
+              style="
+                flex: 0 0 22px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #88919a;
+                font-size: 18px;
+              "
+            >
+              &#8594;
+            </div>
+            <div
+              style="
+                flex: 1 1 0;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(30, 64, 175, 0.18);
+                border: 1px solid rgba(85, 130, 247, 0.5);
+              "
+            >
+              <div
+                style="
+                  font-family:
+                    &quot;Barlow Semi Condensed&quot;, Barlow,
+                    &quot;Helvetica Neue&quot;, Arial, sans-serif;
+                  font-weight: 600;
+                  font-size: 18px;
+                  line-height: 22px;
+                  color: #f0f2f4;
+                "
+              >
+                Shared
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                &#8220;Shared to Facebook&#8221; recorded
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                Done → Home; the post sits in My work
+              </div>
+              <div style="font-size: 13px; line-height: 18px; color: #b2bac2">
+                No discard warning after a share
+              </div>
+            </div>
+          </div>
+        </div>
+        <div
+          style="
+            display: flex;
+            gap: 24px;
+            align-items: flex-start;
+            padding: 16px 20px;
+            border-radius: 12px;
+            background: #191c1f;
+            border: 1px solid #2f3439;
+          "
+        >
+          <div
+            style="
+              font-family:
+                &quot;Barlow Semi Condensed&quot;, Barlow, &quot;Helvetica Neue&quot;,
+                Arial, sans-serif;
+              font-weight: 600;
+              font-size: 18px;
+              color: #f0f2f4;
+              white-space: nowrap;
+            "
+          >
+            Set once by the manager
+          </div>
+          <div style="font-size: 14px; line-height: 20px; color: #b2bac2">
+            Default channels (e.g. Facebook + Instagram) · the creative slate (one Look,
+            one tone, Playful on/off, video on/off per category) · employee disclosure
+            text · approval on/off · the Facebook page handle. Salespeople never pick a
+            Look, a tone, a size or a caption source; they can only try another.
+          </div>
+        </div>
+      </div>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{"$preview":{"width":1760,"height":900}}'
+    >
+      class Component extends DCLogic { renderVals() { return {}; } }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,103 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`GeminiService model routing > keeps the logo-restore and image review prompts byte-identical for a store with no logo corner 1`] = `
+{
+  "restore": "This is a corrective photo edit of the attached generated image.
+
+Use the supplied dealership logo (second attached image) as a small, tasteful watermark in a lower-corner safe zone away from people. If an invented, misspelled, distorted, recolored, or altered imitation is present, remove it and replace it with the exact supplied asset. Do not distort it.
+Change nothing else: preserve all existing text, people, faces, vehicle, background, crop, lighting, and colors.
+Return only the corrected image.",
+  "review": "IMAGE 1: REFERENCE SOURCE IMAGE
+IMAGE 2: GENERATED OUTPUT IMAGE
+IMAGE 3: APPROVED DEALERSHIP LOGO
+
+You are a strict visual quality-control inspector for an automotive dealership image.
+
+Inspect the image pixels and return only the requested JSON object.
+
+The first two attached images are labeled REFERENCE SOURCE and GENERATED OUTPUT. Compare them directly.
+- preservesSourceSubjects=true only when the output keeps the same number of people, recognizable identities, clothing/pose relationships, and no added/replaced person. Fun Mode may stylize faces and bodies, but they must still clearly map to the same source people.
+- preservesVehicleIdentity=true only when the output keeps the same vehicle count, body type, color, viewing angle, and recognizable make/model identity. A stylized/brick/painted rendering is allowed in Fun Mode; a different vehicle is not.
+- preservesSourceComposition=true only when the people, vehicle, and main location geometry retain their source arrangement. Artistic background treatment is allowed in Fun Mode, but moving subjects, inventing a new setting/story, or replacing the scene is not.
+Use subject_identity_changed, vehicle_identity_changed, or source_composition_changed for false fields.
+
+Marketing overlay policy (this matches the design brief the image was created from):
+- Up to 3 separate overlay text blocks are allowed: one headline of at most 4 words / 40 characters, plus up to two short accents (a badge of at most 2 words and one short support line).
+- Across all blocks combined: at most 10 words and 90 characters.
+- Reject full sentences, hashtags, URLs, and phone numbers anywhere in overlay copy.
+- Customer or personal names are forbidden in designed overlay pixels. The exact dealership name below is a business identity and is exempt. Set hasUnexpectedPersonalName=true and use unexpected_personal_name for any other visible designed person name.
+- The exact dealership legal name (Test Dealer) and a supplied dealership logo are brand identity. Exclude those from the marketing word/character counts and block counts.
+- Set dealershipNamePresent=true only when the exact business identity is visibly present as text or within the exact supplied logo. Use missing_dealership_identity when neither is visible.
+- The dealership name must be spelled exactly "Test Dealer". Set dealershipNameCorrect=false for any misspelling, truncation, or substituted store/location name.
+- A third image labeled APPROVED DEALERSHIP LOGO is supplied. The output may show that exact asset once as a designed overlay/watermark, scaled proportionally but otherwise unchanged. Set logoMatchesSuppliedAsset=false and use supplied_logo_altered_or_replaced ONLY when the designed overlay logo's lettering/wording, colors, proportions, emblem, or store identity differs from the supplied asset, or it is a redrawn imitation. Ordinary raster differences from re-rendering (slight softness, anti-aliasing, scaling, compression) are not alterations. Any OTHER designed dealership or manufacturer emblem, badge, crest, or seal added on top of the photo that is not the supplied asset is fabricated and must use fabricated_brand_mark.
+- Manufacturer signage that is physically part of the photographed scene — a pylon sign, building fascia or showroom sign, a vehicle grille or tailgate badge, a dealer plate frame — is scene content. It is NOT the supplied logo and must never be compared against it, must not set logoPresent, and must not count as fabricated_brand_mark. Judge only graphics that were designed and added on top of the photo.
+- Reject prompt leakage or production notes rendered as image copy (for example "avoiding faces", "safe zone", "max words", or parenthetical instructions) with instruction_text.
+- Reject drawn social-app interface chrome: usernames, fake Instagram/TikTok/Facebook headers, heart/comment/share buttons, black app bars, or phone frames. Use social_ui_chrome.
+- This is a regular photo-overlay style. A cartoon, illustration, character render, or rebuilt scene is unrequested and must use unrequested_illustration.
+- Exclude text naturally photographed in the scene, such as vehicle badges, building signs, clothing, documents, and license plates. Count only designed promotional overlay copy.
+- If text is unreadable, ambiguous, or you cannot confidently distinguish promotional overlay from scene text, set uncertain=true. Only set compliant=false when you can identify a concrete violation.
+- Set logoPresent=true only when a DESIGNED dealership logo graphic (an added overlay/watermark, not signage photographed in the scene) is visible, otherwise false.
+
+Visual craft target (Modern & Bold):
+- Score the finished social creative from 1 to 5. One means broken/unstyled, three means usable but still needs another creative pass, four means high-end and campaign-ready, and five means exceptional campaign craft. Scores below four must use below_campaign_quality.
+- Set isRespectfulAndFlattering=true only when the treatment presents every customer warmly and with dignity. Distorted caricature, ridicule, age/body exaggeration, humiliating expressions, or a joke at the customer's expense must use unflattering_or_disrespectful.
+- Set isPlatformAppropriate=true only when the design feels ready for a dealership-tagged social post: exciting and polished without visual overload, sensationalism, fake app chrome, excessive effects, or an over-the-top gimmick. Otherwise use overdone_or_platform_inappropriate.
+- A plain lightly graded photo with generic white type, weak hierarchy, arbitrary floating elements, malformed letters, or no recognizable style signature is not post-ready.
+- Set hasDistinctStyleSignature=false and use bland_or_unstyled for a score of 1-2 caused by generic treatment.
+- Set hasEnvironmentalDepthIntegration=true only when visible dimensional graphics actually inherit the photographed scene's perspective, light direction, occlusion, contact shadow, reflected color, and depth-of-field. Floating sticker shadows or flat pasted-on 3D text are false. For styles without dimensional graphics, omit this field.
+- Set hasCleanTypography=false and use malformed_or_misspelled_text for warped, doubled, melted, clipped, or misspelled designed lettering.
+
+detectedMarketingText must contain each overlay text block as its own array entry, exactly as rendered. detectedPersonalNames contains only designed personal/customer names, never words that are part of the exact dealership business name. marketingWordCount and marketingCharacterCount are totals across all blocks. violations must use only the allowed enum values. Return only the JSON object with keys: compliant, uncertain, detectedMarketingText, marketingWordCount, marketingCharacterCount, hasFullSentence, hasHashtag, hasUrlOrPhone, violations, logoPresent, logoMatchesSuppliedAsset, hasUnexpectedPersonalName, detectedPersonalNames, dealershipNamePresent, dealershipNameCorrect, hasFabricatedBrandMark, hasInstructionText, hasSocialUiChrome, isIllustrationOrCharacterRender, preservesSourceSubjects, preservesVehicleIdentity, preservesSourceComposition, isRespectfulAndFlattering, isPlatformAppropriate, visualQualityScore, hasDistinctStyleSignature, hasEnvironmentalDepthIntegration, hasCleanTypography. Never include explanations or image details outside the JSON.",
+}
+`;
+
+exports[`GeminiService model routing > keeps the logo-restore and image review prompts byte-identical for a store with no logo corner 2`] = `
+{
+  "restore": "This is a corrective photo edit of the attached generated image.
+
+Use the supplied dealership logo (second attached image) as a small, tasteful watermark in a lower-corner safe zone away from people. If an invented, misspelled, distorted, recolored, or altered imitation is present, remove it and replace it with the exact supplied asset. Do not distort it.
+Change nothing else: preserve all existing text, people, faces, vehicle, background, crop, lighting, and colors.
+Return only the corrected image.",
+  "review": "IMAGE 1: REFERENCE SOURCE IMAGE
+IMAGE 2: GENERATED OUTPUT IMAGE
+IMAGE 3: APPROVED DEALERSHIP LOGO
+
+You are a strict visual quality-control inspector for an automotive dealership image.
+
+Inspect the image pixels and return only the requested JSON object.
+
+The first two attached images are labeled REFERENCE SOURCE and GENERATED OUTPUT. Compare them directly.
+- preservesSourceSubjects=true only when the output keeps the same number of people, recognizable identities, clothing/pose relationships, and no added/replaced person. Fun Mode may stylize faces and bodies, but they must still clearly map to the same source people.
+- preservesVehicleIdentity=true only when the output keeps the same vehicle count, body type, color, viewing angle, and recognizable make/model identity. A stylized/brick/painted rendering is allowed in Fun Mode; a different vehicle is not.
+- preservesSourceComposition=true only when the people, vehicle, and main location geometry retain their source arrangement. Artistic background treatment is allowed in Fun Mode, but moving subjects, inventing a new setting/story, or replacing the scene is not.
+Use subject_identity_changed, vehicle_identity_changed, or source_composition_changed for false fields.
+
+Marketing overlay policy (this matches the design brief the image was created from):
+- Up to 3 separate overlay text blocks are allowed: one headline of at most 4 words / 40 characters, plus up to two short accents (a badge of at most 2 words and one short support line).
+- Across all blocks combined: at most 10 words and 90 characters.
+- Reject full sentences, hashtags, URLs, and phone numbers anywhere in overlay copy.
+- Customer or personal names are forbidden in designed overlay pixels. The exact dealership name below is a business identity and is exempt. Set hasUnexpectedPersonalName=true and use unexpected_personal_name for any other visible designed person name.
+- The exact dealership legal name (Test Dealer) and a supplied dealership logo are brand identity. Exclude those from the marketing word/character counts and block counts.
+- Set dealershipNamePresent=true only when the exact business identity is visibly present as text or within the exact supplied logo. Use missing_dealership_identity when neither is visible.
+- The dealership name must be spelled exactly "Test Dealer". Set dealershipNameCorrect=false for any misspelling, truncation, or substituted store/location name.
+- A third image labeled APPROVED DEALERSHIP LOGO is supplied. The output may show that exact asset once as a designed overlay/watermark, scaled proportionally but otherwise unchanged. Set logoMatchesSuppliedAsset=false and use supplied_logo_altered_or_replaced ONLY when the designed overlay logo's lettering/wording, colors, proportions, emblem, or store identity differs from the supplied asset, or it is a redrawn imitation. Ordinary raster differences from re-rendering (slight softness, anti-aliasing, scaling, compression) are not alterations. Any OTHER designed dealership or manufacturer emblem, badge, crest, or seal added on top of the photo that is not the supplied asset is fabricated and must use fabricated_brand_mark.
+- Manufacturer signage that is physically part of the photographed scene — a pylon sign, building fascia or showroom sign, a vehicle grille or tailgate badge, a dealer plate frame — is scene content. It is NOT the supplied logo and must never be compared against it, must not set logoPresent, and must not count as fabricated_brand_mark. Judge only graphics that were designed and added on top of the photo.
+- Reject prompt leakage or production notes rendered as image copy (for example "avoiding faces", "safe zone", "max words", or parenthetical instructions) with instruction_text.
+- Reject drawn social-app interface chrome: usernames, fake Instagram/TikTok/Facebook headers, heart/comment/share buttons, black app bars, or phone frames. Use social_ui_chrome.
+- This is a regular photo-overlay style. A cartoon, illustration, character render, or rebuilt scene is unrequested and must use unrequested_illustration.
+- Exclude text naturally photographed in the scene, such as vehicle badges, building signs, clothing, documents, and license plates. Count only designed promotional overlay copy.
+- If text is unreadable, ambiguous, or you cannot confidently distinguish promotional overlay from scene text, set uncertain=true. Only set compliant=false when you can identify a concrete violation.
+- Set logoPresent=true only when a DESIGNED dealership logo graphic (an added overlay/watermark, not signage photographed in the scene) is visible, otherwise false.
+
+Visual craft target (Modern & Bold):
+- Score the finished social creative from 1 to 5. One means broken/unstyled, three means usable but still needs another creative pass, four means high-end and campaign-ready, and five means exceptional campaign craft. Scores below four must use below_campaign_quality.
+- Set isRespectfulAndFlattering=true only when the treatment presents every customer warmly and with dignity. Distorted caricature, ridicule, age/body exaggeration, humiliating expressions, or a joke at the customer's expense must use unflattering_or_disrespectful.
+- Set isPlatformAppropriate=true only when the design feels ready for a dealership-tagged social post: exciting and polished without visual overload, sensationalism, fake app chrome, excessive effects, or an over-the-top gimmick. Otherwise use overdone_or_platform_inappropriate.
+- A plain lightly graded photo with generic white type, weak hierarchy, arbitrary floating elements, malformed letters, or no recognizable style signature is not post-ready.
+- Set hasDistinctStyleSignature=false and use bland_or_unstyled for a score of 1-2 caused by generic treatment.
+- Set hasEnvironmentalDepthIntegration=true only when visible dimensional graphics actually inherit the photographed scene's perspective, light direction, occlusion, contact shadow, reflected color, and depth-of-field. Floating sticker shadows or flat pasted-on 3D text are false. For styles without dimensional graphics, omit this field.
+- Set hasCleanTypography=false and use malformed_or_misspelled_text for warped, doubled, melted, clipped, or misspelled designed lettering.
+
+detectedMarketingText must contain each overlay text block as its own array entry, exactly as rendered. detectedPersonalNames contains only designed personal/customer names, never words that are part of the exact dealership business name. marketingWordCount and marketingCharacterCount are totals across all blocks. violations must use only the allowed enum values. Return only the JSON object with keys: compliant, uncertain, detectedMarketingText, marketingWordCount, marketingCharacterCount, hasFullSentence, hasHashtag, hasUrlOrPhone, violations, logoPresent, logoMatchesSuppliedAsset, hasUnexpectedPersonalName, detectedPersonalNames, dealershipNamePresent, dealershipNameCorrect, hasFabricatedBrandMark, hasInstructionText, hasSocialUiChrome, isIllustrationOrCharacterRender, preservesSourceSubjects, preservesVehicleIdentity, preservesSourceComposition, isRespectfulAndFlattering, isPlatformAppropriate, visualQualityScore, hasDistinctStyleSignature, hasEnvironmentalDepthIntegration, hasCleanTypography. Never include explanations or image details outside the JSON.",
+}
+`;

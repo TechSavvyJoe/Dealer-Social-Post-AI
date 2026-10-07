@@ -1,121 +1,160 @@
 import { useEffect, useRef } from "react";
 import { AppStep } from "../types";
-import { useAppStore } from "../stores/appStore";
+import { useAppStore, type PostBusyReason } from "../stores/appStore";
 
-/**
- * Hash-based history sync for the AppStep state machine.
- *
- * The platform Back gesture used to exit the installed PWA because the app
- * never wrote history entries. This hook mirrors the store's step into
- * `#/step` URLs and translates popstate back through the same guards the UI
- * enforces, so Back steps through the flow instead of discarding it.
- *
- * Hash (not path) routing is deliberate: the SPA is served from two origins
- * (Vercel and the Fly PocketBase static mount) and hash URLs need no SPA
- * fallback configuration on either. The URL is wayfinding, not authorization —
- * session restore remains authoritative on boot, and auth-gated steps degrade
- * to whatever the restored session allows.
- */
 const STEP_TO_HASH: Record<AppStep, string> = {
   [AppStep.LOGIN]: "#/login",
-  [AppStep.CAPTURE]: "#/capture",
-  [AppStep.CUSTOMIZE]: "#/customize",
-  [AppStep.GENERATING]: "#/generating",
-  [AppStep.RESULT]: "#/result",
+  [AppStep.HOME]: "#/home",
+  [AppStep.DETAILS]: "#/details",
+  [AppStep.CREATING]: "#/details",
+  [AppStep.POST]: "#/post",
   [AppStep.ADMIN]: "#/admin",
   [AppStep.DEALER_ADMIN]: "#/dealership",
+  [AppStep.WORK]: "#/work",
+};
+const HASH_TO_STEP = new Map<string, AppStep>([
+  ["#/login", AppStep.LOGIN],
+  ["#/home", AppStep.HOME],
+  ["#/details", AppStep.DETAILS],
+  ["#/post", AppStep.POST],
+  ["#/work", AppStep.WORK],
+  ["#/admin", AppStep.ADMIN],
+  ["#/dealership", AppStep.DEALER_ADMIN],
+  ["#/capture", AppStep.HOME],
+  ["#/customize", AppStep.DETAILS],
+  ["#/generating", AppStep.DETAILS],
+  ["#/result", AppStep.POST],
+]);
+
+export const postHasWorkAtRisk = (): boolean => {
+  const state = useAppStore.getState();
+  return (
+    state.postWorkAtRisk || Boolean(state.generatedPost && !state.generatedPost.postId)
+  );
 };
 
-const HASH_TO_STEP = new Map<string, AppStep>(
-  (Object.entries(STEP_TO_HASH) as Array<[string, string]>).map(([step, hash]) => [
-    hash,
-    Number(step) as AppStep,
-  ]),
-);
+/** The original Post-screen busy toasts (amendments A4), word for word. */
+export const POST_BUSY_MESSAGES: Record<Exclude<PostBusyReason, null>, string> = {
+  website: "Wait for the final website handoff to finish before leaving this post.",
+  image: "Wait for the current update to finish before leaving this post.",
+};
 
-/** Transient or entry steps never become their own history entries. */
-const REPLACE_STEPS = new Set<AppStep>([AppStep.LOGIN, AppStep.GENERATING]);
+/**
+ * The toast to show instead of leaving the Post screen, or null when nothing
+ * is running. Read at the moment of the exit so it is never stale.
+ */
+export const postBusyMessage = (): string | null => {
+  const reason = useAppStore.getState().postBusy;
+  return reason ? POST_BUSY_MESSAGES[reason] : null;
+};
 
-export const useUrlStepSync = (options?: { onBlockedResultBack?: () => void }) => {
+/** URL navigation uses the same workspace and role guards as visible controls. */
+export const useUrlStepSync = (options?: {
+  onBlockedResultBack?: () => void;
+  /** Browser Back while a render or the website handoff is still running. */
+  onBusyResultBack?: (message: string) => void;
+  /** Browser Back to Home from Details that holds the customer's signature. */
+  onBlockedDraftBack?: (target: AppStep) => void;
+  managementDirty?: boolean;
+  onBlockedManagementBack?: (target: AppStep) => void;
+}) => {
   const step = useAppStore((s) => s.step);
-  const applyingPop = useRef(false);
   const blockedRef = useRef(options?.onBlockedResultBack);
   blockedRef.current = options?.onBlockedResultBack;
-
-  // Boot: normalize whatever URL we were opened with to the restored step.
+  const managementRef = useRef(options);
+  managementRef.current = options;
+  const applyingPop = useRef(false);
   useEffect(() => {
     window.history.replaceState(null, "", STEP_TO_HASH[useAppStore.getState().step]);
   }, []);
-
-  // Forward sync: store → URL.
   useEffect(() => {
-    const target = STEP_TO_HASH[step];
-    // Consume the marker unconditionally: a URL-driven transition lands here
-    // with the hash already correct, and leaving the marker set would make
-    // the NEXT ordinary transition skip its history entry.
-    const cameFromPopstate = applyingPop.current;
+    const cameFromPop = applyingPop.current;
     applyingPop.current = false;
-    if (window.location.hash === target) return;
-    if (cameFromPopstate) return;
-    if (REPLACE_STEPS.has(step)) {
+    const target = STEP_TO_HASH[step];
+    if (cameFromPop || window.location.hash === target) return;
+    if (step === AppStep.LOGIN || step === AppStep.CREATING)
       window.history.replaceState(null, "", target);
-    } else {
-      window.history.pushState(null, "", target);
-    }
+    else window.history.pushState(null, "", target);
   }, [step]);
-
-  // Back/forward sync: URL → store, through the flow's guards.
   useEffect(() => {
     const onPopState = () => {
       const state = useAppStore.getState();
       const current = state.step;
-      const target = HASH_TO_STEP.get(window.location.hash);
-      if (target === undefined || target === current) return;
-
-      const restoreUrl = () =>
-        window.history.pushState(null, "", STEP_TO_HASH[current]);
-
-      // Never bypass the result screen's leave confirmation: an expensive
-      // creative must be discarded explicitly, not by a swipe.
-      if (current === AppStep.RESULT) {
-        restoreUrl();
+      let target = HASH_TO_STEP.get(window.location.hash);
+      if (target === undefined) {
+        window.history.replaceState(null, "", STEP_TO_HASH[current]);
+        return;
+      }
+      if (target === current) {
+        window.history.replaceState(null, "", STEP_TO_HASH[current]);
+        return;
+      }
+      const restore = () => window.history.pushState(null, "", STEP_TO_HASH[current]);
+      if (current === AppStep.CREATING) {
+        restore();
+        return;
+      }
+      if (current === AppStep.POST) {
+        const busy = postBusyMessage();
+        if (busy) {
+          restore();
+          managementRef.current?.onBusyResultBack?.(busy);
+          return;
+        }
+      }
+      if (current === AppStep.POST && postHasWorkAtRisk()) {
+        restore();
         blockedRef.current?.();
         return;
       }
-      // A generation in flight owns the screen, exactly like the UI.
-      if (current === AppStep.GENERATING) {
-        restoreUrl();
-        return;
-      }
-      // The URL never signs anyone in or out.
-      if (current === AppStep.LOGIN || target === AppStep.LOGIN) {
-        window.history.replaceState(null, "", STEP_TO_HASH[current]);
-        return;
-      }
-      // Forward-navigation into RESULT only makes sense with a creative.
       if (
-        (target === AppStep.RESULT || target === AppStep.GENERATING) &&
-        !state.generatedPost
+        current === AppStep.LOGIN ||
+        target === AppStep.LOGIN ||
+        !state.currentDealer
       ) {
         window.history.replaceState(null, "", STEP_TO_HASH[current]);
         return;
       }
-      // Dashboards are role-gated: a stale history entry (for example #/admin
-      // left behind by impersonation) must not render an unauthorized console.
-      if (target === AppStep.ADMIN && state.role !== "super_admin") {
+      if (
+        (target === AppStep.ADMIN && state.role !== "super_admin") ||
+        (target === AppStep.DEALER_ADMIN &&
+          state.role !== "dealer_admin" &&
+          state.role !== "super_admin") ||
+        (target === AppStep.POST && !state.generatedPost)
+      ) {
         window.history.replaceState(null, "", STEP_TO_HASH[current]);
         return;
       }
-      if (
-        target === AppStep.DEALER_ADMIN &&
-        state.role !== "dealer_admin" &&
-        state.role !== "super_admin"
-      ) {
+      if (current === AppStep.POST && state.postReturnStep !== null)
+        target = state.postReturnStep;
+      if (target === AppStep.DETAILS && (!state.selectedImage || !state.postDraft))
+        target = AppStep.HOME;
+      // Redirected onto the step already showing: nothing changes, so the step
+      // effect never runs to consume applyingPop and it would swallow the next
+      // real navigation's history entry. Just put the URL back.
+      if (target === current) {
         window.history.replaceState(null, "", STEP_TO_HASH[current]);
+        return;
+      }
+      // Home starts a fresh draft, so it would drop a signed release unasked.
+      if (
+        current === AppStep.DETAILS &&
+        target === AppStep.HOME &&
+        state.pendingRelease &&
+        managementRef.current?.onBlockedDraftBack
+      ) {
+        restore();
+        managementRef.current.onBlockedDraftBack(target);
+        return;
+      }
+      if (current === AppStep.DEALER_ADMIN && managementRef.current?.managementDirty) {
+        restore();
+        managementRef.current.onBlockedManagementBack?.(target);
         return;
       }
       applyingPop.current = true;
       state.setStep(target);
+      window.history.replaceState(null, "", STEP_TO_HASH[target]);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);

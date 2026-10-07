@@ -1,14 +1,17 @@
 /**
  * Pure delivery-caption composition extracted from components/PostResult.tsx.
  *
- * Everything here is copied verbatim from the original inline computation —
- * only the shape (function arguments instead of closed-over component state)
- * changed. See docs/superpowers/specs/2026-09-22-streamlined-posting-flow-design.md
- * §5 for the invariant this preserves: the disclosure stays outside the
- * editable body and inside every outgoing caption.
+ * It started as a verbatim copy of the original inline computation, with only
+ * the shape (function arguments instead of closed-over component state)
+ * changed. One deliberate change since: the dealership page tag is added
+ * after the compliance scan, not before it, and a store tag the caption
+ * already closes with is kept out of the scan too (see `buildShareCaptions`
+ * and `splitClosingStoreTags`). See
+ * docs/superpowers/specs/2026-09-22-streamlined-posting-flow-design.md §5 for
+ * the invariant this preserves: the disclosure stays outside the editable body
+ * and inside every outgoing caption.
  */
 import type { Dealer } from "../types";
-import type { PlatformShareCaption } from "../components/ShareDialog";
 import {
   analyzeCaptionForDelivery,
   prependEmployeeDisclosure,
@@ -16,8 +19,82 @@ import {
   type DealerBannedPhrases,
   type EmployeeDisclosureDealer,
 } from "../utils/complianceDisclosures";
-import { appendDealershipMention } from "../utils/socialAttribution";
+import {
+  appendDealershipMention,
+  dealershipMentionFor,
+} from "../utils/socialAttribution";
 import { checkCaptionIdentity, type CaptionIdentityContext } from "../utils/postLocks";
+
+/** One destination's outgoing caption: body only, plus its compliance disclosures. */
+export interface PlatformShareCaption {
+  text: string;
+  disclosures?: string;
+  blockedReason?: string;
+}
+
+/** One destination per network with a store tag or handle (see dealershipMentionFor). */
+const STORE_TAG_NETWORKS = [
+  "facebook_feed",
+  "instagram_feed",
+  "tiktok",
+  "x_twitter",
+  "linkedin",
+] as const;
+
+const tagKey = (value: string): string => value.trim().normalize("NFKC").toLowerCase();
+
+/**
+ * Splits off the store's own tags when they close the caption, each on its own
+ * line: a salesperson typed one, or pasted a shared caption back in. The
+ * compliance scan must not see them there. Its brand-kit pass reads hashtags
+ * from the LAST line only, so a caption ending in "@Tag" had its real hashtag
+ * line read as prose and got a second line of filler hashtags under the tag.
+ *
+ * Only a line that is exactly one of this store's configured tags (any
+ * network's, since one caption on screen feeds every channel) is split off,
+ * so anyone else's @handle and any line with words in it are scanned as
+ * before. The first line is never split off, so the scan always has a body.
+ */
+const splitClosingStoreTags = (
+  caption: string,
+  dealer: Dealer | null | undefined,
+): { body: string; tags: string[] } => {
+  const storeTags = new Set(
+    STORE_TAG_NETWORKS.map((id) => dealershipMentionFor(id, dealer))
+      .filter(Boolean)
+      .map(tagKey),
+  );
+  const tags: string[] = [];
+  let body = caption.trim();
+  while (storeTags.size > 0) {
+    const lastBreak = body.lastIndexOf("\n");
+    if (lastBreak < 0) break;
+    const line = body.slice(lastBreak + 1).trim();
+    const rest = body.slice(0, lastBreak).trim();
+    if (!storeTags.has(tagKey(line))) break;
+    tags.unshift(line);
+    body = rest;
+  }
+  return tags.length > 0 ? { body, tags } : { body: caption, tags };
+};
+
+/**
+ * The scanned body, then the store tags split off before the scan, as typed,
+ * then this destination's own tag when the caption does not already carry it.
+ * Each tag is its own line after a blank line, so the page tag closes the
+ * caption, after its one hashtag line.
+ */
+const closeWithStoreTags = (
+  scannedCaption: string,
+  closingTags: string[],
+  destinationId: string | undefined,
+  dealer: Dealer | null | undefined,
+): string => {
+  const closed = [scannedCaption.trim(), ...closingTags].filter(Boolean).join("\n\n");
+  return destinationId
+    ? appendDealershipMention(closed, destinationId, dealer)
+    : closed;
+};
 
 /**
  * The on-screen caption textarea never contains disclosures (they're stored
@@ -114,9 +191,10 @@ export interface BuildShareCaptionsInput {
 
 /**
  * Re-scan every outgoing variant; one platform can trigger a different
- * disclosure. This is the body of PostResult.tsx's former
- * `sharePlatformCaptions` memo, verbatim, plus the PR2b-only
- * `bodyEditSupersedesPack` opt-in (see the field doc above).
+ * disclosure. This was the body of PostResult.tsx's former
+ * `sharePlatformCaptions` memo, plus the PR2b-only `bodyEditSupersedesPack`
+ * opt-in (see the field doc above), with the page tag now added after the
+ * scan instead of before it.
  */
 export const buildShareCaptions = (
   input: BuildShareCaptionsInput,
@@ -141,32 +219,46 @@ export const buildShareCaptions = (
     // "I have", "I've", "Here's" or "Sure" — exactly how a compliance officer
     // words a material-connection line. Prepending first silently deleted the
     // disclosure for four of five realistic wordings.
-    const attributed = appendDealershipMention(base, id, input.dealer);
+    //
+    // The page tag goes on after the scan as well. The scan's brand-kit pass
+    // (applyDealerBrandKit) looks for hashtags on the LAST line only, so a
+    // caption that already ended in "@Tag" had its hashtag line read as prose
+    // and got a second line of filler hashtags written under the tag: every
+    // Facebook and Instagram caption of a store with a tag carried the same
+    // tags twice. For the same reason a store tag the caption on screen
+    // already closes with is set aside for the scan and put back after it.
+    const closing = splitClosingStoreTags(base, input.dealer);
     const scanned = analyzeCaptionForDelivery(
-      attributed,
+      closing.body,
       input.bannedPhrases,
       undefined,
       input.deliveryLanguageAllowed,
     );
-    // Scan the disclosure-prepended text (unchanged from before), so the
-    // identity-safety and prohibited-claims checks see exactly what the
-    // caption will look like once a delivery path adds requiredPrefix.
+    const attributed = closeWithStoreTags(
+      scanned.caption,
+      closing.tags,
+      id,
+      input.dealer,
+    );
+    // Check the disclosure-prepended text, so the identity-safety check sees
+    // exactly what the caption will look like once a delivery path adds
+    // requiredPrefix, page tag included.
     const prepared = {
       ...scanned,
-      caption: prependEmployeeDisclosure(scanned.caption, input.dealer),
+      caption: prependEmployeeDisclosure(attributed, input.dealer),
     };
     const identitySafe = checkCaptionIdentity(prepared.caption, input.identity);
     out[id] = {
-      // Body only — `scanned.caption`, NOT `prepared.caption`. Every consumer
-      // of this pack (handleShareDelivery, contentForTarget in ShareDialog,
-      // the fitter in services/publishTargets.ts) already treats
-      // requiredPrefix as the one channel for the disclosure. Storing the
-      // prepended string here duplicated it: ShareDialog spreads `...content`
-      // (which still carries requiredPrefix) and only overrides `text`, so
-      // the fitter added the disclosure a second time on top of a caption
-      // that already opened with it, corrupting both the published post and
-      // the budget it was fit against.
-      text: scanned.caption,
+      // Body only — `attributed`, NOT `prepared.caption`. Every consumer of
+      // this pack (handleShareDelivery, contentForTarget in ShareDialog, the
+      // fitter in services/publishTargets.ts) already treats requiredPrefix as
+      // the one channel for the disclosure. Storing the prepended string here
+      // duplicated it: ShareDialog spreads `...content` (which still carries
+      // requiredPrefix) and only overrides `text`, so the fitter added the
+      // disclosure a second time on top of a caption that already opened with
+      // it, corrupting both the published post and the budget it was fit
+      // against.
+      text: attributed,
       disclosures: prepared.disclosures || undefined,
       blockedReason: !identitySafe
         ? input.identityBlockedMessage
@@ -197,18 +289,18 @@ export interface CopyTextResult {
 }
 
 /**
- * `handleCopy`'s attribute-then-scan-then-prepend-then-append chain,
- * verbatim. The disclosure is prepended after the scan (see the note in
- * `buildShareCaptions`): this path pastes straight into destinations with no
- * budget fitter behind it, so a disclosure lost here is simply absent from
- * the published post.
+ * The copy chain: set aside any store tag the caption closes with, scan, then
+ * put the tags back and add the page tag, then prepend the disclosure, then
+ * append the disclosures block. The page tag and the disclosure both go
+ * on after the scan (see the notes in `buildShareCaptions`): this path pastes
+ * straight into destinations with no budget fitter behind it, so a disclosure
+ * lost here is simply absent from the published post, and a second hashtag
+ * line written under the tag is simply in it.
  */
 export const buildCopyText = (input: BuildCopyTextInput): CopyTextResult => {
-  const attributedCaption = input.copyDestinationId
-    ? appendDealershipMention(input.editedText, input.copyDestinationId, input.dealer)
-    : input.editedText;
+  const closing = splitClosingStoreTags(input.editedText, input.dealer);
   const preparedCopy = analyzeCaptionForDelivery(
-    attributedCaption,
+    closing.body,
     input.bannedPhrases,
     undefined,
     input.deliveryLanguageAllowed,
@@ -219,8 +311,14 @@ export const buildCopyText = (input: BuildCopyTextInput): CopyTextResult => {
       blockedReason: prohibitedClaimsMessage(preparedCopy.compliance.prohibited),
     };
   }
+  const attributedCaption = closeWithStoreTags(
+    preparedCopy.caption,
+    closing.tags,
+    input.copyDestinationId,
+    input.dealer,
+  );
   const text = appendDisclosureText(
-    prependEmployeeDisclosure(preparedCopy.caption, input.dealer),
+    prependEmployeeDisclosure(attributedCaption, input.dealer),
     preparedCopy.disclosures,
   );
   return { text };

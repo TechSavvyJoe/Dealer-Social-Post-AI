@@ -85,6 +85,8 @@ export interface LogPostInput {
 
 export interface PostRecord {
   id: string;
+  /** Opaque PocketBase update revision used for compare-and-set writes. */
+  updated?: string;
   dealer: string;
   salesperson_name?: string;
   /** Optional FK to the salespeople collection — preferred over the free-text name when present. */
@@ -145,9 +147,44 @@ export interface PostShareSummary {
   last_via: PostShareVia;
   /** Distinct destinations, most recent first. */
   channels: string[];
+  /**
+   * Completed share-sheet events, counted apart from the latest event so a
+   * later download or copy cannot hide an earlier share. Only these may be
+   * labelled "Shared". Absent from an older backend.
+   */
+  sheet_count?: number;
+  /** Destination of the latest share-sheet event; "" when there is none. */
+  last_sheet_channel?: string;
+  /** Server-written time of the latest share-sheet event; "" when there is none. */
+  last_sheet_at?: string;
 }
 
 const POST_SHARE_VIAS: readonly PostShareVia[] = ["share_sheet", "download", "copy"];
+
+/**
+ * The share-sheet fields, only when the server sent them. A malformed count
+ * reads as no share sheet, so the UI never claims a share it cannot prove.
+ */
+const projectShareSheetFields = (
+  value: Record<string, unknown>,
+): Pick<PostShareSummary, "sheet_count" | "last_sheet_channel" | "last_sheet_at"> => {
+  if (value.sheet_count === undefined) return {};
+  const sheetCount =
+    typeof value.sheet_count === "number" && Number.isFinite(value.sheet_count)
+      ? Math.max(0, Math.floor(value.sheet_count))
+      : 0;
+  return {
+    sheet_count: sheetCount,
+    last_sheet_channel:
+      sheetCount > 0 && typeof value.last_sheet_channel === "string"
+        ? value.last_sheet_channel
+        : "",
+    last_sheet_at:
+      sheetCount > 0 && typeof value.last_sheet_at === "string"
+        ? value.last_sheet_at
+        : "",
+  };
+};
 
 /**
  * Client projection of the server's share summary. A missing field (older
@@ -181,11 +218,14 @@ export const projectShareSummary = (
     last_channel: lastChannel,
     last_via: lastVia,
     channels: channels.length > 0 ? channels : [lastChannel],
+    ...projectShareSheetFields(value),
   };
 };
 
 export interface PostApprovalStatus {
   id: string;
+  /** Revision after the latest server-side write (absent from an older backend). */
+  post_revision?: string;
   approval_status: ApprovalStatus;
   approved_by?: string;
   rejection_reason?: string;
@@ -193,6 +233,10 @@ export interface PostApprovalStatus {
   image_review_required?: boolean;
 }
 
+/**
+ * Marking a finished render sets `has_video` without advancing the post's
+ * revision, so the response carries no compare-and-set token to adopt.
+ */
 export interface PostVideoStatus {
   id: string;
   has_video: true;
@@ -530,6 +574,8 @@ export const projectPostRecordForUi = (
 
 export interface UpdatePostDraftInput {
   caption: string;
+  /** Last server revision observed by this editor. */
+  expectedPostRevision: string;
   disclosures?: string;
   imageDataUrl?: string;
   platformCaptions?: Record<string, string>;
@@ -716,6 +762,7 @@ export const updatePostDraft = async (
   });
   const requestAuthEpoch = captureAuthEpoch();
   const form = new FormData();
+  form.append("expected_post_revision", input.expectedPostRevision);
   form.append("caption", input.caption.trim());
   form.append("disclosures", input.disclosures?.trim() || "");
   form.append("platform_captions", JSON.stringify(input.platformCaptions || {}));
@@ -750,6 +797,8 @@ export const updatePostDraft = async (
 export interface RecordPostSharedInput {
   channel: PlatformDestinationId;
   via: PostShareVia;
+  /** Revision of the exact saved copy that was exported. */
+  expectedPostRevision: string;
 }
 
 export interface RecordedPostShare {
@@ -760,13 +809,15 @@ export interface RecordedPostShare {
   shared_at: string;
   /** True when the same channel and method were already recorded within 60 s. */
   deduplicated: boolean;
+  /** Revision of the saved copy whose delivery locks were checked. */
+  post_revision: string;
 }
 
 /**
  * Record a completed share on the owner-scoped post. Call it only once the
  * share happened (navigator.share resolved, the download started, the
- * caption was copied). Sends the destination and method, nothing else: the
- * server writes the time and refuses a post that is still locked.
+ * caption was copied). The revision binds the receipt to the exact saved copy;
+ * the server writes the time and refuses stale or locked posts.
  */
 export const recordPostShared = async (
   postId: string,
@@ -777,7 +828,11 @@ export const recordPostShared = async (
     {
       method: "POST",
       cache: "no-store",
-      body: JSON.stringify({ channel: input.channel, via: input.via }),
+      body: JSON.stringify({
+        channel: input.channel,
+        via: input.via,
+        expected_post_revision: input.expectedPostRevision,
+      }),
     },
   );
 

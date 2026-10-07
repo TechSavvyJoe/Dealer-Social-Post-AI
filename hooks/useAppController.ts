@@ -6,7 +6,14 @@ import { loadGeminiService, useGemini } from "./useGemini";
 import { loadPublishPipeline } from "../services/publishPipeline";
 import { useGeneration } from "./useGeneration";
 import { useDealerTheme } from "./useDealerTheme";
-import { AppStep, StyleOption, ToneOption, type ImageSelection } from "../types";
+import {
+  AppStep,
+  StyleOption,
+  ToneOption,
+  type ImageSelection,
+  type BrandCategoryId,
+  type GeneratedPost,
+} from "../types";
 import { isCreativeSystemEnabled } from "../services/creativeSystem";
 import { logEvent } from "../utils/telemetry";
 import { archiveDealerMedia } from "../utils/creativeStorage";
@@ -36,6 +43,7 @@ export const useAppController = () => {
     reset,
     startRemix,
     restoreSession,
+    refreshStoreImageSettings,
   } = useAppStore(
     useShallow((state) => ({
       step: state.step,
@@ -60,6 +68,7 @@ export const useAppController = () => {
       reset: state.reset,
       startRemix: state.startRemix,
       restoreSession: state.restoreSession,
+      refreshStoreImageSettings: state.refreshStoreImageSettings,
     })),
   );
 
@@ -93,6 +102,25 @@ export const useAppController = () => {
     logEvent("app.boot");
     restoreSession();
   }, [restoreSession]);
+
+  // A manager can change the store's image quality, logo corner and size, or
+  // logo while this app is open, and generation reads them from the session
+  // dealer. Re-read them whenever the app comes back to the screen, so a
+  // teammate's open app does not keep the values from its last sign-in.
+  const signedInDealerId = currentDealer?.id;
+  useEffect(() => {
+    if (!signedInDealerId || isRestoringSession) return;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void refreshStoreImageSettings();
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [signedInDealerId, isRestoringSession, refreshStoreImageSettings]);
 
   // Warm the AI-service chunk (~63 kB gzip) while the user is still picking
   // style and tone, so the first Generate spends its time on the model call
@@ -222,6 +250,47 @@ export const useAppController = () => {
     setOriginalBackupStatus("idle");
   }, []);
 
+  const handlePhotoPicked = useCallback(
+    (selection: ImageSelection, categoryId: BrandCategoryId, scenarioId: string) => {
+      generationProps.supersedeGeneration();
+      const store = useAppStore.getState();
+      store.setGeneratedPost(null);
+      store.setError(null);
+      store.setGenerationParams(null);
+      store.setPendingRelease(null);
+      store.setPendingPhoto(null);
+      store.setPostReturnStep(null);
+      store.setSelectedImage(selection.workingImage);
+      store.setPostDraft({ categoryId, scenarioId });
+      store.setStep(AppStep.DETAILS);
+      if (store.currentDealer) {
+        void archiveDealerMedia(store.currentDealer.id, {
+          kind: "capture",
+          source: selection.originalSource,
+          previewSource: selection.workingImage,
+          originalFilename: selection.originalFilename,
+          label: "Original photo",
+        }).then((record) =>
+          logEvent("media.capture.backup", {
+            outcome: record ? "saved" : "unavailable",
+          }),
+        );
+      }
+    },
+    [generationProps.supersedeGeneration],
+  );
+
+  // Back from the reopened post returns to the surface it was opened from
+  // (Home's preview, My work or the dealership dashboard): openSavedPost
+  // records the current step, never a role-derived guess (amendments B13).
+  const handleOpenPost = useCallback(
+    (post: GeneratedPost) => {
+      generationProps.supersedeGeneration();
+      useAppStore.getState().openSavedPost(post);
+    },
+    [generationProps.supersedeGeneration],
+  );
+
   return {
     step,
     currentDealer,
@@ -255,5 +324,7 @@ export const useAppController = () => {
     handleImageSelected,
     handleCropConfirm,
     handleCropClose,
+    handlePhotoPicked,
+    handleOpenPost,
   };
 };

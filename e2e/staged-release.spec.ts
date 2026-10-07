@@ -145,7 +145,7 @@ test.describe("Hosted staged release", () => {
       const csp = rootResponse.headers()["content-security-policy"] || "";
       for (const directive of [
         "default-src 'self'",
-        "script-src 'self' 'sha256-/BDi79xyTr9R8ICV6KALUbYxT0VtDgKXMM8oqBgzp2M=' https://challenges.cloudflare.com",
+        "script-src 'self' 'sha256-o+4kI1r0Dv6RDMKm3/VtsLMcE6aR+PGeatWcEpd9/uw=' https://challenges.cloudflare.com",
         "frame-src https://challenges.cloudflare.com",
         "object-src 'none'",
         "base-uri 'self'",

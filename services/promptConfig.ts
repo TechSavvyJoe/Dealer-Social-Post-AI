@@ -1,5 +1,12 @@
-import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from "../types";
+import {
+  StyleOption,
+  ToneOption,
+  VideoStyle,
+  VideoRequestOptions,
+  type LogoPlacement,
+} from "../types";
 import { FLAGS } from "./modelConfig";
+import { logoPlacementPriority, logoPlacementWording } from "./logoPlacement";
 import {
   generateTextPromptV2,
   editTextPromptV2,
@@ -18,6 +25,8 @@ export const generateImagePrompt = (
   hasLogo: boolean,
   customMessage?: string,
   creativeBrief?: string,
+  /** The store's logo corner and size; null or absent keeps "a lower corner". */
+  logoPlacement?: LogoPlacement | null,
 ): string => {
   if (FLAGS.useV2Prompts) {
     return generateImagePromptV2(
@@ -26,6 +35,7 @@ export const generateImagePrompt = (
       hasLogo,
       customMessage,
       creativeBrief,
+      logoPlacement,
     );
   }
   const criticalRules = `
@@ -51,7 +61,10 @@ export const generateImagePrompt = (
 *   Under no circumstances may text, logos, or graphics cross into these exclusion zones.`;
 
   const watermarkInstruction = hasLogo
-    ? `*   **MANDATORY LOGO PLACEMENT:** A second image has been provided—this is the dealership's logo. It is a CRITICAL REQUIREMENT that you place this logo as a small, tasteful watermark in a lower corner of the final image, inside a Safe Zone. Do not distort it. Do NOT use the dealership name as a text watermark if the logo image is present. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
+    ? `*   **MANDATORY LOGO PLACEMENT:** A second image has been provided—this is the dealership's logo. It is a CRITICAL REQUIREMENT that you place this logo ${logoPlacementWording(
+        logoPlacement,
+        "as a small, tasteful watermark in a lower corner of the final image, inside a Safe Zone",
+      )}.${logoPlacementPriority(logoPlacement)} Do not distort it. Do NOT use the dealership name as a text watermark if the logo image is present. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
     : `*   **WATERMARK:** The dealership name, '${dealershipName}', MUST be used as a text watermark. Use the *exact* spelling provided and place it tastefully in a lower corner within a Safe Zone.`;
 
   const varietyInstruction = `**CREATIVE TEXT & STYLING MANDATE (WHILE PRESERVING THE ORIGINAL PHOTO)**
@@ -1127,6 +1140,8 @@ export const generateFunPrompt = (
   logoBase64Url?: string,
   requestedStyle?: string,
   creativeBrief?: string,
+  /** The store's logo corner and size; null or absent keeps "a lower corner". */
+  logoPlacement?: LogoPlacement | null,
 ): string => {
   if (FLAGS.useV2Prompts) {
     const matched = funStyleCatalog.find(
@@ -1141,6 +1156,7 @@ export const generateFunPrompt = (
       !!logoBase64Url,
       matched?.name,
       creativeBrief,
+      logoPlacement,
     );
   }
   const criticalRules = `
@@ -1166,7 +1182,10 @@ export const generateFunPrompt = (
 *   Do not output the final image until ALL elements satisfy these margins.`;
 
   const watermarkInstruction = logoBase64Url
-    ? `A dealership logo has been provided as a second image. It is a MANDATORY REQUIREMENT to place this logo as a small, tasteful watermark in a lower corner of the final image. It must be styled to match the overall artistic theme but remain clearly legible and unobtrusive. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
+    ? `A dealership logo has been provided as a second image. It is a MANDATORY REQUIREMENT to place this logo ${logoPlacementWording(
+        logoPlacement,
+        "as a small, tasteful watermark in a lower corner of the final image",
+      )}.${logoPlacementPriority(logoPlacement)} It must be styled to match the overall artistic theme but remain clearly legible and unobtrusive. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
     : `The dealership name is '${dealershipName}'. You MUST use this EXACT name as a small, tasteful text watermark in a lower corner. Style it to match the aesthetic but keep it discreet. Double-check your spelling of '${dealershipName}'.`;
 
   // Select style based on request
@@ -1230,9 +1249,16 @@ export const editImagePrompt = (
   editPrompt: string,
   dealershipName: string,
   logoBase64Url?: string,
+  /** The store's logo corner and size; null or absent keeps "a corner". */
+  logoPlacement?: LogoPlacement | null,
 ): string => {
   if (FLAGS.useV2Prompts) {
-    return editImagePromptV2(editPrompt, dealershipName, !!logoBase64Url);
+    return editImagePromptV2(
+      editPrompt,
+      dealershipName,
+      !!logoBase64Url,
+      logoPlacement,
+    );
   }
   const criticalRulesForEditing = `
 **CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES FOR EDITING: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
@@ -1254,7 +1280,10 @@ export const editImagePrompt = (
 *   If a margin is violated, relocate the element and re-run this safeguard before delivering the final image.`;
 
   const watermarkInstruction = logoBase64Url
-    ? `A dealership logo has been provided as a second image. It is a CRITICAL REQUIREMENT to ensure this logo is present and tastefully placed in a corner of the final edited image. Do not distort it. If the logo was missing from the original image, you MUST add it now. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
+    ? `A dealership logo has been provided as a second image. It is a CRITICAL REQUIREMENT to ensure this logo is present and tastefully placed ${logoPlacementWording(
+        logoPlacement,
+        "in a corner of the final edited image",
+      )}.${logoPlacementPriority(logoPlacement)} Do not distort it. If the logo was missing from the original image, you MUST add it now. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
     : `The dealership name is '${dealershipName}'. If a text watermark with this name was on the original image, ensure it remains or is tastefully reapplied.`;
 
   const guardedEdit = guardImageEditRequest(editPrompt);

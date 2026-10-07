@@ -2,7 +2,7 @@
 
 This runbook keeps the single-writer PocketBase database recoverable and prevents a Vercel frontend from reaching the production domain before its matching Fly backend is ready.
 
-Local version files, GitHub Actions, npm, and Docker pin Node `22.23.1` (npm `10.9.8`). Vercel exposes Node only at the major-version level, so `package.json` constrains builds to Node 22 and Vercel applies its current Node 22 patch automatically. PocketBase remains pinned to `0.22.37`.
+Local version files, GitHub Actions, npm, and Docker pin Node `22.23.1` (npm `10.9.8`). Vercel exposes Node only at the major-version level, so `package.json` constrains builds to Node 22 and Vercel applies its current Node 22 patch automatically. PocketBase remains pinned to `0.22.55`.
 
 ## One-time private R2 setup
 
@@ -100,6 +100,49 @@ that calls it becomes reachable. The job pulls the production environment,
 refuses a Cloudflare test sitekey, builds with `VITE_RELEASE_SHA`, and refuses a
 bundle that is not stamped with its own SHA. It deploys with `--skip-domain`,
 verifies the immutable deployment, and only then moves traffic.
+
+The backend-first workflow cannot safely introduce a newly required client
+request field in one release. Split a revision contract into three compatible
+stages: (1) release an additive backend that returns every new revision token
+but does not require it, (2) release and verify the frontend that preserves and
+sends those tokens, and (3) release the strict backend enforcement. The
+`expected_post_revision` contract also needs the additive photo-release link
+receipt before the frontend stage, because attaching consent advances the post
+revision. A pull request that combines the strict backend and first frontend
+sender must remain blocked from `main` until it is split into those stages. Do
+not leave the field optional in the final backend; doing so silently removes
+the compare-and-set guarantee.
+
+### The post-revision contract, stage by stage
+
+| Stage | What ships                                                                                                                                            | Works with                   |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| A     | Backend returns a revision from every write and checks one when it is sent. A draft save without one still works and logs `[revision-legacy-client]`. | any frontend                 |
+| B     | Frontend sends the revision it last saw with every draft save and share receipt.                                                                      | backend at stage A or later  |
+| C     | Backend rejects a draft save or share receipt that carries no revision (`409`).                                                                       | frontend at stage B or later |
+
+Stages A and B may ship in the same `main` commit: the backend deploys first and
+still accepts the older client. Stage C must ship alone, later, and only through
+this gate. All three conditions must hold:
+
+1. Stage B's `release-frontend` job is green and the canonical alias serves that
+   build.
+2. The production log shows no `[revision-legacy-client]` line for seven
+   consecutive days. Each line names a post whose author is still on a build
+   from before stage B (an installed app or a tab that was never reopened).
+   `flyctl logs --app dealer-social-post-ai-production --no-tail | grep -c
+"revision-legacy-client"` (or the **Fetch Fly Logs** workflow) reads only
+   Fly's recent buffer, so check once a day through the window; a single check
+   at the end proves nothing about the earlier days.
+3. The stage C change is the only change in its `main` commit and merges after
+   stage B's whole pipeline has finished.
+
+Until the gate is met, stage A's compatibility stays. It costs nothing for
+current clients, which always send a revision; it only keeps an older installed
+app able to save.
+
+Rolling back across these stages has its own order. See
+[the post-revision contract in the rollback runbook](runbooks/rollback.md#2a-the-post-revision-contract-stages-a-b-c).
 
 Two things must be true before it reports success, and both are asserted:
 

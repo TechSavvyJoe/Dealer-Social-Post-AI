@@ -1,5 +1,5 @@
 import modelPolicyJson from "../config/gemini-model-policy.json";
-import type { ImageAspectRatio } from "../types";
+import type { ImageAspectRatio, LogoCornerCheck } from "../types";
 
 export type ModelTaskName =
   | "caption"
@@ -83,6 +83,11 @@ export interface ModelExecutionMetadata {
   fallbackCount: number;
   /** Most recent successful upstream response for this task in this session. */
   lastSuccessAt: string | null;
+  /**
+   * Images only, and only when the store set a logo corner and a logo was
+   * supplied: where the image review saw the logo. Never a pass/fail signal.
+   */
+  logoCorner?: LogoCornerCheck;
 }
 
 /**

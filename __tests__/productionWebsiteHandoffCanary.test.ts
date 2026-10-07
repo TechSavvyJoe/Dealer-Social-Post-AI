@@ -6,6 +6,7 @@ import {
   buildSyntheticDrafts,
   canonicalHubOrigin,
   canonicalProductionOrigin,
+  createDraftForm,
   extractHubDraftId,
   injectSyntheticJpegMetadata,
   jpegApplicationMarkers,
@@ -137,6 +138,31 @@ describe("production website handoff canary", () => {
         source.replace(createCall, `${createCall}\nclaimPublicationForPost();`),
       ),
     ).toThrow(/Initial post creation must not enqueue/);
+  });
+
+  it("carries the exact current revision through every synthetic draft PATCH", () => {
+    expect(
+      Object.fromEntries(
+        createDraftForm("Synthetic setup caption.", "revision-from-create").entries(),
+      ),
+    ).toEqual({
+      expected_post_revision: "revision-from-create",
+      caption: "Synthetic setup caption.",
+      disclosures: "",
+      platform_captions: "{}",
+    });
+    expect(() => createDraftForm("Synthetic setup caption.", "")).toThrow(
+      /did not return a safe opaque post revision/,
+    );
+
+    const source = readFileSync(scriptPath, "utf8");
+    expect(source).toContain("created.updated");
+    expect(source).toContain(
+      '"Synthetic saved setup caption. Never publish.",\n          createdRevision,',
+    );
+    expect(source).toContain(
+      '"Synthetic final caption. Never publish.",\n          initialRevision,',
+    );
   });
 
   it("never references attached customer photos or stores secrets in evidence", () => {

@@ -1478,6 +1478,7 @@ describe("client: the same rule before the guard", () => {
     await expect(
       updatePostDraft("post-client-1", {
         caption,
+        expectedPostRevision: "r1",
         disclosures,
         platformCaptions: { facebook_feed: caption },
         grounding: {

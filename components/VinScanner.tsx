@@ -19,6 +19,7 @@ interface VinScannerProps {
   onClose: () => void;
   /** Called when a VIN successfully decodes. The host can stash this in state and inject it into generation. */
   onVehicleDecoded: (vehicle: DecodedVehicle) => void;
+  initialMode?: "scanner" | "manual";
 }
 
 /**
@@ -69,6 +70,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
   isOpen,
   onClose,
   onVehicleDecoded,
+  initialMode,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -84,12 +86,17 @@ export const VinScanner: React.FC<VinScannerProps> = ({
     };
   }, []);
 
-  useEffect(() => {
-    // Re-arm when re-opened
-    if (isOpen) cancelledRef.current = false;
-  }, [isOpen]);
+  const [mode, setMode] = useState<"scanner" | "manual">(
+    () => initialMode ?? (getBarcodeDetector() ? "scanner" : "manual"),
+  );
 
-  const [mode, setMode] = useState<"scanner" | "manual">("scanner");
+  useEffect(() => {
+    // Re-arm when re-opened and choose the usable entry surface up front.
+    if (isOpen) {
+      cancelledRef.current = false;
+      setMode(initialMode ?? (getBarcodeDetector() ? "scanner" : "manual"));
+    }
+  }, [initialMode, isOpen]);
   const [manualVin, setManualVin] = useState("");
   const [isDecoding, setIsDecoding] = useState(false);
   // Mirror of `isDecoding` read inside the detection interval. Keeping it in a
