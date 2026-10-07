@@ -3,12 +3,24 @@ name: CI
 on:
   push:
     branches: [main]
+  # No base-branch filter here on purpose. `branches:` under pull_request
+  # filters the PR's BASE, not its head, so `[main]` silently skipped every
+  # stacked PR (a feature branch based on another feature branch). Those PRs
+  # showed four green checks -- Socket Security and Vercel -- while typecheck,
+  # vitest, Playwright and the container job never ran at all.
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Covering every PR costs minutes, so supersede a PR's own in-flight run when
+# it is pushed again. Pushes to main are never cancelled: Deploy production
+# keys off a *completed* CI run for that head SHA, and cancelling one would
+# silently skip a release.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Required-action SHA pinning (post tj-actions/changed-files Mar 2025).
 # When you bump versions, paste the full 40-char SHA from the action's
