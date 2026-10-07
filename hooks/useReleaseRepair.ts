@@ -71,7 +71,7 @@ export const useReleaseRepair = ({
       setReleaseRetrying(true);
       setReleaseRetryNotice(null);
       try {
-        await linkReleaseToPostWithRetry(releaseId, postId);
+        const linked = await linkReleaseToPostWithRetry(releaseId, postId);
         setReleaseStatus("saved");
         setReleaseLinkStatus(undefined);
         const store = useAppStore.getState();
@@ -80,6 +80,7 @@ export const useReleaseRepair = ({
           const base = current || sourcePost;
           store.setGeneratedPost({
             ...base,
+            postRevision: linked.post_revision,
             releaseStatus: "saved",
             releaseLinkStatus: undefined,
           });

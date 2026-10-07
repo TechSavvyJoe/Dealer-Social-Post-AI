@@ -3,7 +3,7 @@
 # PocketBase Startup Script
 # This script loads environment variables and starts PocketBase with hooks enabled
 
-set -e
+set -euo pipefail
 
 echo "========================================="
 echo "Starting Dealer Social Post AI"
@@ -23,7 +23,7 @@ else
 fi
 
 # Check if GEMINI_API_KEY is set
-if [ -z "$GEMINI_API_KEY" ] || [ "$GEMINI_API_KEY" = "your-api-key-here" ]; then
+if [ -z "${GEMINI_API_KEY:-}" ] || [ "$GEMINI_API_KEY" = "your-api-key-here" ]; then
     echo ""
     echo "ERROR: GEMINI_API_KEY is not configured!"
     echo ""
@@ -33,18 +33,25 @@ if [ -z "$GEMINI_API_KEY" ] || [ "$GEMINI_API_KEY" = "your-api-key-here" ]; then
     echo "3. Replace 'your-api-key-here' with your actual API key"
     echo "4. Save the file and run this script again"
     echo ""
-    # exit 1
+    echo "The backend will start, but AI generation and deep readiness will be unavailable."
+else
+    echo "✓ GEMINI_API_KEY is configured"
 fi
 
 echo "✓ Environment variables loaded successfully"
-echo "✓ GEMINI_API_KEY is configured"
 echo ""
 
 # Keep local development on the same tested maintenance release as Docker.
-PB_VERSION="${PB_VERSION:-0.22.55}"
+EXPECTED_PB_VERSION="0.22.55"
+if [ -n "${PB_VERSION:-}" ] && [ "$PB_VERSION" != "$EXPECTED_PB_VERSION" ]; then
+    echo "ERROR: PB_VERSION=$PB_VERSION is unsupported by this repository."
+    echo "PocketBase is pinned to $EXPECTED_PB_VERSION because the hooks use the 0.22 JSVM API."
+    exit 2
+fi
+PB_VERSION="$EXPECTED_PB_VERSION"
 CURRENT_PB_VERSION=""
 if [ -x "./pocketbase" ]; then
-    CURRENT_PB_VERSION=$(./pocketbase --version 2>/dev/null | awk '{print $3}')
+    CURRENT_PB_VERSION=$(./pocketbase --version 2>/dev/null | awk '{print $3}' || true)
 fi
 
 if [ "$CURRENT_PB_VERSION" != "$PB_VERSION" ]; then
@@ -91,19 +98,31 @@ if [ "$CURRENT_PB_VERSION" != "$PB_VERSION" ]; then
             ;;
     esac
 
-    # Download PocketBase
+    # Download into a private staging directory so a failed transfer, checksum,
+    # or unzip never destroys a previously working binary.
     DOWNLOAD_URL="https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_${OS}_${ARCH}.zip"
     echo "Downloading from: $DOWNLOAD_URL"
+    DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/dsp-pocketbase.XXXXXX")
+    cleanup_download() {
+        rm -rf -- "$DOWNLOAD_DIR"
+    }
+    trap cleanup_download EXIT INT TERM
 
-    curl -fL "$DOWNLOAD_URL" -o pocketbase.zip
+    curl --fail --location --retry 3 --retry-all-errors \
+        --connect-timeout 15 --max-time 180 \
+        "$DOWNLOAD_URL" -o "$DOWNLOAD_DIR/pocketbase.zip"
     if command -v sha256sum >/dev/null 2>&1; then
-        echo "${PB_SHA256}  pocketbase.zip" | sha256sum -c -
+        echo "${PB_SHA256}  $DOWNLOAD_DIR/pocketbase.zip" | sha256sum -c -
     else
-        echo "${PB_SHA256}  pocketbase.zip" | shasum -a 256 -c -
+        echo "${PB_SHA256}  $DOWNLOAD_DIR/pocketbase.zip" | shasum -a 256 -c -
     fi
-    unzip -o pocketbase.zip
-    rm pocketbase.zip
-    chmod +x pocketbase
+    unzip -q "$DOWNLOAD_DIR/pocketbase.zip" -d "$DOWNLOAD_DIR"
+    test -f "$DOWNLOAD_DIR/pocketbase"
+    chmod 0755 "$DOWNLOAD_DIR/pocketbase"
+    mv -f "$DOWNLOAD_DIR/pocketbase" ./pocketbase.next
+    mv -f ./pocketbase.next ./pocketbase
+    cleanup_download
+    trap - EXIT INT TERM
 
     echo "✓ PocketBase downloaded successfully"
     echo ""
@@ -117,4 +136,12 @@ echo "Press Ctrl+C to stop the server"
 echo "========================================="
 echo ""
 
-./pocketbase serve --http=0.0.0.0:8090 --hooksDir=./pb_hooks
+POCKETBASE_HTTP_ADDR="${POCKETBASE_HTTP_ADDR:-0.0.0.0:8090}"
+POCKETBASE_DATA_DIR="${POCKETBASE_DATA_DIR:-./pb_data}"
+# PocketBase resolves the default migrations directory relative to --dir, so a
+# POCKETBASE_DATA_DIR override would silently load no migrations. Pin it.
+exec ./pocketbase serve \
+    --http="$POCKETBASE_HTTP_ADDR" \
+    --dir="$POCKETBASE_DATA_DIR" \
+    --hooksDir=./pb_hooks \
+    --migrationsDir=./pb_migrations

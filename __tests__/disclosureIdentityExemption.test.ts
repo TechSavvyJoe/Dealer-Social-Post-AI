@@ -582,6 +582,7 @@ const runSave = (body: AnyRecord) => {
         addFiles: vi.fn(),
         submit: () => {
           record.id = "post-new";
+          record.values.updated = "2026-09-22 10:00:00.000Z";
           stored.push({ ...record.values });
         },
       };
@@ -617,6 +618,7 @@ describe("POST /api/app/posts saves a customer post that carries disclosures", (
       const { result, stored } = runSave(body);
       expect(result.status).toBe(200);
       expect(result.payload.customer_name).toBe("Michelle");
+      expect(result.payload.updated).toBe("2026-09-22 10:00:00.000Z");
       expect(stored).toHaveLength(1);
       expect(stored[0].caption).toBe("Congrats Michelle! Lease yours for $299/mo.");
       // The legal copy is stored exactly as the server wrote it.
@@ -735,13 +737,18 @@ describe("POST /api/app/posts saves a customer post that carries disclosures", (
 
 // PATCH /api/app/posts/:id/draft -------------------------------------------
 
-const runDraft = (body: AnyRecord, postOverrides: AnyRecord = {}) => {
+const runDraft = (
+  body: AnyRecord,
+  postOverrides: AnyRecord = {},
+  options: { omitExpectedRevision?: boolean } = {},
+) => {
   const source = routeSource(
     'routerAdd("PATCH", "/api/app/posts/:id/draft"',
     'routerAdd("POST", "/api/app/posts/:id/video-generated"',
   );
   const post = fakeRecord("post-1", storedPost(postOverrides));
   const saved: AnyRecord[] = [];
+  const log = vi.fn();
   const txDao = {
     db: () => ({
       newQuery: () => ({
@@ -753,6 +760,7 @@ const runDraft = (body: AnyRecord, postOverrides: AnyRecord = {}) => {
   const handler = routeContext(
     source,
     {
+      console: { error: vi.fn(), log, warn: vi.fn() },
       helpers: sessionHelpers(salespersonContext()),
       $app: {
         dao: () => ({
@@ -760,7 +768,16 @@ const runDraft = (body: AnyRecord, postOverrides: AnyRecord = {}) => {
           runInTransaction: (fn: (dao: typeof txDao) => void) => fn(txDao),
         }),
       },
-      $apis: { requestInfo: () => ({ data: body }) },
+      $apis: {
+        requestInfo: () => ({
+          data: {
+            ...(options.omitExpectedRevision
+              ? {}
+              : { expected_post_revision: post.getString("updated") }),
+            ...body,
+          },
+        }),
+      },
       $filesystem: {},
       RecordUpsertForm: function RecordUpsertForm() {
         let data: AnyRecord = {};
@@ -780,10 +797,63 @@ const runDraft = (body: AnyRecord, postOverrides: AnyRecord = {}) => {
       findPublicationForPostWithDaoStrict: () => null,
     },
   );
-  return { result: handler(routeRequest()), saved };
+  return { result: handler(routeRequest()), saved, log };
 };
 
 describe("PATCH /api/app/posts/:id/draft", () => {
+  it("accepts an absent legacy revision but rejects a stale supplied revision", () => {
+    const valid = storedPost();
+    const legacy = runDraft(
+      {
+        caption: valid.caption,
+        disclosures: valid.disclosures,
+      },
+      {},
+      { omitExpectedRevision: true },
+    );
+    expect(legacy.result.status).toBe(200);
+    expect(legacy.saved).toHaveLength(1);
+    // Stage C's release gate counts these lines in the production log.
+    expect(legacy.log).toHaveBeenCalledWith(
+      "[revision-legacy-client] route=draft post=post-1",
+    );
+
+    const stale = runDraft({
+      expected_post_revision: "2026-09-21 09:00:00.000Z",
+      caption: valid.caption,
+      disclosures: valid.disclosures,
+    });
+    expect(stale.result).toMatchObject({
+      status: 409,
+      payload: { code: "POST_DRAFT_REVISION_CONFLICT" },
+    });
+    expect(stale.saved).toHaveLength(0);
+    expect(stale.log).not.toHaveBeenCalledWith(
+      expect.stringContaining("[revision-legacy-client]"),
+    );
+  });
+
+  it.each([
+    ["blank", ""],
+    ["non-string", { revision: "2026-09-20 10:00:00.000Z" }],
+    ["oversized", "x".repeat(81)],
+  ])(
+    "rejects a %s supplied revision instead of treating it as legacy",
+    (_label, revision) => {
+      const valid = storedPost();
+      const result = runDraft({
+        expected_post_revision: revision,
+        caption: valid.caption,
+        disclosures: valid.disclosures,
+      });
+      expect(result.result).toMatchObject({
+        status: 409,
+        payload: { code: "POST_DRAFT_REVISION_REQUIRED" },
+      });
+      expect(result.saved).toHaveLength(0);
+    },
+  );
+
   it.each(COMBINATIONS.map(({ label, captions }) => [label, captions]))(
     "saves an edited customer draft with disclosures: %s",
     (_label, captions) => {
@@ -871,6 +941,12 @@ const runShare = (postOverrides: AnyRecord = {}) => {
   const post = fakeRecord("post-1", storedPost(postOverrides));
   const events: ReturnType<typeof fakeRecord>[] = [];
   const txDao = {
+    db: () => ({
+      newQuery: () => ({
+        bind: () => ({ execute: () => ({ rowsAffected: () => 1 }) }),
+      }),
+    }),
+    findRecordById: () => post,
     findRecordsByFilter: () => [],
     findCollectionByNameOrId: (name: string) => ({ name }),
     saveRecord: (record: ReturnType<typeof fakeRecord>) => {
@@ -888,7 +964,13 @@ const runShare = (postOverrides: AnyRecord = {}) => {
       }),
     },
     $apis: {
-      requestInfo: () => ({ data: { channel: "facebook_feed", via: "share_sheet" } }),
+      requestInfo: () => ({
+        data: {
+          channel: "facebook_feed",
+          via: "share_sheet",
+          expected_post_revision: post.getString("updated"),
+        },
+      }),
     },
     Record: function Record() {
       return fakeRecord("", {});
@@ -1396,6 +1478,7 @@ describe("client: the same rule before the guard", () => {
     await expect(
       updatePostDraft("post-client-1", {
         caption,
+        expectedPostRevision: "r1",
         disclosures,
         platformCaptions: { facebook_feed: caption },
         grounding: {

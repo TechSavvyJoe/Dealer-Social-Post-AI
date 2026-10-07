@@ -37,8 +37,77 @@ function recordString(record, fieldName) {
   return "";
 }
 
-function initialApprovalStatus(dealer) {
-  return recordBool(dealer, "requires_approval") ? "pending" : "n_a";
+function readApprovalPolicy(dealer) {
+  const raw = recordString(dealer, "approval_policy").trim();
+  if (!raw || raw === "null") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+/**
+ * Whether a new post waits for manager review.
+ *
+ * dealers.requires_approval turns review on for the store. approval_policy can
+ * only narrow which posts are reviewed while review is on: it never turns
+ * review on by itself, and everything it cannot decide is reviewed — no
+ * policy, an unreadable policy, an unknown mode, an empty category list, a
+ * post whose category or whose author's approved-post count is unknown.
+ *
+ * The narrowing must not be something the author can talk their way out of:
+ *
+ * - per_category sorts by the post type the author picked, so a post that
+ *   involves a customer (`context.involvesCustomer`: a customer name, a
+ *   required release, or a customer-story scenario) is reviewed whenever
+ *   deliveries are, whatever category its scenario maps to.
+ * - first_n counts only posts a manager APPROVED (`context.countApprovedPosts`,
+ *   called only for this mode). Counting every post would let a new person
+ *   leave review by creating N posts nobody looked at.
+ *
+ * `context.category` is the server-resolved brand category of the scenario.
+ */
+function initialApprovalStatus(dealer, context) {
+  if (!recordBool(dealer, "requires_approval")) return "n_a";
+  const policy = readApprovalPolicy(dealer);
+  if (!policy) return "pending";
+
+  if (policy.mode === "per_category") {
+    const categories = Array.isArray(policy.categories) ? policy.categories : [];
+    const category =
+      context && typeof context.category === "string" ? context.category : "";
+    if (!category || categories.length === 0) return "pending";
+    if (categories.indexOf(category) !== -1) return "pending";
+    if (
+      categories.indexOf("deliveries") !== -1 &&
+      (!context || context.involvesCustomer !== false)
+    ) {
+      return "pending";
+    }
+    return "n_a";
+  }
+
+  if (policy.mode === "first_n") {
+    const firstN = Number(policy.firstN);
+    if (!(firstN >= 1) || Math.floor(firstN) !== firstN) return "pending";
+    let approved = NaN;
+    try {
+      approved =
+        context && typeof context.countApprovedPosts === "function"
+          ? Number(context.countApprovedPosts())
+          : NaN;
+    } catch (_e) {
+      approved = NaN;
+    }
+    if (!(approved >= 0) || Math.floor(approved) !== approved) return "pending";
+    return approved < firstN ? "pending" : "n_a";
+  }
+
+  return "pending";
 }
 
 // The exact header that opens every canonical disclosure block. Mirrored in

@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   createVideoBlobUrl,
+  editSocialPostImage,
   editSocialPostTextDetailed,
   fetchVideoThroughProxy,
   generateFunSocialPostImage,
-  generatePlatformCaptionPack,
   generateSocialPost,
   generateSocialPostTextDetailed,
   generatePostVideo,
@@ -16,7 +16,6 @@ import {
   type GeneratedImageTextReview,
 } from "./geminiService";
 import { setProxyCapabilities } from "./proxyCapabilities";
-import { parsePlatformCaptionPack } from "./platformCopy";
 import { StyleOption, ToneOption, VideoStyle } from "../types";
 import {
   FLAGS,
@@ -1213,6 +1212,393 @@ describe("GeminiService model routing", () => {
     ).not.toBeNull();
   });
 
+  it("keeps the logo-restore and image review prompts byte-identical for a store with no logo corner", async () => {
+    // Recorded before logo placement reached generation: a store that never
+    // chose a corner gets exactly the restore and review wording it always got.
+    const bytes = new Uint8Array([1, 2, 3]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => ({
+          type: "image/png",
+          arrayBuffer: async () => bytes.buffer,
+        }),
+      })),
+    );
+    let reviewCalls = 0;
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse({
+          ...compliantImageTextReview,
+          logoPresent: reviewCalls > 1,
+          logoMatchesSuppliedAsset: reviewCalls > 1,
+        });
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        return Promise.resolve(generatedImageResponse("cmVuZGVy"));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+    const promptTexts = () =>
+      mockGenerateContent.mock.calls.flatMap(([request]) =>
+        (request.contents?.parts ?? [])
+          .map((part: { text?: string }) => part.text)
+          .filter((text: string | undefined): text is string => Boolean(text)),
+      );
+
+    for (const placement of [undefined, null]) {
+      mockGenerateContent.mockClear();
+      reviewCalls = 0;
+      await generateSocialPost(
+        "data:image/jpeg;base64,b3JpZ2luYWwtcGhvdG8=",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+        undefined,
+        "/api/files/dealers/dealer-id/logo.png",
+        undefined,
+        undefined,
+        "standard",
+        undefined,
+        true,
+        undefined,
+        undefined,
+        placement,
+      );
+      const texts = promptTexts();
+      const restore = texts.find((text) =>
+        text.includes("Use the supplied dealership logo"),
+      );
+      const review = texts.find((text) =>
+        text.includes("strict visual quality-control inspector"),
+      );
+      expect(restore).toBeDefined();
+      expect({ restore, review }).toMatchSnapshot();
+    }
+  });
+
+  describe("the store's logo corner", () => {
+    const placement = { corner: "top_left", scale: 0.25 } as const;
+    const LOGO_URL = "/api/files/dealers/dealer-id/logo.png";
+    const CORNER_WORDING =
+      "in the top-left corner, about 25% of the image width, inside a safe zone away from people";
+    let imageCalls = 0;
+    let reviews: GeneratedImageTextReview[] = [];
+    let reviewCalls = 0;
+
+    const stubLogoFetch = () => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          blob: async () => ({
+            type: "image/png",
+            arrayBuffer: async () => bytes.buffer,
+          }),
+        })),
+      );
+    };
+    const texts = (predicate: (request: any) => boolean) =>
+      mockGenerateContent.mock.calls
+        .filter(([request]) => predicate(request))
+        .flatMap(([request]) =>
+          (request.contents?.parts ?? [])
+            .map((part: { text?: string }) => part.text)
+            .filter((text: string | undefined): text is string => Boolean(text)),
+        );
+    const isImageRequest = (request: any) =>
+      request.generationConfig?.responseModalities?.includes("IMAGE") === true;
+
+    beforeEach(() => {
+      imageCalls = 0;
+      reviewCalls = 0;
+      reviews = [];
+      stubLogoFetch();
+      mockGenerateContent.mockImplementation((request) => {
+        if (isImageTextReviewRequest(request)) {
+          const review = reviews[Math.min(reviewCalls, reviews.length - 1)];
+          reviewCalls += 1;
+          return imageTextReviewResponse(review);
+        }
+        if (isImageRequest(request)) {
+          imageCalls += 1;
+          return Promise.resolve(generatedImageResponse(btoa(`render${imageCalls}`)));
+        }
+        return Promise.resolve({
+          text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+        });
+      });
+    });
+
+    const generateWithPlacement = (withLogo = true) =>
+      generateSocialPost(
+        "data:image/jpeg;base64,b3JpZ2luYWwtcGhvdG8=",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+        undefined,
+        withLogo ? LOGO_URL : undefined,
+        undefined,
+        undefined,
+        "standard",
+        undefined,
+        true,
+        undefined,
+        undefined,
+        placement,
+      );
+
+    it("asks for the corner and size, notes a miss, and never regenerates over it", async () => {
+      reviews = [
+        {
+          ...compliantImageTextReview,
+          logoPresent: true,
+          logoMatchesSuppliedAsset: true,
+          logoCorner: "bottom_right",
+        },
+      ];
+
+      const result = await generateWithPlacement();
+
+      // One render, one review: a logo in another corner costs nothing more.
+      expect(imageCalls).toBe(1);
+      expect(reviewCalls).toBe(1);
+      expect(result.image).toBe(`data:image/png;base64,${btoa("render1")}`);
+      expect(result.aiMeta.image).toMatchObject({ provider: "gemini" });
+      expect(result.aiMeta.image.logoCorner).toEqual({
+        requested: "top_left",
+        observed: "bottom_right",
+        matched: false,
+      });
+      const [imagePrompt] = texts(isImageRequest);
+      expect(imagePrompt).toContain(`place it ${CORNER_WORDING} AND still include`);
+      const [reviewPrompt] = texts(isImageTextReviewRequest);
+      expect(reviewPrompt).toContain(
+        "Set logoCorner to the corner of the image where that designed logo sits",
+      );
+      expect(reviewPrompt).toContain(
+        "never add a violation or change compliant because of it",
+      );
+      expect(reviewPrompt).toContain("hasCleanTypography, logoCorner. Never include");
+      // Prompt text only: both requests still pass the server's request policy
+      // unchanged (no new request field, same schema id).
+      const policies = loadPocketBaseRequestPolicies();
+      for (const [request] of mockGenerateContent.mock.calls.filter(
+        ([request]) => isImageRequest(request) || isImageTextReviewRequest(request),
+      )) {
+        expect(
+          policies.buildGeminiProxyRequest(
+            `v1beta/models/${request.model}:generateContent`,
+            {
+              contents: [request.contents],
+              generationConfig: request.generationConfig,
+            },
+            request.task,
+          ),
+          request.task,
+        ).not.toBeNull();
+      }
+    });
+
+    it("notes the corner the review saw on the render that ships after a logo restore", async () => {
+      reviews = [
+        {
+          ...compliantImageTextReview,
+          logoPresent: false,
+          logoMatchesSuppliedAsset: false,
+          logoCorner: "bottom_left",
+        },
+        {
+          ...compliantImageTextReview,
+          logoPresent: true,
+          logoMatchesSuppliedAsset: true,
+          logoCorner: "top_left",
+        },
+      ];
+
+      const result = await generateWithPlacement();
+
+      expect(imageCalls).toBe(2);
+      expect(result.image).toBe(`data:image/png;base64,${btoa("render2")}`);
+      expect(result.aiMeta.image.logoCorner).toEqual({
+        requested: "top_left",
+        observed: "top_left",
+        matched: true,
+      });
+      const restorePrompt = texts(isImageRequest).find((text) =>
+        text.includes("Use the supplied dealership logo"),
+      );
+      expect(restorePrompt).toContain(
+        `Use the supplied dealership logo (second attached image) ${CORNER_WORDING}. If an invented`,
+      );
+    });
+
+    it("tells the reviewer a large logo the store asked for never counts against the render", async () => {
+      // The store asked for a half-width logo. If the reviewer scored that as
+      // visual overload, the craft ladder would re-render twice and ask for
+      // the same size again, so the review prompt rules it out.
+      reviews = [
+        {
+          ...compliantImageTextReview,
+          logoPresent: true,
+          logoMatchesSuppliedAsset: true,
+          logoCorner: "bottom_left",
+        },
+      ];
+
+      const result = await generateSocialPost(
+        "data:image/jpeg;base64,b3JpZ2luYWwtcGhvdG8=",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+        undefined,
+        LOGO_URL,
+        undefined,
+        undefined,
+        "standard",
+        undefined,
+        true,
+        undefined,
+        undefined,
+        { corner: "bottom_left", scale: 0.5 },
+      );
+
+      expect(imageCalls).toBe(1);
+      expect(reviewCalls).toBe(1);
+      expect(result.aiMeta.image.logoCorner).toEqual({
+        requested: "bottom_left",
+        observed: "bottom_left",
+        matched: true,
+      });
+      const [reviewPrompt] = texts(isImageTextReviewRequest);
+      expect(reviewPrompt).toContain(
+        "- The store asked for its logo in the bottom-left corner, about 50% of the image width, inside a safe zone away from people. That position and size are the store's choice: they must never lower visualQualityScore, set isPlatformAppropriate=false, or add a violation.",
+      );
+      expect(reviewPrompt.length).toBeLessThanOrEqual(
+        MODEL_POLICY.requestLimits.maxPromptChars,
+      );
+    });
+
+    it("records an unknown corner when the review does not say", async () => {
+      reviews = [
+        {
+          ...compliantImageTextReview,
+          logoPresent: true,
+          logoMatchesSuppliedAsset: true,
+        },
+      ];
+
+      const result = await generateWithPlacement();
+
+      expect(imageCalls).toBe(1);
+      expect(result.aiMeta.image.logoCorner).toEqual({ requested: "top_left" });
+    });
+
+    it("asks nothing about a corner and notes nothing without an uploaded logo", async () => {
+      reviews = [{ ...compliantImageTextReview, logoCorner: "bottom_right" }];
+
+      const result = await generateWithPlacement(false);
+
+      expect(result.aiMeta.image.logoCorner).toBeUndefined();
+      const [imagePrompt] = texts(isImageRequest);
+      expect(imagePrompt).not.toContain("top-left corner");
+      const [reviewPrompt] = texts(isImageTextReviewRequest);
+      expect(reviewPrompt).not.toContain("logoCorner");
+    });
+
+    it("asks Fun mode and Edit image for the corner and reviews where the logo landed", async () => {
+      reviews = [
+        {
+          ...compliantImageTextReview,
+          isIllustrationOrCharacterRender: true,
+          logoPresent: true,
+          logoMatchesSuppliedAsset: true,
+          logoCorner: "top_left",
+        },
+      ];
+      await generateFunSocialPostImage(
+        "data:image/jpeg;base64,b3JpZ2luYWwtcGhvdG8=",
+        "Test Dealer",
+        LOGO_URL,
+        "pixar",
+        "standard",
+        undefined,
+        undefined,
+        undefined,
+        placement,
+      );
+      expect(texts(isImageRequest)[0]).toContain(
+        `- Place the store logo ${CORNER_WORDING}`,
+      );
+      expect(texts(isImageTextReviewRequest)[0]).toContain("Set logoCorner");
+      expect(imageCalls).toBe(1);
+
+      mockGenerateContent.mockClear();
+      imageCalls = 0;
+      await editSocialPostImage(
+        "data:image/png;base64,cmVuZGVy",
+        "Make the sky a deeper blue",
+        "Test Dealer",
+        LOGO_URL,
+        "standard",
+        undefined,
+        undefined,
+        placement,
+      );
+      expect(texts(isImageRequest)[0]).toContain(
+        `The dealership logo must remain visible ${CORNER_WORDING}.`,
+      );
+      expect(texts(isImageTextReviewRequest)[0]).toContain("Set logoCorner");
+      expect(imageCalls).toBe(1);
+    });
+
+    it("reads an odd corner answer as unknown without failing the review", async () => {
+      const logoReferenceImagePart = {
+        inlineData: { mimeType: "image/png", data: "bG9nbw==" },
+      };
+      const reviewWith = async (logoCorner: unknown) => {
+        mockGenerateContent.mockImplementation(() =>
+          Promise.resolve({
+            text: () =>
+              JSON.stringify({
+                ...compliantImageTextReview,
+                logoPresent: true,
+                logoCorner,
+              }),
+          }),
+        );
+        return reviewGeneratedImageText(
+          "data:image/png;base64,cmVuZGVy",
+          "Test Dealer",
+          {
+            logoSupplied: true,
+            logoReferenceImagePart,
+            logoPlacement: placement,
+          },
+        );
+      };
+
+      for (const odd of [42, "center", { corner: "top_left" }, null]) {
+        const review = await reviewWith(odd);
+        expect(review.compliant, JSON.stringify(odd)).toBe(true);
+        expect(review.violations).toEqual([]);
+        expect(review).not.toHaveProperty("logoCorner");
+      }
+      const spelled = await reviewWith("Lower Right");
+      expect(spelled.logoCorner).toBe("bottom_right");
+      // A miss is a note, never a finding.
+      expect(spelled.compliant).toBe(true);
+      expect(spelled.violations).toEqual([]);
+    });
+  });
+
   it("ships the styled render when a supplied logo is still missing after one repair", async () => {
     // The dealer's own logo drawn wrong (or not at all) is a brand-polish
     // finding about a render that already passed identity review. One repair
@@ -1456,10 +1842,10 @@ describe("GeminiService model routing", () => {
   it("retries in prose mode when the proxy predates the schema registry", async () => {
     // A server without the response-schema registry sees `responseMimeType`
     // and `schemaId` as unknown generationConfig keys and answers 400. The
-    // retry must reuse the same model and prompt, and the kept heuristic
-    // parser must still recover the pack.
+    // retry must reuse the same model and prompt, and return the prose answer
+    // for the caller's own parser.
     const proseAnswer =
-      '```json\n{"captions":[{"platformId":"tiktok","caption":"TikTok body"}]}\n```';
+      '```json\n{"title":"Community update","body":"A private community update for review.","altText":"A dealership community image.","category":"community","privacyFlags":[]}\n```';
     mockGenerateContent.mockImplementation((request) => {
       if (request.generationConfig?.schemaId) {
         return Promise.reject(
@@ -1469,20 +1855,15 @@ describe("GeminiService model routing", () => {
       return Promise.resolve({ text: () => proseAnswer });
     });
 
-    const raw = await generatePlatformCaptionPack(
+    const raw = await generateWebsiteDraftMetadata(
       "data:image/jpeg;base64,source-photo",
-      "Return the caption pack.",
-      undefined,
-      false,
+      "Return the website metadata JSON.",
     );
 
     expect(raw).toBe(proseAnswer);
-    expect(parsePlatformCaptionPack(raw, ["tiktok"])).toEqual({
-      tiktok: "TikTok body",
-    });
     const calls = mockGenerateContent.mock.calls;
     expect(calls).toHaveLength(2);
-    expect(calls[0]?.[0].generationConfig.schemaId).toBe("caption_pack_v1");
+    expect(calls[0]?.[0].generationConfig.schemaId).toBe("website_draft_v1");
     // Same model: the structured retry is not a fallback-chain step.
     expect(calls[1]?.[0].model).toBe(calls[0]?.[0].model);
     expect(calls[1]?.[0].generationConfig).not.toHaveProperty("schemaId");
@@ -1500,40 +1881,6 @@ describe("GeminiService model routing", () => {
     expect(mockGenerateContent.mock.calls[0]?.[0].generationConfig).not.toHaveProperty(
       "schemaId",
     );
-  });
-
-  it("preserves structured caption-pack JSON and binds it to the public customer label", async () => {
-    const structured = JSON.stringify({
-      facebook_feed: "Congratulations to Lisa at Test Dealer.",
-      instagram_feed: "Lisa's delivery day at Test Dealer. #TestDealer",
-    });
-    mockGenerateContent.mockResolvedValueOnce({ text: () => structured });
-
-    const raw = await generatePlatformCaptionPack(
-      "data:image/jpeg;base64,source-photo",
-      'Return JSON with keys ["facebook_feed","instagram_feed"].',
-      "Lisa Marie Sample",
-      true,
-    );
-
-    expect(raw).toBe(structured);
-    expect(parsePlatformCaptionPack(raw, ["facebook_feed", "instagram_feed"])).toEqual({
-      facebook_feed: "Congratulations to Lisa at Test Dealer.",
-      instagram_feed: "Lisa's delivery day at Test Dealer. #TestDealer",
-    });
-    const requestParts = mockGenerateContent.mock.calls[0]?.[0].contents
-      .parts as Array<{
-      text?: string;
-      inlineData?: unknown;
-    }>;
-    // Text-first ordering: the shared prompt precedes the per-post image bytes.
-    expect(requestParts[0]).toHaveProperty("text");
-    expect(requestParts[1]).toHaveProperty("inlineData");
-    const requestPrompt = requestParts[0].text as string;
-    expect(requestPrompt).toContain(
-      'the only customer label allowed in any value is exactly "Lisa"',
-    );
-    expect(requestPrompt).not.toContain("Lisa Marie Sample");
   });
 
   it("forwards the selected primary canvas as a Gemini image aspect ratio", async () => {

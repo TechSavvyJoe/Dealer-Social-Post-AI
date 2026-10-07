@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   appendDisclosureText,
   buildCopyText,
@@ -7,7 +7,15 @@ import {
   effectivePackFor,
   withPackEdit,
 } from "./deliveryCaptions";
-import type { CaptionIdentityContext } from "../utils/postLocks";
+import { checkCaptionIdentity, type CaptionIdentityContext } from "../utils/postLocks";
+import { applyDealerBrandKit } from "../utils/brandKit";
+
+// The real identity guard, watched, so a test can read the exact text it was
+// asked to judge. Every other test gets its real verdicts.
+vi.mock("../utils/postLocks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../utils/postLocks")>();
+  return { ...actual, checkCaptionIdentity: vi.fn(actual.checkCaptionIdentity) };
+});
 
 const DEALER = { id: "dealer-1", name: "Bob Maxey Ford of Howell" };
 
@@ -365,7 +373,7 @@ describe("buildShareCaptions", () => {
 });
 
 describe("buildCopyText", () => {
-  it("attributes, scans, prepends the disclosure, then appends the footer", () => {
+  it("scans, adds the page tag, prepends the disclosure, then appends the footer", () => {
     const dealer = {
       ...DEALER,
       employee_disclosure_text: "Posted by a {dealer} team member.",
@@ -409,5 +417,208 @@ describe("buildCopyText", () => {
     });
     expect(result.blockedReason).toBeUndefined();
     expect(result.text).toContain("Big smiles today!");
+  });
+});
+
+/**
+ * The page tag is added after the compliance scan. The scan's brand-kit pass
+ * reads hashtags from the last line only, so scanning a caption that already
+ * ended in "@Tag" wrote a second line of filler hashtags under the tag.
+ */
+describe("the page tag closes the caption, after its one hashtag line", () => {
+  const TAGGED = {
+    ...DEALER,
+    facebook_page_tag: "BobMaxeyFordHowell",
+    instagram_handle: "bobmaxeyford",
+  };
+  // What generation stores: the body, then the brand kit's one hashtag line.
+  const GENERATED = applyDealerBrandKit(
+    "Congratulations on your new SUV! Thank you for choosing Bob Maxey Ford of Howell. We loved helping you find the right one, and we hope you enjoy every mile.",
+    { name: TAGGED.name, default_hashtags: "#HowellMI" },
+    true,
+  );
+  const hashtagLines = (text: string) =>
+    text.split("\n").filter((line) => /^#\w+(?:\s+#\w+)*$/.test(line.trim()));
+  const hashtags = (text: string) =>
+    (text.match(/#\w+/g) || []).map((tag) => tag.toLowerCase());
+
+  it("starts from one hashtag line (the fixture is what generation stores)", () => {
+    expect(hashtagLines(GENERATED)).toHaveLength(1);
+  });
+
+  it.each([
+    ["facebook_feed", "@BobMaxeyFordHowell"],
+    ["marketplace", "@BobMaxeyFordHowell"],
+    ["instagram_feed", "@bobmaxeyford"],
+  ])(
+    "share caption for %s: one hashtag line, no tag repeated, page tag last",
+    (id, tag) => {
+      const out = buildShareCaptions({
+        effectivePack: { [id]: GENERATED },
+        activeCaptionPlatform: null,
+        editedText: GENERATED,
+        dealer: TAGGED,
+        bannedPhrases: undefined,
+        deliveryLanguageAllowed: true,
+        identity: permissiveIdentity,
+        identityBlockedMessage: "blocked",
+        bodyEditSupersedesPack: true,
+      });
+      const text = out?.[id]?.text || "";
+      expect(hashtagLines(text)).toHaveLength(1);
+      expect(new Set(hashtags(text)).size).toBe(hashtags(text).length);
+      expect(text.endsWith(`\n\n${tag}`)).toBe(true);
+      expect(text.split(tag)).toHaveLength(2);
+      expect(out?.[id]?.blockedReason).toBeUndefined();
+    },
+  );
+
+  it("copy text: disclosure, body, one hashtag line, then the page tag", () => {
+    const result = buildCopyText({
+      editedText: GENERATED,
+      copyDestinationId: "facebook_feed",
+      dealer: TAGGED,
+      bannedPhrases: undefined,
+      deliveryLanguageAllowed: true,
+    });
+    expect(result.blockedReason).toBeUndefined();
+    expect(
+      result.text.startsWith("Posted by a Bob Maxey Ford of Howell team member.\n\n"),
+    ).toBe(true);
+    expect(hashtagLines(result.text)).toHaveLength(1);
+    expect(new Set(hashtags(result.text)).size).toBe(hashtags(result.text).length);
+    expect(result.text.endsWith("\n\n@BobMaxeyFordHowell")).toBe(true);
+  });
+
+  it("keeps the disclosures block after the page tag", () => {
+    const result = buildCopyText({
+      editedText: `Drive home with 4.9% APR today!\n${hashtagLines(GENERATED)[0]}`,
+      copyDestinationId: "facebook_feed",
+      dealer: TAGGED,
+      bannedPhrases: undefined,
+      deliveryLanguageAllowed: true,
+    });
+    const [beforeBlock] = result.text.split("— Disclosures —");
+    expect(beforeBlock.trimEnd().endsWith("@BobMaxeyFordHowell")).toBe(true);
+    expect(hashtagLines(beforeBlock)).toHaveLength(1);
+  });
+
+  const shareOne = (id: string, caption: string, dealer = TAGGED) =>
+    buildShareCaptions({
+      effectivePack: { [id]: caption },
+      activeCaptionPlatform: null,
+      editedText: caption,
+      dealer,
+      bannedPhrases: undefined,
+      deliveryLanguageAllowed: true,
+      identity: permissiveIdentity,
+      identityBlockedMessage: "blocked",
+      bodyEditSupersedesPack: true,
+    })?.[id];
+  const copyFor = (id: string | undefined, caption: string) =>
+    buildCopyText({
+      editedText: caption,
+      copyDestinationId: id,
+      dealer: TAGGED,
+      bannedPhrases: undefined,
+      deliveryLanguageAllowed: true,
+    });
+  const count = (text: string, part: string) =>
+    text.toLowerCase().split(part.toLowerCase()).length - 1;
+
+  // A salesperson typed the tag, or pasted a shared caption back in. The scan
+  // reads hashtags from the last line only, so a tag left there turned the
+  // real hashtag line into prose and got a filler line written under the tag.
+  it("does not add the tag again when the caption already carries it", () => {
+    const already = `${GENERATED}\n\n@BobMaxeyFordHowell`;
+    const text = shareOne("facebook_feed", already)?.text || "";
+    expect(text.split("@BobMaxeyFordHowell")).toHaveLength(2);
+    expect(hashtagLines(text)).toHaveLength(1);
+    expect(new Set(hashtags(text)).size).toBe(hashtags(text).length);
+    expect(text.endsWith(`${hashtagLines(GENERATED)[0]}\n\n@BobMaxeyFordHowell`)).toBe(
+      true,
+    );
+  });
+
+  it("copy text: a caption already closing with the tag keeps one hashtag line", () => {
+    const result = copyFor("facebook_feed", `${GENERATED}\n\n@BobMaxeyFordHowell`);
+    expect(result.blockedReason).toBeUndefined();
+    expect(result.text.split("@BobMaxeyFordHowell")).toHaveLength(2);
+    expect(hashtagLines(result.text)).toHaveLength(1);
+    expect(new Set(hashtags(result.text)).size).toBe(hashtags(result.text).length);
+    expect(result.text.endsWith("\n\n@BobMaxeyFordHowell")).toBe(true);
+  });
+
+  it("copy text with no destination keeps the typed tag and one hashtag line", () => {
+    const result = copyFor(undefined, `${GENERATED}\n\n@BobMaxeyFordHowell`);
+    expect(result.text.split("@BobMaxeyFordHowell")).toHaveLength(2);
+    expect(hashtagLines(result.text)).toHaveLength(1);
+    expect(result.text.endsWith("\n\n@BobMaxeyFordHowell")).toBe(true);
+  });
+
+  it("matches the typed tag whatever its case, and still tags once", () => {
+    const text =
+      shareOne("facebook_feed", `${GENERATED}\n@bobmaxeyfordhowell`)?.text || "";
+    expect(count(text, "@BobMaxeyFordHowell")).toBe(1);
+    expect(hashtagLines(text)).toHaveLength(1);
+    expect(text.endsWith("\n\n@bobmaxeyfordhowell")).toBe(true);
+  });
+
+  // One caption on screen feeds every channel, so the Facebook tag a
+  // salesperson typed also reaches the Instagram scan.
+  it("Instagram: keeps a typed Facebook tag, one hashtag line, its own handle last", () => {
+    const text =
+      shareOne("instagram_feed", `${GENERATED}\n\n@BobMaxeyFordHowell`)?.text || "";
+    expect(hashtagLines(text)).toHaveLength(1);
+    expect(new Set(hashtags(text)).size).toBe(hashtags(text).length);
+    expect(count(text, "@BobMaxeyFordHowell")).toBe(1);
+    expect(text.endsWith("\n\n@BobMaxeyFordHowell\n\n@bobmaxeyford")).toBe(true);
+  });
+
+  it("never drops anyone else's @handle on the last line", () => {
+    const text = shareOne("facebook_feed", `${GENERATED}\n\n@SomeoneElse`)?.text || "";
+    expect(count(text, "@SomeoneElse")).toBe(1);
+    expect(text.endsWith("\n\n@BobMaxeyFordHowell")).toBe(true);
+  });
+
+  it("leaves a caption that is only the tag whole", () => {
+    const text = shareOne("facebook_feed", "@BobMaxeyFordHowell")?.text || "";
+    expect(count(text, "@BobMaxeyFordHowell")).toBe(1);
+  });
+
+  it("still scans the body when the caption closes with the tag", () => {
+    const financed = shareOne(
+      "facebook_feed",
+      "Drive home with 4.9% APR today!\n\n@BobMaxeyFordHowell",
+    );
+    expect(financed?.disclosures).toContain("Financing subject to credit approval");
+    expect(financed?.text.endsWith("\n\n@BobMaxeyFordHowell")).toBe(true);
+
+    const claim =
+      "Guaranteed approval for everyone, no credit check!\n\n@BobMaxeyFordHowell";
+    expect(shareOne("facebook_feed", claim)?.blockedReason).toContain(
+      "prohibited advertising claim",
+    );
+    expect(copyFor("facebook_feed", claim).blockedReason).toContain(
+      "prohibited advertising claim",
+    );
+  });
+
+  // The identity guard must judge what is posted: the disclosure the delivery
+  // path prefixes, then the body, then the page tag.
+  it.each([
+    ["facebook_feed", "@BobMaxeyFordHowell", GENERATED],
+    ["instagram_feed", "@bobmaxeyford", GENERATED],
+    ["facebook_feed", "@BobMaxeyFordHowell", `${GENERATED}\n\n@BobMaxeyFordHowell`],
+  ])("the identity check reads the whole %s caption, ending %s", (id, tag, caption) => {
+    const judge = vi.mocked(checkCaptionIdentity);
+    judge.mockClear();
+    const out = shareOne(id, caption);
+    expect(judge).toHaveBeenCalledTimes(1);
+    const [judged] = judge.mock.calls[0];
+    expect(judged).toBe(
+      `Posted by a Bob Maxey Ford of Howell team member.\n\n${out?.text}`,
+    );
+    expect(judged.endsWith(`\n\n${tag}`)).toBe(true);
   });
 });

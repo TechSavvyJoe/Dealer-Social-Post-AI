@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PLATFORM_LIMITS, evaluate } from "../utils/platformLimits";
-import { fitPublishCaptionToBudget } from "../services/publishTargets";
+import { PUBLISH_TARGETS, fitPublishCaptionToBudget } from "../services/publishTargets";
+import { buildShareCaptions } from "../services/deliveryCaptions";
+import { outboundPreviewParts } from "../components/post/PostPreviewCard";
+import type { Dealer } from "../types";
 import {
   CANONICAL_DISCLOSURE_HEADER,
   DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE,
@@ -243,6 +246,442 @@ describe("the disclosure survives the caption sanitizer", () => {
 });
 
 /**
+ * Source pins for the live posting screen. Disclosure text never lives in the
+ * editable caption; it reaches every outgoing caption only through this
+ * wiring, and the preview has to show exactly what ships:
+ *
+ *   PostScreen.tsx      buildShareCaptions({ ..., bodyEditSupersedesPack: true })
+ *                       -> selectedCaption -> shareContent { text, disclosures:
+ *                       selectedCaption?.disclosures || captionSetAnalysis.disclosures,
+ *                       requiredPrefix: employeeDisclosure || undefined }
+ *                       -> usePostShare({ content: shareContent })
+ *                       -> <PostPreviewCard outboundText employeeDisclosure disclosures />
+ *   PostPreviewCard.tsx outboundPreviewParts(outboundText, employeeDisclosure, disclosures)
+ *                       -> prefix, body, disclosures block
+ *
+ * `requiredPrefix` is the one channel the fitter (fitPublishCaptionToBudget)
+ * uses to put the team-member disclosure first and protect it from
+ * truncation, so dropping it removes the disclosure from every share.
+ * `disclosures` is the one channel for the compliance block (financing, lease
+ * terms): the selected caption's own scan first, and when that found none,
+ * the scan of the whole caption set. That set starts with the caption on
+ * screen, so the fallback can only add a disclosure, never lose one the
+ * shipped text needs (decided 2026-10-06; this guard is the oracle).
+ */
+type WiringSources = {
+  postScreen: string;
+  previewCard: string;
+  deliveryCaptions: string;
+};
+
+const WIRING_FILES: Record<keyof WiringSources, string> = {
+  postScreen: "components/PostScreen.tsx",
+  previewCard: "components/post/PostPreviewCard.tsx",
+  deliveryCaptions: "services/deliveryCaptions.ts",
+};
+
+const readWiringSources = (): WiringSources => ({
+  postScreen: readFileSync(resolve(process.cwd(), WIRING_FILES.postScreen), "utf8"),
+  previewCard: readFileSync(resolve(process.cwd(), WIRING_FILES.previewCard), "utf8"),
+  deliveryCaptions: readFileSync(
+    resolve(process.cwd(), WIRING_FILES.deliveryCaptions),
+    "utf8",
+  ),
+});
+
+/**
+ * The text from `start` through the first `end` after it, or "" when either is
+ * missing, so each pin reads only the call or element it is about and never a
+ * look-alike elsewhere in the file.
+ */
+const sliceAt = (source: string, from: number, start: string, end: string): string => {
+  const to = source.indexOf(end, from + start.length);
+  return to < 0 ? "" : source.slice(from, to + end.length);
+};
+
+const sliceFrom = (source: string, start: string, end: string): string => {
+  const from = source.indexOf(start);
+  return from < 0 ? "" : sliceAt(source, from, start, end);
+};
+
+/**
+ * Every `start` ... `end` slice in the file, for calls and elements that can
+ * appear more than once. Checking only the first one lets a second copy (a
+ * phone/desktop split of the preview, a second share hook) wire the editable
+ * body while the guard reads the first and stays green. There must be at
+ * least one site, and every site must hold.
+ */
+const everySite = (
+  source: string,
+  start: string,
+  end: string,
+  holds: (site: string) => boolean,
+): boolean => {
+  const sites: string[] = [];
+  for (
+    let at = source.indexOf(start);
+    at >= 0;
+    at = source.indexOf(start, at + start.length)
+  ) {
+    sites.push(sliceAt(source, at, start, end));
+  }
+  return sites.length > 0 && sites.every(holds);
+};
+
+const shareContentMemo = (source: string) =>
+  sliceFrom(source, "const shareContent = useMemo(", "}),");
+const captionAnalysisMemo = (source: string) =>
+  sliceFrom(source, "const captionAnalysis = useMemo(", "]");
+const captionSetAnalysisMemo = (source: string) =>
+  sliceFrom(source, "const captionSetAnalysis = useMemo(", "]");
+
+const PIN = {
+  oneCaption: "every channel ships from the one caption on screen",
+  scannedText: "the shared text is the selected channel's scanned caption",
+  requiredPrefix: "the team-member disclosure rides as the required prefix",
+  disclosures: "the compliance disclosures ride with the shared text",
+  delivered: "the share hook delivers that content",
+  previewProps: "the preview is handed what ships",
+  previewSplit: "the preview splits the outbound text",
+  previewRender: "the preview renders every outbound part, in the order it ships",
+  deliveredCaptionFor: "deliveredCaptionFor prepends after appending the disclosures",
+} as const;
+
+const DELIVERED_STRING_PINS: ReadonlyArray<{
+  id: (typeof PIN)[keyof typeof PIN];
+  file: keyof WiringSources;
+  holds: (source: string) => boolean;
+}> = [
+  {
+    // A per-channel AI variant the salesperson never saw must not ship.
+    id: PIN.oneCaption,
+    file: "postScreen",
+    holds: (s) =>
+      everySite(s, "buildShareCaptions({", "})", (call) =>
+        /\bbodyEditSupersedesPack:\s*true\b/.test(call),
+      ),
+  },
+  {
+    // The compliance scan and attribution run in buildShareCaptions; the raw
+    // editable body skips them. PostScreen gives every channel an entry, so
+    // the fallback is reached only when buildShareCaptions has no text for
+    // the selected channel, and it is the body run through
+    // analyzeCaptionForDelivery, never the body itself. An emptied caption
+    // shares nothing (Share then asks for a caption), never the brand-kit
+    // filler that analyzeCaptionForDelivery writes for an empty body.
+    id: PIN.scannedText,
+    file: "postScreen",
+    holds: (s) =>
+      /const selectedCaption = shareCaptions\?\.\[selectedChannelId\];/.test(s) &&
+      /\btext:\s*caption\.trim\(\)\s*\?\s*selectedCaption\?\.text\s*\|\|\s*captionAnalysis\.caption\s*:\s*""\s*,/.test(
+        shareContentMemo(s),
+      ) &&
+      /^const captionAnalysis = useMemo\(\s*\(\)\s*=>\s*analyzeCaptionForDelivery\(\s*caption\s*,/.test(
+        captionAnalysisMemo(s),
+      ),
+  },
+  {
+    id: PIN.requiredPrefix,
+    file: "postScreen",
+    holds: (s) =>
+      /const employeeDisclosure = useMemo\(\s*\(\) => buildEmployeeDisclosure\(currentDealer\)/.test(
+        s,
+      ) &&
+      /\brequiredPrefix:\s*employeeDisclosure\s*\|\|\s*undefined\s*,/.test(
+        shareContentMemo(s),
+      ),
+  },
+  {
+    // The selected caption's own disclosures win; the fallback is the scan of
+    // the caption set, which must include the caption on screen.
+    id: PIN.disclosures,
+    file: "postScreen",
+    holds: (s) =>
+      /\bdisclosures:\s*selectedCaption\?\.disclosures\s*\|\|\s*captionSetAnalysis\.disclosures\s*\|\|\s*undefined\s*,/.test(
+        shareContentMemo(s),
+      ) &&
+      /^const captionSetAnalysis = useMemo\(\s*\(\)\s*=>\s*analyzeCaptionSetForDelivery\(\s*\[\s*caption\s*,/.test(
+        captionSetAnalysisMemo(s),
+      ),
+  },
+  {
+    id: PIN.delivered,
+    file: "postScreen",
+    holds: (s) =>
+      everySite(s, "usePostShare({", "});", (call) =>
+        /\bcontent:\s*shareContent\s*,/.test(call),
+      ),
+  },
+  {
+    id: PIN.previewProps,
+    file: "postScreen",
+    holds: (s) =>
+      everySite(s, "<PostPreviewCard", "/>", (element) =>
+        [
+          "outboundText={shareContent.text}",
+          "employeeDisclosure={employeeDisclosure}",
+          "disclosures={shareContent.disclosures}",
+        ].every((prop) => element.includes(prop)),
+      ),
+  },
+  {
+    id: PIN.previewSplit,
+    file: "previewCard",
+    holds: (s) =>
+      /const parts = outboundPreviewParts\(\s*outboundText,\s*employeeDisclosure,\s*disclosures,?\s*\)/.test(
+        s,
+      ),
+  },
+  {
+    id: PIN.previewRender,
+    file: "previewCard",
+    holds: (s) => {
+      const view = sliceFrom(s, 'data-testid="post-outbound-preview"', "</div>");
+      const present = [
+        /\{parts\.prefix\}/,
+        /data-outbound-part="body"[^>]*>\s*\{parts\.body\}\s*<\/p>/,
+        /\{parts\.disclosureBlock\}/,
+      ].every((part) => part.test(view));
+      // Same order as fitPublishCaptionToBudget: prefix, body, disclosures.
+      const order = ["{parts.prefix}", "{parts.body}", "{parts.disclosureBlock}"].map(
+        (part) => view.indexOf(part),
+      );
+      return present && order[0] < order[1] && order[1] < order[2];
+    },
+  },
+  {
+    // Body + compliance footer first, then the protected prefix in front.
+    id: PIN.deliveredCaptionFor,
+    file: "deliveryCaptions",
+    holds: (s) =>
+      /prependEmployeeDisclosure\(\s*appendDisclosureText\(\s*editedText,\s*disclosures\s*\),\s*dealer,?\s*\)/.test(
+        sliceFrom(s, "export const deliveredCaptionFor = (", ";"),
+      ),
+  },
+];
+
+/**
+ * The pins read code, not comments. A line switched off with `//` and left
+ * beside its replacement still spells the old wiring, and a raw-text pin
+ * would find it there and stay green. Same idiom as
+ * backendCompliancePolicy.test.ts: `://` survives so a URL is not cut short.
+ */
+const withoutComments = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+const deliveredStringWiringFaults = (sources: WiringSources): string[] =>
+  DELIVERED_STRING_PINS.filter(
+    (pin) => !pin.holds(withoutComments(sources[pin.file])),
+  ).map((pin) => pin.id);
+
+const DELIVERED_STRING_MUTANTS: ReadonlyArray<{
+  regression: string;
+  file: keyof WiringSources;
+  from: string;
+  to: string;
+  fault: (typeof PIN)[keyof typeof PIN];
+}> = [
+  {
+    regression: "drops the required prefix",
+    file: "postScreen",
+    from: "requiredPrefix: employeeDisclosure || undefined,",
+    to: "",
+    fault: PIN.requiredPrefix,
+  },
+  {
+    regression: "drops the compliance disclosures",
+    file: "postScreen",
+    from: "disclosures:\n        selectedCaption?.disclosures || captionSetAnalysis.disclosures || undefined,",
+    to: "",
+    fault: PIN.disclosures,
+  },
+  {
+    regression: "ships only the stale variants' disclosures",
+    file: "postScreen",
+    from: "selectedCaption?.disclosures || captionSetAnalysis.disclosures",
+    to: "captionSetAnalysis.disclosures",
+    fault: PIN.disclosures,
+  },
+  {
+    regression: "falls back to a scan that leaves out the caption on screen",
+    file: "postScreen",
+    from: "[caption, ...Object.values(effectivePack || {})]",
+    to: "[...Object.values(effectivePack || {})]",
+    fault: PIN.disclosures,
+  },
+  {
+    regression: "ships each channel's saved AI variant",
+    file: "postScreen",
+    from: "bodyEditSupersedesPack: true",
+    to: "bodyEditSupersedesPack: false",
+    fault: PIN.oneCaption,
+  },
+  {
+    regression: "shares the raw editable body",
+    file: "postScreen",
+    from: 'text: caption.trim() ? selectedCaption?.text || captionAnalysis.caption : ""',
+    to: "text: caption",
+    fault: PIN.scannedText,
+  },
+  {
+    // Reached when buildShareCaptions has no text for the selected channel.
+    regression: "falls back to the raw editable body",
+    file: "postScreen",
+    from: "|| captionAnalysis.caption :",
+    to: "|| caption :",
+    fault: PIN.scannedText,
+  },
+  {
+    // analyzeCaptionForDelivery("") writes brand-kit prose and hashtags, so
+    // an emptied caption would ship filler with no page tag.
+    regression: "shares brand-kit filler for an emptied caption",
+    file: "postScreen",
+    from: 'text: caption.trim() ? selectedCaption?.text || captionAnalysis.caption : "",',
+    to: "text: selectedCaption?.text || captionAnalysis.caption,",
+    fault: PIN.scannedText,
+  },
+  {
+    regression: "keeps the fallback's name but stops scanning it",
+    file: "postScreen",
+    from: "const captionAnalysis = useMemo(",
+    to: "const captionAnalysis = useMemo(() => ({ caption }), [caption]);\n  const scannedCaption = useMemo(",
+    fault: PIN.scannedText,
+  },
+  {
+    regression: "builds a second caption set that keeps each channel's AI variant",
+    file: "postScreen",
+    from: "const selectedCaption = shareCaptions?.[selectedChannelId];",
+    to: "const variantCaptions = buildShareCaptions({ effectivePack, editedText: caption, bodyEditSupersedesPack: false });\n  const selectedCaption = shareCaptions?.[selectedChannelId];",
+    fault: PIN.oneCaption,
+  },
+  {
+    regression: "hands the share hook a prefix-less copy",
+    file: "postScreen",
+    from: "content: shareContent,",
+    to: "content: { ...shareContent, requiredPrefix: undefined },",
+    fault: PIN.delivered,
+  },
+  {
+    // After the real call, so a first-site-only read would still pass.
+    regression: "adds a second share hook that delivers the editable body",
+    file: "postScreen",
+    from: "const leaveGuard = usePostLeaveGuard({",
+    to: "const bodyShare = usePostShare({ post, content: { text: caption } });\n  const leaveGuard = usePostLeaveGuard({",
+    fault: PIN.delivered,
+  },
+  {
+    regression: "previews the editable body",
+    file: "postScreen",
+    from: "outboundText={shareContent.text}",
+    to: "outboundText={caption}",
+    fault: PIN.previewProps,
+  },
+  {
+    // A phone/desktop split: the first element is untouched and the second
+    // previews the body, so a first-site-only read would still pass.
+    regression: "adds a second preview that shows the editable body",
+    file: "postScreen",
+    from: "onCaptionBlur={() => setEditingCaption(false)}",
+    to: "onCaptionBlur={() => setEditingCaption(false)}\n          />\n          <PostPreviewCard\n            outboundText={caption}\n            employeeDisclosure={employeeDisclosure}\n            disclosures={shareContent.disclosures}",
+    fault: PIN.previewProps,
+  },
+  {
+    regression: "splits the editable body inside the preview",
+    file: "previewCard",
+    from: "outboundPreviewParts(outboundText,",
+    to: "outboundPreviewParts(caption,",
+    fault: PIN.previewSplit,
+  },
+  {
+    regression: "renders the editable body in the outbound view",
+    file: "previewCard",
+    from: "{parts.body}",
+    to: "{caption}",
+    fault: PIN.previewRender,
+  },
+  {
+    regression: "prepends before appending the disclosures",
+    file: "deliveryCaptions",
+    from: "prependEmployeeDisclosure(appendDisclosureText(editedText, disclosures), dealer)",
+    to: "appendDisclosureText(prependEmployeeDisclosure(editedText, dealer), disclosures)",
+    fault: PIN.deliveredCaptionFor,
+  },
+];
+
+/**
+ * The same regressions made the way a line usually gets switched off in a
+ * refactor: the old wiring stays behind as a comment beside its replacement.
+ * Every row except the rendered-parts one (whose pin already needs the
+ * expression right after the tag) went green before the pins read the source
+ * with comments removed.
+ */
+const COMMENTED_OUT_MUTANTS: typeof DELIVERED_STRING_MUTANTS = [
+  {
+    regression: "comments out the required prefix",
+    file: "postScreen",
+    from: "requiredPrefix: employeeDisclosure || undefined,",
+    to: "// requiredPrefix: employeeDisclosure || undefined,",
+    fault: PIN.requiredPrefix,
+  },
+  {
+    regression: "comments out the compliance disclosures",
+    file: "postScreen",
+    from: "disclosures:\n        selectedCaption?.disclosures || captionSetAnalysis.disclosures || undefined,",
+    to: "// disclosures: selectedCaption?.disclosures || captionSetAnalysis.disclosures || undefined,",
+    fault: PIN.disclosures,
+  },
+  {
+    regression: "comments out the one-caption rule",
+    file: "postScreen",
+    from: "bodyEditSupersedesPack: true,",
+    to: "// bodyEditSupersedesPack: true,",
+    fault: PIN.oneCaption,
+  },
+  {
+    regression: "comments out the scanned caption and shares the body",
+    file: "postScreen",
+    from: 'text: caption.trim() ? selectedCaption?.text || captionAnalysis.caption : "",',
+    to: '// text: caption.trim() ? selectedCaption?.text || captionAnalysis.caption : "",\n      text: caption,',
+    fault: PIN.scannedText,
+  },
+  {
+    regression: "comments out the delivered content and hands over a copy",
+    file: "postScreen",
+    from: "content: shareContent,",
+    to: "// content: shareContent,\n    content: { text: caption, imageDataUrl: post.image },",
+    fault: PIN.delivered,
+  },
+  {
+    regression: "comments out the outbound preview prop and previews the body",
+    file: "postScreen",
+    from: "outboundText={shareContent.text}",
+    to: "// outboundText={shareContent.text}\n            outboundText={caption}",
+    fault: PIN.previewProps,
+  },
+  {
+    regression: "comments out the outbound split and splits the body",
+    file: "previewCard",
+    from: "const parts = outboundPreviewParts(outboundText, employeeDisclosure, disclosures);",
+    to: '// const parts = outboundPreviewParts(outboundText, employeeDisclosure, disclosures);\n  const parts = outboundPreviewParts(caption, "", undefined);',
+    fault: PIN.previewSplit,
+  },
+  {
+    regression: "comments out the rendered body and renders the editable one",
+    file: "previewCard",
+    from: "{parts.body}",
+    to: "{/* {parts.body} */}{caption}",
+    fault: PIN.previewRender,
+  },
+  {
+    regression: "comments out the delivered order and prepends first",
+    file: "deliveryCaptions",
+    from: "prependEmployeeDisclosure(appendDisclosureText(editedText, disclosures), dealer)",
+    to: "// prependEmployeeDisclosure(appendDisclosureText(editedText, disclosures), dealer)\n  appendDisclosureText(prependEmployeeDisclosure(editedText, dealer), disclosures)",
+    fault: PIN.deliveredCaptionFor,
+  },
+];
+
+/**
  * The character meter on the result screen has to measure the string that
  * actually reaches the destination, and the phone preview has to show it.
  *
@@ -284,37 +723,164 @@ describe("the meter measures what is actually delivered", () => {
     expect(prependEmployeeDisclosure(body, dealer)).toBe(body);
   });
 
-  it("keeps the result screen wired to the delivered string, not the body", () => {
+  it("keeps the post screen wired to the delivered string, not the body", () => {
     // A source guard, because the defect was a prop pointing one variable to
-    // the left. Both consumers claim to show or measure what gets posted.
-    // `deliveredCaption`'s computation moved into
-    // services/deliveryCaptions.ts's deliveredCaptionFor; the prop wiring
-    // below stays pinned in components/PostResult.tsx.
-    const source = readFileSync(
-      resolve(process.cwd(), "components/PostResult.tsx"),
-      "utf8",
-    );
-    expect(source).toContain("text={deliveredCaption}");
-    expect(source).toContain("caption={deliveredCaption}");
-    expect(source).toMatch(
-      /const deliveredCaption = deliveredCaptionFor\(\s*editedText,\s*activeDisclosures,\s*currentDealer,?\s*\)/,
-    );
-    const deliveryCaptionsSource = readFileSync(
-      resolve(process.cwd(), "services/deliveryCaptions.ts"),
-      "utf8",
-    );
-    expect(deliveryCaptionsSource).toMatch(
-      /export const deliveredCaptionFor = \([\s\S]*?prependEmployeeDisclosure\(appendDisclosureText\(editedText, disclosures\), dealer\)/,
-    );
+    // the left. The live screen is components/PostScreen.tsx with
+    // components/post/PostPreviewCard.tsx (PostResult.tsx is no longer
+    // mounted); see DELIVERED_STRING_PINS for what each pin protects.
+    expect(deliveredStringWiringFaults(readWiringSources())).toEqual([]);
   });
 
-  it("the delivered-string guard actually fails on a body-only wiring (planted mutant)", () => {
-    const source = readFileSync(
-      resolve(process.cwd(), "components/PostResult.tsx"),
-      "utf8",
+  it.each([...DELIVERED_STRING_MUTANTS, ...COMMENTED_OUT_MUTANTS])(
+    "the delivered-string guard fails when the wiring $regression (planted mutant)",
+    ({ file, from, to, fault }) => {
+      // Applies the regression to the real source in memory. The replaced
+      // text must exist, so a refactor cannot turn this into a no-op that
+      // "proves" nothing.
+      const sources = readWiringSources();
+      expect(sources[file], `${file} no longer contains ${from}`).toContain(from);
+      const mutated = { ...sources, [file]: sources[file].split(from).join(to) };
+      expect(mutated[file]).not.toBe(sources[file]);
+      expect(deliveredStringWiringFaults(mutated)).toEqual([fault]);
+    },
+  );
+
+  it("the delivered-string guard fails when the preview reorders the outbound parts (planted mutant)", () => {
+    // Every part still renders, so only the order check can catch it: the
+    // compliance block now shows first and the team-member disclosure last.
+    const sources = readWiringSources();
+    const view = sliceFrom(
+      sources.previewCard,
+      'data-testid="post-outbound-preview"',
+      "</div>",
     );
-    const mutated = source.replace("text={deliveredCaption}", "text={editedText}");
-    expect(mutated).not.toContain("text={deliveredCaption}");
+    expect(view).toContain("{parts.prefix}");
+    const swapped = view
+      .split("{parts.prefix}")
+      .join("\u0000")
+      .split("{parts.disclosureBlock}")
+      .join("{parts.prefix}")
+      .split("\u0000")
+      .join("{parts.disclosureBlock}");
+    const mutated = {
+      ...sources,
+      previewCard: sources.previewCard.replace(view, swapped),
+    };
+    expect(mutated.previewCard).not.toBe(sources.previewCard);
+    expect(deliveredStringWiringFaults(mutated)).toEqual([PIN.previewRender]);
+  });
+});
+
+/**
+ * The behavioural half of the guard above: for a real financing caption, the
+ * parts the Post preview shows, joined the way the share joins them, are
+ * exactly the string fitPublishCaptionToBudget delivers.
+ */
+describe("the Post preview matches what ships within the channel budget", () => {
+  const dealer = {
+    id: "dealer-1",
+    name: "Bob Maxey Ford of Howell",
+    facebook_page_tag: "BobMaxeyFordHowell",
+  } as Dealer;
+  const employeeDisclosure = buildEmployeeDisclosure(dealer);
+
+  it("joins prefix, body and disclosure block into the delivered caption", () => {
+    const captions = buildShareCaptions({
+      effectivePack: { facebook_feed: "A saved AI variant nobody sees." },
+      activeCaptionPlatform: null,
+      editedText: "Drive home today with 4.9% APR on approved credit. #BobMaxeyFord",
+      dealer,
+      deliveryLanguageAllowed: true,
+      identity: { dealerName: dealer.name },
+      identityBlockedMessage: "Check the customer's name",
+      bodyEditSupersedesPack: true,
+    });
+    const selected = captions?.facebook_feed;
+    expect(selected?.blockedReason).toBeUndefined();
+    expect(selected?.disclosures).toContain("Financing subject to credit approval");
+    expect(selected?.text).toContain("@BobMaxeyFordHowell");
+
+    const delivered = fitPublishCaptionToBudget(
+      {
+        text: selected!.text,
+        disclosures: selected!.disclosures,
+        requiredPrefix: employeeDisclosure,
+      },
+      10_000,
+    );
+    const parts = outboundPreviewParts(
+      selected!.text,
+      employeeDisclosure,
+      selected!.disclosures,
+    );
+    const previewed = [parts.prefix, parts.body, parts.disclosureBlock]
+      .filter(Boolean)
+      .join("\n\n");
+
+    expect(delivered.startsWith(employeeDisclosure)).toBe(true);
+    expect(delivered).toContain("Financing subject to credit approval");
+    expect(previewed).toBe(delivered);
+  });
+
+  // The share step fits the caption to the chosen channel's real budget
+  // (preparePublishShare -> fitPublishCaptionToBudget(content,
+  // target.charBudget)). Google Business allows 1,500 characters.
+  const gbpBudget = PUBLISH_TARGETS.find((target) => target.id === "gbp")!.charBudget;
+  const previewAndDelivered = (editedText: string) => {
+    const selected = buildShareCaptions({
+      effectivePack: { gbp: "A saved AI variant nobody sees." },
+      activeCaptionPlatform: null,
+      editedText,
+      dealer,
+      deliveryLanguageAllowed: true,
+      identity: { dealerName: dealer.name },
+      identityBlockedMessage: "Check the customer's name",
+      bodyEditSupersedesPack: true,
+    })?.gbp;
+    expect(selected?.blockedReason).toBeUndefined();
+    const parts = outboundPreviewParts(
+      selected!.text,
+      employeeDisclosure,
+      selected!.disclosures,
+    );
+    return {
+      previewed: [parts.prefix, parts.body, parts.disclosureBlock]
+        .filter(Boolean)
+        .join("\n\n"),
+      delivered: fitPublishCaptionToBudget(
+        {
+          text: selected!.text,
+          disclosures: selected!.disclosures,
+          requiredPrefix: employeeDisclosure,
+        },
+        gbpBudget,
+      ),
+    };
+  };
+
+  it("matches the delivered caption at a real channel budget when the caption fits", () => {
+    expect(gbpBudget).toBe(1500);
+    const { previewed, delivered } = previewAndDelivered(
+      "Drive home today with 4.9% APR on approved credit. #BobMaxeyFord",
+    );
+    expect(delivered.length).toBeLessThanOrEqual(gbpBudget);
+    expect(previewed).toBe(delivered);
+  });
+
+  it("records the known gap: a caption over the channel budget ships shortened, and the preview does not show that yet", () => {
+    // KNOWN GAP (verification record, "Posting flow"): PostPreviewCard shows
+    // the whole body; the share step shortens it to the budget. When the
+    // preview learns the budget (the post unit's proposed
+    // fitPublishCaptionParts), flip the last assertion to toBe.
+    const longBody = `Drive home today with 4.9% APR on approved credit. ${"Our team walks every buyer through the paperwork, the features and the first service visit. ".repeat(30)}#BobMaxeyFord`;
+    const { previewed, delivered } = previewAndDelivered(longBody);
+    expect(previewed.length).toBeGreaterThan(gbpBudget);
+    // What legally matters still ships: the fitter protects the prefix and
+    // the disclosure block and shortens only the body.
+    expect(delivered.length).toBeLessThanOrEqual(gbpBudget);
+    expect(delivered.startsWith(employeeDisclosure)).toBe(true);
+    expect(delivered).toContain("Financing subject to credit approval");
+    expect(previewed).not.toBe(delivered);
   });
 });
 
@@ -374,14 +940,14 @@ describe("a caption and requiredPrefix never publish the disclosure twice", () =
     const fnStart = source.indexOf("export const buildShareCaptions");
     const fnEnd = source.indexOf("export interface BuildCopyTextInput", fnStart);
     const fn = source.slice(fnStart, fnEnd);
-    expect(fn).toContain("text: scanned.caption");
+    expect(fn).toContain("text: attributed,");
     expect(fn).not.toContain("text: prepared.caption");
   });
 
   it("the body-only guard actually fails on the regressed shape (planted mutant)", () => {
     // Proves the guard above is load-bearing rather than vacuous: swapping
-    // the real source's `text: scanned.caption` for the regressed
-    // `text: prepared.caption` must flip both assertions.
+    // the real source's `text: attributed,` for the regressed
+    // `text: prepared.caption,` must flip both assertions.
     const source = readFileSync(
       resolve(process.cwd(), "services/deliveryCaptions.ts"),
       "utf8",
@@ -389,8 +955,8 @@ describe("a caption and requiredPrefix never publish the disclosure twice", () =
     const fnStart = source.indexOf("export const buildShareCaptions");
     const fnEnd = source.indexOf("export interface BuildCopyTextInput", fnStart);
     const fn = source.slice(fnStart, fnEnd);
-    const mutated = fn.replace("text: scanned.caption", "text: prepared.caption");
-    expect(mutated).not.toContain("text: scanned.caption");
+    const mutated = fn.replace("text: attributed,", "text: prepared.caption,");
+    expect(mutated).not.toContain("text: attributed,");
     expect(mutated).toContain("text: prepared.caption");
   });
 });

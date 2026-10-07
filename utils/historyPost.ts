@@ -93,6 +93,7 @@ export const toGeneratedPostFromRecord = (
     isBasicFallback: post.caption_source === "basic_fallback",
     disclosures: post.disclosures || undefined,
     postId: post.id,
+    postRevision: post.updated || undefined,
     approvalStatus: approval,
     // The reason travels with the rejection, or the reopened result
     // screen falls back to the generic "a manager rejected this" copy
@@ -125,27 +126,75 @@ export const toGeneratedPostFromRecord = (
 };
 
 export type HistoryPostStatus =
-  "shared" | "waiting" | "changes" | "draft" | "review_blocked";
+  | "shared"
+  | "downloaded"
+  | "copied"
+  | "waiting"
+  | "changes"
+  | "draft"
+  | "review_blocked";
+
+/**
+ * The part of the server's share summary the status reads. Only `count` is
+ * required so an older backend's (or a test's) partial summary still passes.
+ */
+export type HistoryShareSummaryInput = Pick<PostShareSummary, "count"> &
+  Partial<
+    Pick<
+      PostShareSummary,
+      | "last_via"
+      | "last_channel"
+      | "last_shared_at"
+      | "sheet_count"
+      | "last_sheet_channel"
+      | "last_sheet_at"
+    >
+  >;
 
 /**
  * The minimal shape postStatusFor needs — a subset of PostRecord, so a
  * PostRecord from the History list passes straight in. `share_summary` is the
- * derived summary GET /api/app/posts projects from `post_share_events`; only
- * its count decides the status.
+ * derived summary GET /api/app/posts projects from `post_share_events`.
  */
 export interface HistoryPostStatusInput {
   approval_status?: ApprovalStatus;
   identity_review_required?: boolean;
   image_review_required?: boolean;
-  share_summary?: Pick<PostShareSummary, "count"> | null;
+  share_summary?: HistoryShareSummaryInput | null;
 }
+
+/**
+ * Only a completed share sheet may be called "Shared"; a download or a copied
+ * caption is not one (amendment B1). The server counts share-sheet events
+ * apart from the latest event, so a copy made after a share cannot hide it.
+ * An older backend that does not send that count is judged by its latest
+ * event alone.
+ */
+export const wasSentToShareSheet = (summary: HistoryShareSummaryInput): boolean =>
+  typeof summary.sheet_count === "number"
+    ? summary.sheet_count > 0
+    : summary.last_via === "share_sheet";
+
+/**
+ * The destination and time behind a post's share status: the latest
+ * share-sheet event when there is one, otherwise the latest event (the
+ * download or copy the status names). Empty strings when unknown.
+ */
+export const shareStatusDetail = (
+  summary: HistoryShareSummaryInput,
+): { channel: string; at: string } =>
+  typeof summary.sheet_count === "number" && summary.sheet_count > 0
+    ? { channel: summary.last_sheet_channel || "", at: summary.last_sheet_at || "" }
+    : { channel: summary.last_channel || "", at: summary.last_shared_at || "" };
 
 /**
  * A single, human status for a saved post, most-authoritative condition
  * first: a quarantined creative or caption always reads as blocked, a
  * manager's rejection always reads as "changes requested" even if the post
  * was shared before that rejection, and only then does an outstanding
- * approval or a share record decide the label.
+ * approval or a share record decide the label. A share record reads as
+ * "shared" only for the share sheet; a download or a copied caption keeps its
+ * own name.
  */
 export const postStatusFor = (record: HistoryPostStatusInput): HistoryPostStatus => {
   if (record.identity_review_required || record.image_review_required) {
@@ -153,6 +202,10 @@ export const postStatusFor = (record: HistoryPostStatusInput): HistoryPostStatus
   }
   if (record.approval_status === "rejected") return "changes";
   if (record.approval_status === "pending") return "waiting";
-  if (record.share_summary && record.share_summary.count > 0) return "shared";
+  const summary = record.share_summary;
+  if (!summary) return "draft";
+  if (wasSentToShareSheet(summary)) return "shared";
+  if (summary.count > 0 && summary.last_via === "download") return "downloaded";
+  if (summary.count > 0 && summary.last_via === "copy") return "copied";
   return "draft";
 };

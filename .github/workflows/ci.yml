@@ -18,7 +18,9 @@ jobs:
   typecheck-and-test:
     name: typecheck + vitest
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # test:stability runs the whole suite three times (about 3.3 min a pass
+    # with 4,000+ tests), so 10 minutes cut the third pass off.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -66,7 +68,8 @@ jobs:
   playwright:
     name: Playwright e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 368 tests (Chromium and WebKit at eight sizes) on one worker.
+    timeout-minutes: 25
     needs: typecheck-and-test
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

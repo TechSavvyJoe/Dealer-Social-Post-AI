@@ -15,6 +15,7 @@ vi.mock("../components/ui/Toast", () => ({
 }));
 
 import { usePostLeaveGuard } from "./usePostLeaveGuard";
+import { useAppStore } from "../stores/appStore";
 
 const baseOptions = {
   hasSavedMedia: true,
@@ -31,6 +32,7 @@ describe("usePostLeaveGuard", () => {
   beforeEach(() => {
     mocks.toastWarning.mockReset();
     mocks.triggerHapticFeedback.mockReset();
+    useAppStore.setState({ postBusy: null });
   });
 
   it("is not at risk once media is saved and the caption is copied unedited", () => {
@@ -73,6 +75,33 @@ describe("usePostLeaveGuard", () => {
     expect(mocks.toastWarning).toHaveBeenCalledWith(
       "Wait for the final website handoff to finish before leaving this post.",
     );
+  });
+
+  it("publishes what is running to the store while mounted and clears it on unmount (A4)", () => {
+    const { rerender, unmount } = renderHook(
+      (options: typeof baseOptions) => usePostLeaveGuard(options),
+      { initialProps: baseOptions },
+    );
+    expect(useAppStore.getState().postBusy).toBeNull();
+
+    rerender({ ...baseOptions, imageBusy: true });
+    expect(useAppStore.getState().postBusy).toBe("image");
+
+    rerender({ ...baseOptions, textBusy: true });
+    expect(useAppStore.getState().postBusy).toBe("image");
+
+    // The website handoff names itself even while a render also runs.
+    rerender({ ...baseOptions, imageBusy: true, websiteSending: true });
+    expect(useAppStore.getState().postBusy).toBe("website");
+
+    rerender(baseOptions);
+    expect(useAppStore.getState().postBusy).toBeNull();
+
+    rerender({ ...baseOptions, websiteSending: true });
+    expect(useAppStore.getState().postBusy).toBe("website");
+    // Leaving the screen never strands the shell in a busy state.
+    unmount();
+    expect(useAppStore.getState().postBusy).toBeNull();
   });
 
   it("asks the caller to confirm when at risk and not busy", () => {

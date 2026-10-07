@@ -148,9 +148,9 @@ describe("super-admin credential handoff", () => {
     );
 
     fireEvent.keyDown(adminsTab, { key: "End" });
-    const usersTab = screen.getByRole("tab", { name: "Users" });
-    await waitFor(() => expect(usersTab).toHaveFocus());
-    expect(usersTab).toHaveAttribute("tabindex", "0");
+    const connectionsTab = screen.getByRole("tab", { name: "Connections" });
+    await waitFor(() => expect(connectionsTab).toHaveFocus());
+    expect(connectionsTab).toHaveAttribute("tabindex", "0");
     queryClient.clear();
   });
 

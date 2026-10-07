@@ -5,6 +5,8 @@ import AxeBuilder from "@axe-core/playwright";
 // reviewed image policy. Keep this in sync with config/gemini-model-policy.json;
 // an intentional policy bump should quarantine them until the fixture is updated.
 const CURRENT_TEST_MODEL_POLICY_VERSION = "5";
+/** buildEmployeeDisclosure() for "Northline Motors" with the default template. */
+const EMPLOYEE_DISCLOSURE = "Posted by a Northline Motors team member.";
 
 async function expectNoSeriousAxeViolations(page: import("@playwright/test").Page) {
   const results = await new AxeBuilder({ page }).analyze();
@@ -508,12 +510,12 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("keeps the authenticated capture studio reachable on a changing phone viewport", async ({
+  test("keeps authenticated Home categories reachable on a changing phone viewport", async ({
     page,
   }, testInfo) => {
     test.skip(
       !testInfo.project.name.endsWith("phone-390"),
-      "The representative 390px Chromium and WebKit phones cover the capture scrollport.",
+      "The representative 390px Chromium and WebKit phones cover the Home scrollport.",
     );
 
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -546,36 +548,27 @@ test.describe("Dealer Social Post AI Flow", () => {
       });
     });
 
-    await page.goto("/#/capture");
+    await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "Start with a photo" }),
+      page.getByRole("heading", { name: "What are you posting?" }),
     ).toBeVisible();
 
     const mainContent = page.locator("#main-content");
-    const transitionWrapper = mainContent.locator(":scope > div").first();
-    const contentWrapper = transitionWrapper.locator(":scope > div").first();
-    const captureGrid = page.locator(".capture-studio-grid");
-    const captureSidebar = page.locator(".capture-studio-sidebar");
-    const takePhoto = page.getByRole("button", { name: "Take photo" });
-    const chooseFromDevice = page.getByRole("button", {
-      name: "Choose from device",
+    const categoryCards = mainContent.locator("article");
+    const deliveryCard = categoryCards.filter({ hasText: /^Delivery/ }).first();
+    const finalCategoryCard = categoryCards.filter({ hasText: /^Team/ }).first();
+    const deliveryAction = deliveryCard.getByRole("button", { name: /^Delivery/ });
+    // Phones get one "Choose from library" row under the tiles, the last
+    // control on Home; it belongs to no tile.
+    const chooseFromLibrary = mainContent.getByRole("button", {
+      name: "Choose from library",
     });
 
-    await expect(transitionWrapper.locator(".capture-studio-grid")).toHaveCount(1);
-    await expect(contentWrapper.locator(".capture-studio-grid")).toHaveCount(1);
-    await expect(captureGrid).toBeVisible();
-    await expect(captureSidebar).toBeVisible();
-    expect(
-      await captureSidebar.evaluate((sidebar) => {
-        const preview = document.querySelector(".capture-studio-preview");
-        return Boolean(
-          preview &&
-          (sidebar.compareDocumentPosition(preview) &
-            Node.DOCUMENT_POSITION_FOLLOWING) !==
-            0,
-        );
-      }),
-    ).toBe(true);
+    await expect(categoryCards).toHaveCount(6);
+    await expect(deliveryAction).toBeVisible();
+    await expect(page.getByLabel("Take a photo for Delivery")).toBeAttached();
+    await expect(page.getByLabel("Choose a photo for Delivery")).toBeAttached();
+    await expect(page.getByRole("heading", { name: "My work" })).toBeVisible();
 
     const expectDocumentLockedToViewport = async () => {
       const geometry = await page.evaluate(() => ({
@@ -592,16 +585,13 @@ test.describe("Dealer Social Post AI Flow", () => {
       expect(geometry.htmlClientHeight).toBe(geometry.viewportHeight);
     };
 
-    const expectCaptureEndReachable = async () => {
+    const expectHomeEndReachable = async () => {
       const scrollContract = await mainContent.evaluate((element) => ({
         clientHeight: element.clientHeight,
         scrollHeight: element.scrollHeight,
         overflowY: getComputedStyle(element).overflowY,
       }));
       expect(scrollContract.clientHeight).toBeGreaterThan(0);
-      // The compact phone capture (buttons first, 4:3 well) can fit an 844px
-      // viewport without scrolling; the 600px pass below still proves the
-      // scrollport reaches the end when the content is taller than the screen.
       expect(scrollContract.scrollHeight).toBeGreaterThanOrEqual(
         scrollContract.clientHeight,
       );
@@ -619,60 +609,33 @@ test.describe("Dealer Social Post AI Flow", () => {
         )
         .toBeLessThanOrEqual(1);
 
-      const [
-        mainBounds,
-        transitionBounds,
-        contentBounds,
-        gridBounds,
-        sidebarBounds,
-        chooseBounds,
-      ] = await Promise.all([
+      const [mainBounds, finalCardBounds, chooseBounds] = await Promise.all([
         mainContent.boundingBox(),
-        transitionWrapper.boundingBox(),
-        contentWrapper.boundingBox(),
-        captureGrid.boundingBox(),
-        captureSidebar.boundingBox(),
-        chooseFromDevice.boundingBox(),
+        finalCategoryCard.boundingBox(),
+        chooseFromLibrary.boundingBox(),
       ]);
       expect(mainBounds).not.toBeNull();
-      expect(transitionBounds).not.toBeNull();
-      expect(contentBounds).not.toBeNull();
-      expect(gridBounds).not.toBeNull();
-      expect(sidebarBounds).not.toBeNull();
+      expect(finalCardBounds).not.toBeNull();
       expect(chooseBounds).not.toBeNull();
       const mainBottom = (mainBounds?.y || 0) + (mainBounds?.height || 0);
-      const transitionBottom =
-        (transitionBounds?.y || 0) + (transitionBounds?.height || 0);
-      const contentBottom = (contentBounds?.y || 0) + (contentBounds?.height || 0);
-      const gridBottom = (gridBounds?.y || 0) + (gridBounds?.height || 0);
-      const mainBottomPadding = await mainContent.evaluate((element) =>
-        Number.parseFloat(getComputedStyle(element).paddingBottom),
-      );
-      expect(transitionBottom).toBeGreaterThanOrEqual(gridBottom - 1);
-      expect(contentBottom).toBeGreaterThanOrEqual(gridBottom - 1);
-      expect(gridBottom).toBeLessThanOrEqual(mainBottom - mainBottomPadding + 1);
       expect(
-        (sidebarBounds?.y || 0) + (sidebarBounds?.height || 0),
+        (finalCardBounds?.y || 0) + (finalCardBounds?.height || 0),
       ).toBeLessThanOrEqual(mainBottom + 1);
       expect((chooseBounds?.y || 0) + (chooseBounds?.height || 0)).toBeLessThanOrEqual(
         mainBottom + 1,
       );
-      await expect(chooseFromDevice).toBeVisible();
+      await expect(chooseFromLibrary).toBeVisible();
+      await expectControlsInsideViewport(page, chooseFromLibrary);
     };
 
     await expectDocumentLockedToViewport();
-    await expect(takePhoto).toBeVisible();
-    await expect(chooseFromDevice).toBeVisible();
-    await expectControlsInsideViewport(
-      page,
-      page.getByRole("button", { name: /^(Take photo|Choose from device)$/ }),
-    );
-    await expectCaptureEndReachable();
+    await expectControlsInsideViewport(page, deliveryAction);
+    await expectHomeEndReachable();
 
     await page.setViewportSize({ width: 390, height: 600 });
     await expect.poll(() => page.evaluate(() => window.innerHeight)).toBe(600);
     await expectDocumentLockedToViewport();
-    await expectCaptureEndReachable();
+    await expectHomeEndReachable();
   });
 
   test("keeps the responsive result workspace job-first", async ({
@@ -721,9 +684,32 @@ test.describe("Dealer Social Post AI Flow", () => {
         }),
       });
     });
+    await page.route("**/api/app/posts/qa-post-1/shared", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          // The real route answers with the post's id, not a receipt id.
+          id: "qa-post-1",
+          channel: "facebook_feed",
+          via: "share_sheet",
+          shared_at: "2026-09-23T12:00:00.000Z",
+          deduplicated: false,
+        }),
+      });
+    });
 
     await page.addInitScript(() => {
       (window as unknown as { __shareCalls: ShareData[] }).__shareCalls = [];
+      (
+        window as unknown as {
+          __downloadCalls: Array<{ filename: string; href: string }>;
+        }
+      ).__downloadCalls = [];
+      (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites = [];
+      let resolveShare: (() => void) | undefined;
+      (window as unknown as { __resolveShare?: () => void }).__resolveShare = () =>
+        resolveShare?.();
       Object.defineProperty(navigator, "canShare", {
         configurable: true,
         value: () => true,
@@ -734,24 +720,45 @@ test.describe("Dealer Social Post AI Flow", () => {
           (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.push(
             shareData,
           );
-          return Promise.resolve();
+          return new Promise<void>((resolve) => {
+            resolveShare = resolve;
+          });
         },
       });
       Object.defineProperty(navigator, "clipboard", {
         configurable: true,
-        value: { writeText: () => Promise.resolve() },
+        value: {
+          writeText: (value: string) => {
+            (
+              window as unknown as { __clipboardWrites: string[] }
+            ).__clipboardWrites.push(value);
+            return Promise.resolve();
+          },
+        },
       });
+      const nativeAnchorClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function click() {
+        if (this.download) {
+          (
+            window as unknown as {
+              __downloadCalls: Array<{ filename: string; href: string }>;
+            }
+          ).__downloadCalls.push({ filename: this.download, href: this.href });
+          return;
+        }
+        nativeAnchorClick.call(this);
+      };
     });
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "Start with a photo" }),
+      page.getByRole("heading", { name: "What are you posting?" }),
     ).toBeVisible();
     await page.evaluate(async (modelPolicyVersion) => {
       const image =
         "data:image/svg+xml;charset=utf-8," +
         encodeURIComponent(
-          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs><rect width="1080" height="1080" fill="url(#g)"/><path d="M140 640h800l-92-210H310z" fill="#e8eef8" opacity=".92"/><circle cx="350" cy="680" r="88" fill="#07111f"/><circle cx="760" cy="680" r="88" fill="#07111f"/><text x="540" y="860" text-anchor="middle" font-family="Arial" font-size="54" fill="white">NORTHLINE MOTORS</text></svg>',
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1350"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs><rect width="1080" height="1350" fill="url(#g)"/><path d="M140 640h800l-92-210H310z" fill="#e8eef8" opacity=".92"/><circle cx="350" cy="680" r="88" fill="#07111f"/><circle cx="760" cy="680" r="88" fill="#07111f"/><text x="540" y="1000" text-anchor="middle" font-family="Arial" font-size="54" fill="white">NORTHLINE MOTORS</text></svg>',
         );
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         const request = indexedDB.open("dealer-social-post-ai", 2);
@@ -792,9 +799,11 @@ test.describe("Dealer Social Post AI Flow", () => {
           generatedPost: {
             text: "A standout delivery deserves a standout moment. Congratulations on the new ride!",
             postId: "qa-post-1",
+            scenarioId: "customer_delivery",
+            postRevision: "2026-08-05 09:43:00.000Z",
             releaseStatus: "saved",
             aiMeta: { modelPolicyVersion },
-            platformIds: ["facebook_feed", "linkedin"],
+            platformIds: ["facebook_feed", "instagram_feed"],
             mediaOutputMode: "photo",
             primaryFormatId: "feed_portrait",
             imageAspectRatio: "4:5",
@@ -803,7 +812,8 @@ test.describe("Dealer Social Post AI Flow", () => {
             style: "Modern & Bold",
             tone: "Excited",
             customerName: "",
-            platformIds: ["facebook_feed", "linkedin"],
+            scenarioId: "customer_delivery",
+            platformIds: ["facebook_feed", "instagram_feed"],
             mediaOutputMode: "photo",
             primaryFormatId: "feed_portrait",
             imageAspectRatio: "4:5",
@@ -814,156 +824,382 @@ test.describe("Dealer Social Post AI Flow", () => {
     await page.reload();
 
     const isDesktop = testInfo.project.name.endsWith("desktop-1440");
-    await expect(
-      page.getByRole("heading", {
-        name: isDesktop ? "Publish studio" : "Facebook Feed",
-      }),
-    ).toBeVisible();
-    const mediaPreview = page.getByRole("region", { name: "Media preview" });
-    const deliveryBar = page.getByLabel("Post delivery actions");
-    const shareAndSaveActions = isDesktop ? mediaPreview : deliveryBar;
-    if (!isDesktop) {
+    const postPreview = page.getByRole("region", { name: "Post preview" });
+    const postActions = page.getByRole("region", { name: "Post actions" });
+    await expect(postPreview).toBeVisible();
+    await expect(postActions).toBeVisible();
+    const viewportWidth = page.viewportSize()?.width ?? 1440;
+    if (viewportWidth >= 1024) {
+      await expect(page.getByRole("heading", { name: "Ready to share" })).toBeVisible();
+    } else if (viewportWidth < 768) {
+      // Phones name the post's category in the header, not on the Post screen.
       await expect(
-        deliveryBar.getByRole("button", { name: "Copy caption" }),
+        page.getByRole("banner").getByText("Delivery", { exact: true }),
       ).toBeVisible();
     }
-    const shareTrigger = shareAndSaveActions.getByRole("button", {
-      name: "Share post",
-    });
-    await expect(shareTrigger).toBeVisible();
+    const channelGroup = page.getByRole("group", { name: "Share to" });
     await expect(
-      shareAndSaveActions.getByRole("button", {
-        name: /^Save (?:image|video|to Photos|\d+×\d+)$/,
-      }),
-    ).toBeVisible();
-    const deliveryBoard = page.getByRole("region", { name: "Platform delivery" });
-    await expect(deliveryBoard).toBeVisible();
+      channelGroup.getByRole("button", { name: "Facebook" }),
+    ).toHaveAttribute("aria-pressed", "true");
     await expect(
-      deliveryBoard.getByRole("checkbox", {
-        name: /Include Facebook Feed image 4:5 in Share selected/i,
-      }),
-    ).toBeChecked();
+      channelGroup.getByRole("button", { name: "Instagram" }),
+    ).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(
-      deliveryBoard.getByRole("checkbox", {
-        name: /Include LinkedIn Feed image 1:1 in Share selected/i,
-      }),
-    ).toBeChecked();
-    const clearAllDeliveries = deliveryBoard.getByRole("button", {
-      name: "Clear all",
-    });
-    const shareAllDeliveries = deliveryBoard.getByRole("button", {
-      name: "Share all 2",
-    });
-    await expect(shareAllDeliveries).toBeEnabled();
-    for (const control of [clearAllDeliveries, shareAllDeliveries]) {
-      expect(
-        await control.evaluate(
-          (element) => element.scrollWidth <= element.clientWidth + 1,
-        ),
-      ).toBe(true);
-    }
+      page.getByRole("button", { name: /Share all|Schedule|More/ }),
+    ).toHaveCount(0);
 
     await expectNoCriticalAccessibilityIssues(page);
     await expectNoSeriousAxeViolations(page);
     await expectNoHorizontalOverflow(page);
 
-    const creativeTools = page.getByRole("button", { name: /creative tools/i });
-    await expect(creativeTools).toHaveAttribute("aria-expanded", "false");
-    await expect(page.getByTestId("creative-tools-panel")).toBeHidden();
-    await expect(page.getByRole("button", { name: "Regenerate image" })).toBeHidden();
+    if (isDesktop) {
+      const copyCaption = page.getByRole("button", { name: "Copy caption" });
+      const download = page.getByRole("button", { name: "Download for Facebook" });
+      await expect(copyCaption).toBeEnabled({ timeout: 15_000 });
+      await expect(download).toBeEnabled({ timeout: 15_000 });
+      await copyCaption.click();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites
+                .length,
+          ),
+        )
+        .toBe(1);
+      // The delivered caption leads with the employee disclosure.
+      const [copied] = await page.evaluate(
+        () => (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites,
+      );
+      expect(copied.startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`)).toBe(true);
+      expect(copied).toContain(
+        "A standout delivery deserves a standout moment. Congratulations on the new ride!",
+      );
+      await download.click();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (
+                window as unknown as {
+                  __downloadCalls: Array<{ filename: string; href: string }>;
+                }
+              ).__downloadCalls,
+          ),
+        )
+        .toEqual([
+          {
+            filename: "dealer-social-qa-post-1-facebook-feed-photo-4x5-1080x1350.jpg",
+            href: expect.stringMatching(/^blob:/),
+          },
+        ]);
+    } else {
+      const share = page.getByRole("button", {
+        name: "Share to Facebook",
+        exact: true,
+      });
+      await expect(share).toBeEnabled({ timeout: 15_000 });
+      await expectControlsInsideViewport(page, share);
+      const previewImage = postPreview.getByRole("img", {
+        name: "Post image",
+      });
+      const previewGeometry = await previewImage.evaluate((image) => ({
+        height: image.parentElement?.getBoundingClientRect().height || 0,
+        objectFit: getComputedStyle(image).objectFit,
+        viewportHeight: window.innerHeight,
+      }));
+      expect(previewGeometry.height).toBeGreaterThan(0);
+      // The creative is capped at 56% of the viewport (PostPreviewCard).
+      expect(previewGeometry.height).toBeLessThanOrEqual(
+        Math.ceil(previewGeometry.viewportHeight * 0.56) + 1,
+      );
+      expect(previewGeometry.objectFit).toBe("contain");
+      const viewport = page.viewportSize();
+      // Held upright, the cap leaves the caption's first line fully on screen
+      // above the fixed share bar. Not at 320x568: there the first line starts
+      // under the bar (measured 498 px against a 471 px bar top), a design
+      // question reported for the Post screen, not a property of the cap.
+      if (viewport && viewport.height > viewport.width && viewport.height >= 600) {
+        const captionGeometry = await share.evaluate((button) => {
+          let bar: Element | null = button;
+          while (bar && getComputedStyle(bar).position !== "fixed") {
+            bar = bar.parentElement;
+          }
+          const firstLine = document.querySelector<HTMLElement>(
+            '[data-testid="post-outbound-preview"] [data-outbound-part]',
+          );
+          return {
+            barTop: bar ? bar.getBoundingClientRect().top : null,
+            captionTop: firstLine ? firstLine.getBoundingClientRect().top : null,
+            lineHeight: firstLine
+              ? parseFloat(getComputedStyle(firstLine).lineHeight)
+              : null,
+          };
+        });
+        expect(captionGeometry.barTop, "the share bar is fixed").not.toBeNull();
+        expect(captionGeometry.captionTop, "the caption renders").not.toBeNull();
+        expect(captionGeometry.captionTop!).toBeGreaterThanOrEqual(0);
+        expect(
+          captionGeometry.captionTop! + captionGeometry.lineHeight!,
+          "the caption's first line ends above the share bar",
+        ).toBeLessThanOrEqual(captionGeometry.barTop!);
+      }
+      await share.click();
+      const preparedShare = await page.evaluate(async () => {
+        const calls = (window as unknown as { __shareCalls: ShareData[] }).__shareCalls;
+        const file = calls[0]?.files?.[0];
+        if (!file) return null;
+        const bitmap = await createImageBitmap(file);
+        const result = {
+          callCount: calls.length,
+          text: calls[0]?.text,
+          filename: file.name,
+          type: file.type,
+          width: bitmap.width,
+          height: bitmap.height,
+        };
+        bitmap.close();
+        return result;
+      });
+      expect(preparedShare).toEqual({
+        callCount: 1,
+        // Facebook drops shared text; the caption goes to the clipboard.
+        text: undefined,
+        filename: "dealer-social-qa-post-1-facebook-feed-photo-4x5-1080x1350.jpg",
+        type: "image/jpeg",
+        width: 1080,
+        height: 1350,
+      });
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.evaluate(() =>
+        (window as unknown as { __resolveShare?: () => void }).__resolveShare?.(),
+      );
+      await expect(
+        page.getByRole("button", { name: "Done", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("Shared · Facebook", { exact: true })).toBeVisible();
+      const clipboard = await page.evaluate(
+        () => (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites,
+      );
+      expect(clipboard.length).toBeGreaterThan(0);
+      expect(clipboard[0].startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`)).toBe(true);
+    }
 
-    await shareTrigger.focus();
-    await page.keyboard.press("Enter");
-    const shareDialog = page.getByRole("dialog", { name: "Share" });
-    await expect(shareDialog).toBeVisible();
-    await page.getByRole("button", { name: "Share to Facebook" }).click();
-    const shareNow = page.getByRole("button", { name: "Share now" });
-    await expect(shareNow).toBeEnabled({ timeout: 10_000 });
-    await shareNow.click();
+    await page.screenshot({
+      path: testInfo.outputPath("post-streamlined.png"),
+      fullPage: true,
+    });
+  });
+
+  test("falls back to save, copy and open on a phone that cannot share files", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      (testInfo.project.use.viewport?.width ?? 1440) >= 768,
+      "Phones only: wider layouts never offer the share sheet.",
+    );
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const unknown: string[] = [];
+    const shares: Array<Record<string, unknown>> = [];
+    const draftRevision = "2026-08-05 09:44:00.000Z";
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      const reply = (json: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(json),
+        });
+      if (path === "/api/app/session")
+        return reply({
+          role: "salesperson",
+          dealer: {
+            id: "qa-dealer",
+            name: "Northline Motors",
+            requires_approval: false,
+          },
+          person: {
+            id: "qa-person",
+            dealer: "qa-dealer",
+            name: "Jamie Rivera",
+            role: "salesperson",
+            active: true,
+          },
+        });
+      if (path === "/api/telemetry") return reply({ success: true });
+      if (path === "/api/app/website-destinations") return reply({ items: [] });
+      if (path === "/api/app/posts" && request.method() === "GET")
+        return reply({ items: [] });
+      if (path === "/api/app/posts/qa-post-1/draft")
+        return reply({ id: "qa-post-1", updated: true, post_revision: draftRevision });
+      if (path === "/api/app/posts/qa-post-1/shared") {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        shares.push(body);
+        // The real route answers with the post's id, not a receipt id.
+        return reply({
+          id: path.split("/")[4],
+          channel: body.channel,
+          via: body.via,
+          shared_at: "2026-09-23T12:00:00.000Z",
+          deduplicated: false,
+          post_revision: body.expected_post_revision,
+        });
+      }
+      unknown.push(`${request.method()} ${path}`);
+      return route.fulfill({ status: 500, body: "{}" });
+    });
+    await page.addInitScript(() => {
+      (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites = [];
+      (window as unknown as { __downloads: string[] }).__downloads = [];
+      // This browser has no Web Share API at all.
+      Object.defineProperty(navigator, "share", {
+        configurable: true,
+        value: undefined,
+      });
+      Object.defineProperty(navigator, "canShare", {
+        configurable: true,
+        value: undefined,
+      });
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: (value: string) => {
+            (
+              window as unknown as { __clipboardWrites: string[] }
+            ).__clipboardWrites.push(value);
+            return Promise.resolve();
+          },
+        },
+      });
+      const nativeAnchorClick = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function click() {
+        if (this.download) {
+          (window as unknown as { __downloads: string[] }).__downloads.push(
+            this.download,
+          );
+          return;
+        }
+        nativeAnchorClick.call(this);
+      };
+    });
+
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "What are you posting?" }),
+    ).toBeVisible();
+    await page.evaluate(async (modelPolicyVersion) => {
+      const image = `data:image/svg+xml;base64,${btoa(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1350"><rect width="1080" height="1350" fill="#07111f"/><path d="M140 740h800l-92-210H310z" fill="#e8eef8"/><circle cx="350" cy="780" r="88" fill="#2563eb"/><circle cx="760" cy="780" r="88" fill="#2563eb"/></svg>',
+      )}`;
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("dealer-social-post-ai", 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("creative-assets")) {
+            db.createObjectStore("creative-assets", { keyPath: "key" });
+          }
+          if (!db.objectStoreNames.contains("media-archive")) {
+            const archive = db.createObjectStore("media-archive", { keyPath: "id" });
+            archive.createIndex("dealerId", "dealerId", { unique: false });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction("creative-assets", "readwrite");
+        transaction.objectStore("creative-assets").put({
+          key: "qa-dealer:generated",
+          value: image,
+          updatedAt: Date.now(),
+          mediaEpoch: 0,
+        });
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      database.close();
+      localStorage.setItem(
+        "dealer-social-post-ai.session",
+        JSON.stringify({
+          dealerId: "qa-dealer",
+          step: 4,
+          loginTimestamp: Date.now(),
+          generatedPost: {
+            text: "A standout delivery deserves a standout moment. Congratulations on the new ride!",
+            postId: "qa-post-1",
+            postRevision: "2026-08-05 09:43:00.000Z",
+            scenarioId: "customer_delivery",
+            releaseStatus: "saved",
+            aiMeta: { modelPolicyVersion },
+            platformIds: ["facebook_feed", "instagram_feed"],
+            mediaOutputMode: "photo",
+            primaryFormatId: "feed_portrait",
+            imageAspectRatio: "4:5",
+          },
+          generationParams: {
+            style: "Modern & Bold",
+            tone: "Excited",
+            customerName: "",
+            scenarioId: "customer_delivery",
+            platformIds: ["facebook_feed", "instagram_feed"],
+            mediaOutputMode: "photo",
+            primaryFormatId: "feed_portrait",
+            imageAspectRatio: "4:5",
+          },
+        }),
+      );
+    }, CURRENT_TEST_MODEL_POLICY_VERSION);
+    await page.reload();
+
+    const postActions = page.getByRole("region", { name: "Post actions" });
+    await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible();
+    const save = page.getByRole("button", { name: "Save image", exact: true });
+    const copy = page.getByRole("button", { name: "Copy caption", exact: true });
+    const open = page.getByRole("button", { name: "Open Facebook", exact: true });
+    await expect(save).toBeEnabled({ timeout: 15_000 });
+    await expect(copy).toBeEnabled();
+    await expect(open).toBeEnabled();
+    await expect(page.getByRole("button", { name: /^Share to / })).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(postActions).toBeVisible();
+    await expectControlsInsideViewport(page, open);
+    await expectNoHorizontalOverflow(page);
+
+    await copy.click();
     await expect
       .poll(() =>
         page.evaluate(
           () =>
-            (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.length,
+            (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites,
         ),
       )
-      .toBe(1);
-
-    // Escape closes the focus-trapped modal and restores focus to its trigger.
-    await page.keyboard.press("Escape");
-    await expect(shareDialog).toBeHidden();
-    await expect(shareTrigger).toBeFocused();
-    await expectNoHorizontalOverflow(page);
-
-    if (testInfo.project.name.endsWith("phone-390")) {
-      await shareAllDeliveries.click();
-      await expect(shareDialog).toBeVisible();
-      await expect(shareDialog.getByText("Share sequence")).toBeVisible();
-      await expect(shareDialog.getByText("1 of 2")).toBeVisible();
-      await expect(shareNow).toBeEnabled({ timeout: 10_000 });
-      await shareNow.click();
-      await expect
-        .poll(() =>
-          page.evaluate(
-            () =>
-              (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.length,
-          ),
-        )
-        .toBe(2);
-      await shareDialog
-        .getByRole("button", { name: /Next selected: LinkedIn/i })
-        .click();
-      await expect(shareDialog).toBeVisible();
-      await expect(shareDialog.getByText("2 of 2")).toBeVisible();
-      await expect(shareNow).toBeEnabled({ timeout: 10_000 });
-      await shareNow.click();
-      await expect
-        .poll(() =>
-          page.evaluate(
-            () =>
-              (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.length,
-          ),
-        )
-        .toBe(3);
-      await shareDialog.getByRole("button", { name: "Finish sequence" }).click();
-      await expect(shareDialog).toBeHidden();
-      const completionToast = page.getByText(/Share sequence finished/i);
-      await expect(completionToast).toBeVisible();
-      const [toastBounds, deliveryBarBounds] = await Promise.all([
-        completionToast.boundingBox(),
-        deliveryBar.boundingBox(),
-      ]);
-      expect(toastBounds).not.toBeNull();
-      expect(deliveryBarBounds).not.toBeNull();
-      expect((toastBounds?.y || 0) + (toastBounds?.height || 0)).toBeLessThanOrEqual(
-        (deliveryBarBounds?.y || 0) + 1,
+      .toHaveLength(1);
+    const [copied] = await page.evaluate(
+      () => (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites,
+    );
+    expect(copied.startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`)).toBe(true);
+    await save.click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as unknown as { __downloads: string[] }).__downloads,
+        ),
+      )
+      .toEqual(["dealer-social-qa-post-1-facebook-feed-photo-4x5-1080x1350.jpg"]);
+    await expect
+      .poll(() => shares.map((share) => share.via))
+      .toEqual(["copy", "download"]);
+    for (const share of shares) {
+      expect(share).toMatchObject({ channel: "facebook_feed" });
+      expect(["2026-08-05 09:43:00.000Z", draftRevision]).toContain(
+        share.expected_post_revision,
       );
-      await expectNoHorizontalOverflow(page);
     }
-
-    if (testInfo.project.name.endsWith("phone-320")) {
-      await page.evaluate(() => {
-        Object.defineProperty(navigator, "share", {
-          configurable: true,
-          value: undefined,
-        });
-      });
-      await page.keyboard.press("Enter");
-      await expect(shareDialog).toBeVisible();
-      await page.getByRole("button", { name: "Share to Facebook" }).click();
-      await expect(shareNow).toBeEnabled({ timeout: 10_000 });
-      await shareNow.click();
-      await expect(
-        shareDialog.getByText(/System sharing is unavailable/i),
-      ).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(shareTrigger).toBeFocused();
-    }
-
-    await page.screenshot({
-      path: testInfo.outputPath("result-mobile.png"),
-      fullPage: true,
-    });
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(unknown).toEqual([]);
   });
 
   test("keeps Website-only private and viewport-bound until the final Send", async ({
@@ -982,6 +1218,8 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     let websitePostCount = 0;
     let websiteRequestBody: Record<string, unknown> | null = null;
+    let draftSaveCount = 0;
+    const deliverySequence: string[] = [];
     const readyPublication = {
       status: "draft_ready",
       attempts: 1,
@@ -1030,6 +1268,8 @@ test.describe("Dealer Social Post AI Flow", () => {
       });
     });
     await page.route("**/api/app/posts/qa-website-1/draft", async (route) => {
+      draftSaveCount += 1;
+      deliverySequence.push("draft");
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -1045,6 +1285,7 @@ test.describe("Dealer Social Post AI Flow", () => {
       async (route) => {
         if (route.request().method() === "POST") {
           websitePostCount += 1;
+          deliverySequence.push("website");
           websiteRequestBody = route.request().postDataJSON() as Record<
             string,
             unknown
@@ -1096,7 +1337,7 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "Start with a photo" }),
+      page.getByRole("heading", { name: "What are you posting?" }),
     ).toBeVisible();
     await page.evaluate(async (modelPolicyVersion) => {
       const image = `data:image/svg+xml;base64,${btoa(
@@ -1139,6 +1380,8 @@ test.describe("Dealer Social Post AI Flow", () => {
           generatedPost: {
             text: "Final synthetic caption after salesperson review.",
             postId: "qa-website-1",
+            scenarioId: "customer_delivery",
+            postRevision: "2026-08-05 09:43:00.000Z",
             releaseStatus: "saved",
             aiMeta: { modelPolicyVersion },
             platformIds: [],
@@ -1174,96 +1417,41 @@ test.describe("Dealer Social Post AI Flow", () => {
     }, CURRENT_TEST_MODEL_POLICY_VERSION);
     await page.reload();
 
+    await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible();
+    const postActions = page.getByRole("region", { name: "Post actions" });
+    await expect(postActions).toBeVisible();
+    // Website-only: the category is named in the header, and there is no
+    // channel row at all (the group would be "Share to").
     await expect(
-      page.getByRole("heading", { name: "Finish and send to website" }),
+      page.getByRole("banner").getByText("Delivery", { exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("Private website draft")).toBeVisible();
     await expect(page.getByText("TikTok")).toHaveCount(0);
-    await expect(
-      page.getByRole("list", { name: "Mobile platform outputs" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("group", { name: "Share to" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Share to / })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Review website draft" })).toHaveCount(
+      0,
+    );
     expect(websitePostCount).toBe(0);
+    await expect.poll(() => draftSaveCount).toBeGreaterThanOrEqual(1);
+    expect(deliverySequence.every((step) => step === "draft")).toBe(true);
 
-    const statusCard = page.getByRole("status").filter({
-      hasText: "Website selected",
+    const sendWebsite = postActions.getByRole("button", {
+      name: "Send website draft",
     });
-    await expect(statusCard).toBeVisible();
-    const initialCardGeometry = await statusCard.evaluate((element) => ({
-      height: element.getBoundingClientRect().height,
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-    }));
-    expect(initialCardGeometry.height).toBeLessThanOrEqual(64);
-    expect(initialCardGeometry.scrollWidth).toBeLessThanOrEqual(
-      initialCardGeometry.clientWidth + 1,
-    );
+    await sendWebsite.scrollIntoViewIfNeeded();
+    await expect(sendWebsite).toBeEnabled();
+    await expectControlsInsideViewport(page, sendWebsite);
+    await expectNoCriticalAccessibilityIssues(page);
+    await expectNoSeriousAxeViolations(page);
+    await expectNoHorizontalOverflow(page);
 
-    const footer = page.getByLabel("Post delivery actions");
-    const footerFrame = await footer.evaluate((element) => {
-      const shell = element.parentElement as HTMLElement;
-      const bounds = shell.getBoundingClientRect();
-      return {
-        parentIsBody: shell.parentElement === document.body,
-        bottom: bounds.bottom,
-        viewportHeight: window.innerHeight,
-      };
-    });
-    expect(footerFrame.parentIsBody).toBe(true);
-    expect(footerFrame.bottom).toBe(footerFrame.viewportHeight);
-    await expectControlsInsideViewport(page, footer.getByRole("button"));
-
-    const previewHeight = await page
-      .getByRole("region", { name: "Media preview" })
-      .evaluate((element) => element.getBoundingClientRect().height);
-    expect(previewHeight).toBeLessThanOrEqual(
-      testInfo.project.name.endsWith("phone-320") ? 161 : 321,
-    );
-
-    const privacyToggle = statusCard.locator(
-      'summary[aria-label="Website privacy review details"]',
-    );
-    await privacyToggle.click();
-    const privacyPanel = statusCard.locator("details > div");
-    await expect(privacyPanel).toBeVisible();
-    const privacyGeometry = await privacyPanel.evaluate((element) => {
-      const bounds = element.getBoundingClientRect();
-      return { left: bounds.left, right: bounds.right, width: window.innerWidth };
-    });
-    expect(privacyGeometry.left).toBeGreaterThanOrEqual(0);
-    expect(privacyGeometry.right).toBeLessThanOrEqual(privacyGeometry.width + 1);
-    await privacyToggle.click();
-
-    await page.locator("#main-content").evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-    });
-    const finalContentGeometry = await page.evaluate(() => {
-      const candidates = Array.from(
-        document.querySelectorAll<HTMLElement>(
-          'main a[href], main button:not([disabled]), main input:not([disabled]), main textarea:not([disabled]), main select:not([disabled]), main [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((element) => {
-        const style = getComputedStyle(element);
-        const bounds = element.getBoundingClientRect();
-        return (
-          style.display !== "none" && style.visibility !== "hidden" && bounds.height > 0
-        );
-      });
-      const lastControl = candidates.at(-1);
-      const footerShell = document
-        .querySelector<HTMLElement>('[aria-label="Post delivery actions"]')
-        ?.parentElement?.getBoundingClientRect();
-      const lastBounds = lastControl?.getBoundingClientRect();
-      return {
-        lastBottom: lastBounds?.bottom ?? Number.POSITIVE_INFINITY,
-        footerTop: footerShell?.top ?? Number.NEGATIVE_INFINITY,
-      };
-    });
-    expect(finalContentGeometry.lastBottom).toBeLessThanOrEqual(
-      finalContentGeometry.footerTop + 1,
-    );
-
-    await footer.getByRole("button", { name: "Send website draft" }).click();
+    draftSaveCount = 0;
+    deliverySequence.length = 0;
+    await sendWebsite.click();
     await expect.poll(() => websitePostCount).toBe(1);
+    expect(draftSaveCount).toBeGreaterThanOrEqual(1);
+    expect(deliverySequence.at(-1)).toBe("website");
+    expect(deliverySequence.slice(0, -1).every((step) => step === "draft")).toBe(true);
     expect(websiteRequestBody).toEqual({
       expected_post_revision: "2026-08-05 09:43:00.000Z",
       website_draft: expect.objectContaining({
@@ -1274,17 +1462,15 @@ test.describe("Dealer Social Post AI Flow", () => {
         ),
         kind: "customer_story",
         category: "deliveries",
+        privacyFlags: ["review_visual_privacy"],
       }),
     });
-    await expect(
-      page.getByRole("alert").filter({
-        hasText: "Draft ready — check status",
-      }),
-    ).toBeVisible();
-    await expect(
-      footer.getByRole("button", { name: "Review website draft" }),
-    ).toBeVisible();
-    await expect(page.getByRole("link", { name: "Review" })).toHaveCount(0);
+    const review = page.getByRole("link", { name: "Review website draft" });
+    await expect(review).toBeVisible();
+    await expect(review).toHaveAttribute(
+      "href",
+      "https://joegallant.me/studio/updates#draft-00000000-0000-4000-8000-000000000001",
+    );
     await page.waitForTimeout(100);
     expect(websitePostCount).toBe(1);
     await expectNoHorizontalOverflow(page);
@@ -1297,7 +1483,7 @@ test.describe("Dealer Social Post AI Flow", () => {
     // Keep this banner contract independent from a developer's active local
     // session and wait for the login route's lazy chunk before disconnecting.
     // Otherwise a very small/slow phone can go offline while Vite is still
-    // fetching the authenticated Capture chunk, turning a banner test into a
+    // fetching the authenticated Home chunk, turning a banner test into a
     // nondeterministic module-load failure.
     await page.route("**/api/app/session", async (route) => {
       await route.fulfill({

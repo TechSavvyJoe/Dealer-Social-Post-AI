@@ -1,6 +1,16 @@
 import React from "react";
 import { Check } from "lucide-react";
+import { extendTailwindMerge } from "tailwind-merge";
 import { cn } from "../../utils/classNames";
+
+// tailwind-merge only knows t-shirt font sizes, so plain cn() reads the
+// project's `text-caption` (13 px, tailwind.config.js) as a text color and
+// drops the variant's ink when the two meet, which left every size="lg"
+// badge in the inherited color. This merge knows the custom size. It can go
+// once utils/classNames.ts teaches cn() the same thing for every component.
+const mergeBadgeClasses = extendTailwindMerge({
+  extend: { classGroups: { "font-size": [{ text: ["caption"] }] } },
+});
 
 type Variant = "primary" | "success" | "warning" | "error" | "info" | "neutral";
 type Size = "sm" | "md" | "lg";
@@ -11,7 +21,11 @@ const variantStyles: Record<Variant, string> = {
   warning: "bg-warning-fill text-warning-ink border border-warning-ink/30",
   error: "bg-error-fill text-error-ink border border-error-ink/30",
   info: "bg-info-fill text-info-ink border border-info-ink/30",
-  neutral: "bg-panel-raised text-ink-2 border border-hairline",
+  // A translucent fill always steps off whatever it sits on, and the control
+  // edge clears 3:1 on canvas, panel and raised rows in both themes. The old
+  // raised fill and hairline vanished on a raised row (1.00:1 fill, 1.23:1
+  // edge) and in Sunlight Mode (1.26:1 edge on the canvas).
+  neutral: "bg-fill-subtle text-ink-2 border border-strong",
 };
 
 const sizeStyles: Record<Size, string> = {
@@ -67,7 +81,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
   ) => (
     <span
       ref={ref}
-      className={cn(
+      className={mergeBadgeClasses(
         "inline-flex items-center",
         "rounded-full",
         "font-medium",

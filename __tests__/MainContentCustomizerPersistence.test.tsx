@@ -1,260 +1,135 @@
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MainContent } from "../components/MainContent";
-import {
-  AppStep,
-  StyleOption,
-  ToneOption,
-  type Dealer,
-  type GeneratedPost,
-  type GenerationParams,
-} from "../types";
+import { useAppStore } from "../stores/appStore";
+import { AppStep, StyleOption, ToneOption } from "../types";
+import { loadSession } from "../utils/persistence";
+import { MainContent, type MainContentProps } from "../components/MainContent";
 
-const mocks = vi.hoisted(() => ({
-  state: {
-    generationParams: null as GenerationParams | null,
-  },
-}));
-
-vi.mock("../stores/appStore", () => ({
-  useAppStore: (selector: (state: typeof mocks.state) => unknown) =>
-    selector(mocks.state),
-}));
-
-vi.mock("../components/PostCustomizer", () => ({
-  PostCustomizer: (props: {
-    initialGenerationParams?: GenerationParams | null;
-    onGenerate: (...args: unknown[]) => Promise<void>;
-  }) => (
-    <div>
-      <output data-testid="customizer-seed">
-        {JSON.stringify(props.initialGenerationParams ?? null)}
-      </output>
-      <button
-        type="button"
-        onClick={() =>
-          void props.onGenerate(
-            StyleOption.Sporty,
-            ToneOption.Professional,
-            "Alex",
-            "Alex found the perfect SUV.",
-            "Retry-safe creative brief.",
-            {
-              scenarioId: "preowned_spotlight",
-              websiteEnabled: true,
-              websiteVehicleDescription: "2025 Ford Explorer ST",
-            },
-            ["gbp"],
-            {
-              primaryFormatId: "gbp",
-              imageAspectRatio: "4:3",
-              label: "Google Business · 4:3",
-            },
-            "both",
-          )
-        }
-      >
-        Generate from editor
-      </button>
-    </div>
-  ),
-}));
-
-vi.mock("../components/PostResult", () => ({
-  PostResult: ({ onRemix }: { onRemix: () => void }) => (
-    <button type="button" onClick={onRemix}>
-      Remix result
-    </button>
-  ),
-}));
-
-vi.mock("../components/CameraCapture", () => ({
-  ImageInput: () => <div>Camera step</div>,
-}));
-
-const dealer = {
-  id: "dealer-1",
-  name: "Example Motors",
-} as Dealer;
-
-const persistedParams: GenerationParams = {
-  style: StyleOption.Modern,
-  tone: ToneOption.Excited,
-  customerName: "Alex",
-  platformIds: ["facebook_feed", "gbp"],
-  mediaOutputMode: "both",
-  primaryFormatId: "marketplace",
-  imageAspectRatio: "16:9",
-  websiteEnabled: true,
-  websiteVehicleDescription: "2025 Ford Explorer ST",
-};
-
-const makeProps = (overrides: Record<string, unknown> = {}) => ({
-  displayedStep: AppStep.CUSTOMIZE,
-  step: AppStep.CUSTOMIZE,
-  currentDealer: dealer,
-  selectedImage: "data:image/png;base64,cGhvdG8=",
-  generatedPost: null as GeneratedPost | null,
-  error: null,
-  preferredStyle: StyleOption.Modern,
-  preferredTone: ToneOption.Excited,
-  isDesktopLayout: false,
-  generationProgress: 0,
-  progressMessage: "",
-  onLogin: vi.fn(),
-  onImageSelected: vi.fn(),
-  onReset: vi.fn(),
-  onRemix: vi.fn(),
-  onDismissError: vi.fn(),
-  onGenerate: vi.fn().mockResolvedValue(undefined),
-  onBackToCapture: vi.fn(),
-  onStyleToneChange: vi.fn(),
-  onRegenerateImage: vi.fn().mockResolvedValue(undefined),
-  onEditImage: vi.fn().mockResolvedValue(undefined),
-  onRegenerateText: vi.fn().mockResolvedValue(undefined),
-  onEditText: vi.fn().mockResolvedValue(""),
-  onFunMode: vi.fn().mockResolvedValue(undefined),
-  onGenerateVideo: vi.fn().mockResolvedValue(""),
-  ...overrides,
+describe("Details draft persistence", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useAppStore.setState({
+      currentDealer: { id: "dealer1", name: "Example Motors" },
+      role: "salesperson",
+      step: AppStep.HOME,
+      selectedImage: null,
+      postDraft: null,
+      pendingRelease: null,
+      pendingPhoto: null,
+      generationParams: null,
+      generatedPost: null,
+    });
+  });
+  // Only step changes: setStep leaves the draft alone for every non-Home
+  // target. The real Cancel path (cancelGeneration and its toasts) is covered
+  // by __tests__/AppNavigation.test.tsx and hooks/useGeneration.test.tsx.
+  it("step changes through Creating keep the photo, personal line and the exact signature object", () => {
+    const state = useAppStore.getState();
+    const release = {
+      customerName: "Maria Lopez",
+      signaturePngDataUrl: "data:image/png;base64,signature",
+      vin: "VIN123",
+    };
+    state.setSelectedImage("photo");
+    state.setPostDraft({
+      categoryId: "deliveries",
+      scenarioId: "customer_delivery",
+      personalLine: "A wonderful day",
+    });
+    state.setPendingRelease(release);
+    state.setStep(AppStep.DETAILS);
+    state.setStep(AppStep.CREATING);
+    state.setStep(AppStep.DETAILS);
+    expect(useAppStore.getState().pendingRelease).toBe(release);
+    expect(useAppStore.getState().postDraft?.personalLine).toBe("A wonderful day");
+    expect(useAppStore.getState().selectedImage).toBe("photo");
+  });
+  it("never persists signature bytes or an unposted personal line", () => {
+    const state = useAppStore.getState();
+    state.setPendingRelease({
+      customerName: "Maria Lopez",
+      signaturePngDataUrl: "PRIVATE_SIGNATURE",
+    });
+    state.setPostDraft({
+      categoryId: "deliveries",
+      scenarioId: "customer_delivery",
+      personalLine: "PRIVATE_LINE",
+    });
+    state.setStep(AppStep.DETAILS);
+    expect(JSON.stringify(loadSession())).not.toMatch(
+      /PRIVATE_SIGNATURE|PRIVATE_LINE|Maria Lopez/,
+    );
+    expect(loadSession()?.postDraft?.scenarioId).toBe("customer_delivery");
+  });
+  it("starts a fresh draft on Home without carrying the previous signature", () => {
+    const state = useAppStore.getState();
+    state.setPostDraft({ categoryId: "deliveries", scenarioId: "customer_delivery" });
+    state.setPendingRelease({
+      customerName: "Maria",
+      signaturePngDataUrl: "signature",
+    });
+    state.setStep(AppStep.HOME);
+    expect(useAppStore.getState().postDraft).toBeNull();
+    expect(useAppStore.getState().pendingRelease).toBeNull();
+    expect(loadSession()?.postDraft).toBeUndefined();
+  });
+  it("keeps the draft during My work navigation and same-photo remix", () => {
+    const state = useAppStore.getState();
+    state.setSelectedImage("photo");
+    state.setPostDraft({
+      categoryId: "inventory",
+      scenarioId: "new_arrival",
+      personalLine: "Just arrived",
+    });
+    state.setGenerationParams({
+      style: StyleOption.Modern,
+      tone: ToneOption.Excited,
+      customerName: "",
+      platformIds: ["gbp"],
+      primaryFormatId: "gbp",
+      imageAspectRatio: "4:3",
+    });
+    state.setStep(AppStep.WORK);
+    state.setStep(AppStep.POST);
+    state.startRemix();
+    expect(useAppStore.getState().step).toBe(AppStep.DETAILS);
+    expect(useAppStore.getState().postDraft?.personalLine).toBe("Just arrived");
+    expect(useAppStore.getState().generationParams?.platformIds).toEqual(["gbp"]);
+  });
 });
 
-describe("MainContent customizer delivery-plan persistence", () => {
-  beforeEach(() => {
-    mocks.state.generationParams = null;
-  });
-
-  it("hydrates persisted choices when a CUSTOMIZE session is restored", async () => {
-    mocks.state.generationParams = persistedParams;
-    render(<MainContent {...makeProps()} />);
-
-    expect(await screen.findByTestId("customizer-seed")).toHaveTextContent(
-      JSON.stringify(persistedParams),
-    );
-  });
-
-  it("does not leak stale persisted choices from Capture into a new post", async () => {
-    mocks.state.generationParams = persistedParams;
-    const { rerender } = render(
+describe("MainContent on Creating", () => {
+  it("drives the Creating screen from the generation stage and wires Cancel to App's handler", () => {
+    const onCancelGeneration = vi.fn();
+    render(
       <MainContent
-        {...makeProps({
-          displayedStep: AppStep.CAPTURE,
-          step: AppStep.CAPTURE,
-          selectedImage: null,
-        })}
+        {...({
+          displayedStep: AppStep.CREATING,
+          step: AppStep.CREATING,
+          currentDealer: { id: "dealer1", name: "Example Motors" },
+          selectedImage: "data:image/jpeg;base64,cGhvdG8=",
+          generatedPost: null,
+          error: null,
+          generationStage: "checks",
+          partsReady: { image: true, caption: true },
+          onCancelGeneration,
+        } as unknown as MainContentProps)}
       />,
     );
-
-    expect(await screen.findByText("Camera step")).toBeInTheDocument();
-    rerender(<MainContent {...makeProps()} />);
-
-    expect(await screen.findByTestId("customizer-seed")).toHaveTextContent("null");
-  });
-
-  it("uses the result's exact delivery profile when remixing the same photo", async () => {
-    mocks.state.generationParams = persistedParams;
-    const generatedPost: GeneratedPost = {
-      image: "data:image/png;base64,b3V0cHV0",
-      text: "Caption",
-      platformIds: ["gbp"],
-      mediaOutputMode: "video",
-      primaryFormatId: "gbp",
-      imageAspectRatio: "4:3",
-      websiteDraft: {
-        enabled: true,
-        kind: "site_update",
-        category: "inventory",
-        title: "New arrival",
-        body: "A fresh arrival is ready for review.",
-        altText: "Vehicle arrival creative from Example Motors.",
-        vehicleDescription: "2025 Ford Explorer ST",
-        schemaVersion: 1,
-      },
-    };
-    const props = makeProps({
-      displayedStep: AppStep.RESULT,
-      step: AppStep.RESULT,
-      generatedPost,
-    });
-    const { rerender } = render(<MainContent {...props} />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Remix result" }));
-    expect(props.onRemix).toHaveBeenCalledOnce();
-
-    rerender(<MainContent {...makeProps()} />);
-    const restored = JSON.parse(
-      (await screen.findByTestId("customizer-seed")).textContent || "null",
-    ) as GenerationParams;
-    expect(restored).toMatchObject({
-      platformIds: ["gbp"],
-      mediaOutputMode: "video",
-      primaryFormatId: "gbp",
-      imageAspectRatio: "4:3",
-      websiteEnabled: true,
-      websiteVehicleDescription: "2025 Ford Explorer ST",
-    });
-  });
-
-  it("captures exact editor choices before generation unmounts the editor", async () => {
-    const props = makeProps();
-    render(<MainContent {...props} />);
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Generate from editor" }),
+    expect(screen.getByRole("img", { name: "Your source photo" })).toHaveAttribute(
+      "src",
+      "data:image/jpeg;base64,cGhvdG8=",
     );
-
-    expect(props.onGenerate).toHaveBeenCalledWith(
-      StyleOption.Sporty,
-      ToneOption.Professional,
-      "Alex",
-      "Alex found the perfect SUV.",
-      "Retry-safe creative brief.",
-      {
-        scenarioId: "preowned_spotlight",
-        websiteEnabled: true,
-        websiteVehicleDescription: "2025 Ford Explorer ST",
-      },
-      ["gbp"],
-      expect.objectContaining({
-        primaryFormatId: "gbp",
-        imageAspectRatio: "4:3",
-      }),
-      "both",
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Running a final check on the caption and image…",
     );
-  });
-
-  it("round-trips the safe editor seed through a failed generation remount", async () => {
-    const props = makeProps();
-    const { rerender } = render(<MainContent {...props} />);
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Generate from editor" }),
-    );
-    rerender(
-      <MainContent
-        {...props}
-        displayedStep={AppStep.GENERATING}
-        step={AppStep.GENERATING}
-      />,
-    );
-    rerender(<MainContent {...props} />);
-
-    const restored = JSON.parse(
-      (await screen.findByTestId("customizer-seed")).textContent || "null",
-    ) as GenerationParams;
-    expect(restored).toMatchObject({
-      style: StyleOption.Sporty,
-      tone: ToneOption.Professional,
-      customerName: "Alex",
-      customText: "Alex found the perfect SUV.",
-      creativeBrief: "Retry-safe creative brief.",
-      scenarioId: "preowned_spotlight",
-      platformIds: ["gbp"],
-      mediaOutputMode: "both",
-      primaryFormatId: "gbp",
-      imageAspectRatio: "4:3",
-      websiteEnabled: true,
-      websiteVehicleDescription: "2025 Ford Explorer ST",
-    });
+    const current = within(screen.getByRole("list", { name: "Post generation stages" }))
+      .getAllByRole("listitem")
+      .filter((item) => item.getAttribute("aria-current") === "step");
+    expect(current.map((item) => item.textContent)).toEqual(["Final check"]);
+    expect(onCancelGeneration).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelGeneration).toHaveBeenCalledTimes(1);
   });
 });

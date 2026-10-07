@@ -40,10 +40,12 @@ const installLoopbackSessionCookie = async (
 ) => {
   const [name, value] = cookie.split("=", 2);
   const parsed = new URL(page.url());
-  // WebKit can retain the production Secure cookie as a distinct cookie with
-  // the same name/domain/path. Remove it, then use the more-specific /api path
-  // so later production Path=/ refreshes cannot displace this loopback shim.
-  await context.clearCookies({ name });
+  // The shim lives on the more-specific /api path so later production Path=/
+  // refreshes cannot displace it. Replace it in place (same name, domain and
+  // path) before removing anything: the signed-in screens fetch on their own
+  // (Home loads My work as soon as it lands), and a request sent while no
+  // cookie is installed gets a 401 that signs the page out. Then remove the
+  // production Path=/ cookie, which WebKit can retain as a distinct cookie.
   await context.addCookies([
     {
       name,
@@ -55,6 +57,58 @@ const installLoopbackSessionCookie = async (
       sameSite: "Lax",
     },
   ]);
+  await context.clearCookies({ name, path: "/" });
+};
+
+/**
+ * Impersonation and its exit swap the session in one response, and the app
+ * fetches with the new session at once (Home and the header load as soon as
+ * they mount). Over HTTPS the response's own Set-Cookie covers that. Over
+ * loopback the /api shim would still hold the previous bearer, which the
+ * server reads first, so install the minted bearer as the shim before the page
+ * sees the response, as the real cookie would be.
+ */
+const handOffSessionSwapsToLoopbackShim = async (
+  context: BrowserContext,
+  page: Page,
+) => {
+  // A fulfilled response does not expose Set-Cookie to the page, so the
+  // bearer each swap minted is kept here, read from the server's response.
+  // Keyed by path, not by Request: WebKit hands waitForResponse a different
+  // Request object for a fulfilled route than the one this handler saw. Swaps
+  // run one at a time, and each read consumes its entry, so a stale bearer
+  // from an earlier swap can never answer for a later one.
+  const mintedByPath = new Map<string, string>();
+  await page.route(
+    /\/api\/app\/session\/(?:impersonate|exit-impersonate)$/,
+    async (route) => {
+      const response = await route.fetch();
+      const minted = response
+        .headersArray()
+        .filter(({ name }) => name.toLowerCase() === "set-cookie")
+        .map(({ value }) => value.match(/^dealer_session=([^;,\s]+)/)?.[1])
+        .find(Boolean);
+      if (response.ok() && minted) {
+        mintedByPath.set(new URL(route.request().url()).pathname, minted);
+        await installLoopbackSessionCookie(context, page, `dealer_session=${minted}`);
+      }
+      await route.fulfill({ response });
+    },
+  );
+  return {
+    /** The dealer_session cookie the server minted for this swap's response. */
+    mintedCookie: async (response: Response): Promise<string> => {
+      const path = new URL(response.url()).pathname;
+      const routed = mintedByPath.get(path);
+      mintedByPath.delete(path);
+      if (routed) return `dealer_session=${routed}`;
+      // WebKit does not route a request its service worker handles (this spec
+      // runs with the production worker active), so the shim never saw this
+      // swap; read the bearer from the page's own response, as the sign-ins
+      // above do.
+      return responseSessionCookie(response);
+    },
+  };
 };
 
 const expectPersonSummary = (
@@ -90,9 +144,43 @@ const enterPersonalCode = async (page: Page, pin: string) => {
 
 const rosterRow = (page: Page, personName: string) =>
   page
-    .locator("div.font-semibold.text-surface-50")
+    .locator("div.font-semibold.text-ink")
     .filter({ hasText: personName })
     .locator("xpath=../..");
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The system admin's setup board: a table from `md` (the real-backend project
+ * runs at 1440 px), one row header per store holding the button that opens
+ * the store's detail under the row.
+ */
+const setupBoardRow = (page: Page, dealerName: string) =>
+  page.getByRole("rowheader", { name: new RegExp(escapeRegExp(dealerName)) });
+
+const openSetupBoardStore = async (page: Page, dealerName: string) => {
+  const opener = setupBoardRow(page, dealerName).getByRole("button");
+  // The board may be remounting after a session swap (sign-in, exit). Over
+  // loopback http this test installs the swapped cookie itself (production
+  // gets it with the response), so the board's list request can race the
+  // swap. One reload settles it on the installed session; it is recorded so
+  // a board that needs it is never silent.
+  try {
+    await expect(opener).toBeVisible({ timeout: 10_000 });
+  } catch {
+    test.info().annotations.push({
+      type: "setup-board-reload",
+      description: `"${dealerName}" was not on the board 10 s after a session swap; reloaded once`,
+    });
+    await page.reload();
+    await expect(opener).toBeVisible({ timeout: 15_000 });
+  }
+  if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
+  await expect(opener).toHaveAttribute("aria-expanded", "true");
+  const detailId = await opener.getAttribute("aria-controls");
+  expect(detailId).toBeTruthy();
+  return page.locator(`[id="${detailId}"]`);
+};
 
 const assertActiveProductionServiceWorker = async (page: Page) => {
   const result = await page.evaluate(async () => {
@@ -199,6 +287,7 @@ test.describe("real PocketBase release flow", () => {
 
     let adminCookie = await responseSessionCookie(adminLoginResponse);
     await installLoopbackSessionCookie(context, page, adminCookie);
+    const sessionSwaps = await handOffSessionSwapsToLoopbackShim(context, page);
 
     // Exercise the actual PocketBase JSVM callback boundary. Static imports do
     // not catch handler-scope mistakes because PB serializes each route into an
@@ -307,7 +396,14 @@ test.describe("real PocketBase release flow", () => {
     );
     await expect(page.getByRole("tab", { name: "Admins" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Users" })).toBeVisible();
-    await expect(page.getByLabel("Store", { exact: true })).toHaveValue("");
+    await expect(page.getByRole("tab", { name: "Connections" })).toBeVisible();
+    // The Dealers tab is the setup board; its search replaces the store filter,
+    // which lives on the Admins and Users tabs.
+    await expect(page.getByRole("heading", { name: "Setup board" })).toBeVisible();
+    await expect(
+      page.getByRole("searchbox", { name: "Find a dealership" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Store", { exact: true })).toHaveCount(0);
 
     const suffix = `${testInfo.project.name}-${Date.now().toString(36)}`
       .replace(/[^a-z0-9-]/gi, "")
@@ -320,24 +416,80 @@ test.describe("real PocketBase release flow", () => {
     // the exact password instead of normalizing a credential in transit.
     const managerPassword = ` E2E manager access ${suffix}! `;
 
-    await page.getByRole("button", { name: "Add Dealer" }).click();
-    await page.getByLabel("Dealer name *").fill(dealerName);
+    await page.getByRole("button", { name: "Add dealer", exact: true }).click();
+    const newDealerDialog = page.getByRole("dialog", { name: "New dealership" });
+    await expect(newDealerDialog).toBeVisible();
+    await newDealerDialog.getByLabel("Dealer name *").fill(dealerName);
     const createDealerPromise = page.waitForResponse(
       (response) =>
         response.url().endsWith("/api/app/dealers") &&
         response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "Create dealer" }).click();
+    await newDealerDialog.getByRole("button", { name: "Create dealer" }).click();
     const createDealerResponse = await createDealerPromise;
     expect(createDealerResponse.status()).toBe(200);
     const dealerId = String(((await createDealerResponse.json()) as JsonObject).id);
     expect(dealerId).toMatch(/^[a-z0-9]{15}$/);
-    await expect(page.locator("h3").filter({ hasText: dealerName })).toBeVisible();
+    await expect(newDealerDialog).toBeHidden();
 
-    await page.getByLabel("Store", { exact: true }).selectOption(dealerId);
-    await page.getByRole("tab", { name: "Admins" }).click();
+    // The setup board lists the store this spec just created, read back from
+    // PocketBase, and opening its row shows what is left to set up. A new
+    // store has no manager yet, so the deep links wait for one.
+    await expect(setupBoardRow(page, dealerName)).toBeVisible();
+    let storeDetail = await openSetupBoardStore(page, dealerName);
+    await expect(
+      storeDetail.getByRole("heading", { name: /^\d+ things? left to set up$/ }),
+    ).toBeVisible();
+    await expect(storeDetail.getByText("Brand voice", { exact: true })).toBeVisible();
+    await expect(
+      storeDetail.getByRole("button", { name: "Open Voice" }),
+    ).toBeDisabled();
+    await expect(
+      storeDetail.getByText("This store has no active manager yet."),
+    ).toBeVisible();
+    await expect(
+      storeDetail.getByRole("heading", { name: "This store's posts" }),
+    ).toBeVisible();
+
+    // Setup notes save on their own and survive a full reload.
+    const setupNotes = `E2E setup notes ${suffix}\nCall the GM before the Facebook page is linked.`;
+    const setupNotesField = storeDetail.getByLabel("Setup notes", { exact: true });
+    await expect(setupNotesField).toBeEnabled();
+    await setupNotesField.fill(setupNotes);
+    await expect(storeDetail.getByText("Unsaved changes")).toBeVisible();
+    const saveNotesPromise = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/app/dealers/${dealerId}`) &&
+        response.request().method() === "PATCH",
+    );
+    await storeDetail.getByRole("button", { name: "Save notes" }).click();
+    const saveNotesResponse = await saveNotesPromise;
+    expect(saveNotesResponse.status()).toBe(200);
+    await expect(storeDetail.getByText(/^Saved /)).toBeVisible();
+    await expect(storeDetail.getByRole("button", { name: "Save notes" })).toHaveCount(
+      0,
+    );
+
+    await installLoopbackSessionCookie(context, page, adminCookie);
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { name: "System admin" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await installLoopbackSessionCookie(context, page, adminCookie);
+    storeDetail = await openSetupBoardStore(page, dealerName);
+    await expect(storeDetail.getByLabel("Setup notes", { exact: true })).toHaveValue(
+      setupNotes,
+    );
+
+    // The open store's Admins button selects the store on the Admins tab.
+    await storeDetail.getByRole("button", { name: "Admins", exact: true }).click();
+    await expect(page.getByRole("tab", { name: "Admins" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByLabel("Store", { exact: true })).toHaveValue(dealerId);
     const managerPanel = page
-      .getByRole("heading", { name: `Add manager · ${dealerName}` })
+      .getByRole("heading", { name: `Add a manager to ${dealerName}` })
       .locator("..");
     await managerPanel.getByPlaceholder("e.g. Jordan Lee").fill(managerName);
     const createManagerPromise = page.waitForResponse(
@@ -432,7 +584,7 @@ test.describe("real PocketBase release flow", () => {
 
     await page.getByRole("tab", { name: "Users" }).click();
     const salespersonPanel = page
-      .getByRole("heading", { name: `Add salesperson · ${dealerName}` })
+      .getByRole("heading", { name: `Add a salesperson to ${dealerName}` })
       .locator("..");
     await salespersonPanel.getByPlaceholder("e.g. Sarah Chen").fill(salespersonName);
     const createSalespersonPromise = page.waitForResponse(
@@ -562,10 +714,26 @@ test.describe("real PocketBase release flow", () => {
     // hydrate the exact stored business hours from PocketBase.
     const expectedHours =
       "Mon 8:30 AM–7:30 PM, Tue–Fri 9:00 AM–8:00 PM, Sat 9:00 AM–6:00 PM, Sun closed";
+    // A footer the manager saves in Voice must reach the sample post beside
+    // the form, before and after the save is read back from PocketBase.
+    const expectedFooter = `Ask for the E2E ${suffix} delivery desk.`;
     await managerPage.getByRole("tab", { name: "Settings" }).click();
-    let managerSettingsCard = managerPage
-      .getByRole("heading", { name: "Dealership settings" })
-      .locator("xpath=../../..");
+    let managerSettingsCard = managerPage.getByRole("tabpanel", { name: "Settings" });
+    const settingsSections = managerSettingsCard.getByRole("navigation", {
+      name: "Dealership settings sections",
+    });
+    const openSettingsSection = async (label: string) => {
+      const sectionButton = settingsSections.getByRole("button", {
+        name: new RegExp(`^${escapeRegExp(label)}(,|$)`),
+      });
+      await sectionButton.click();
+      await expect(sectionButton).toHaveAttribute("aria-current", "page");
+      await expect(
+        managerSettingsCard.getByRole("heading", { name: label, exact: true }),
+      ).toBeVisible();
+    };
+    const samplePost = () =>
+      managerSettingsCard.getByRole("complementary", { name: "Sample post" });
     const managerMondayOpen = managerSettingsCard.getByLabel("Monday opens");
     const managerMondayClose = managerSettingsCard.getByLabel("Monday closes");
     const noApprovalRequired = managerSettingsCard.getByRole("radio", {
@@ -574,13 +742,29 @@ test.describe("real PocketBase release flow", () => {
     const approvalRequired = managerSettingsCard.getByRole("radio", {
       name: "Require manager approval",
     });
+    // The approval choice sits under "Require manager approval" in Workflow.
+    await openSettingsSection("Workflow");
+    await expect(noApprovalRequired).toBeChecked();
     await noApprovalRequired.focus();
     await managerPage.keyboard.press("ArrowRight");
     await expect(approvalRequired).toBeFocused();
-    await expect(approvalRequired).toHaveAttribute("aria-checked", "true");
+    await expect(approvalRequired).toBeChecked();
     await managerPage.keyboard.press("ArrowLeft");
     await expect(noApprovalRequired).toBeFocused();
-    await expect(noApprovalRequired).toHaveAttribute("aria-checked", "true");
+    await expect(noApprovalRequired).toBeChecked();
+
+    await openSettingsSection("Voice");
+    await expect(samplePost().getByText(expectedFooter)).toHaveCount(0);
+    await managerSettingsCard
+      .getByLabel("Footer", { exact: true })
+      .fill(expectedFooter);
+    await expect(
+      samplePost().locator('[data-part="footer"]').getByText(expectedFooter, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await openSettingsSection("Store profile");
     await managerMondayOpen.selectOption("8:30 AM");
     await managerMondayClose.selectOption("7:30 PM");
     await expect(managerMondayOpen).toHaveValue("8:30 AM");
@@ -599,6 +783,7 @@ test.describe("real PocketBase release flow", () => {
     const saveHoursResponse = await saveHoursPromise;
     expect(saveHoursResponse.status()).toBe(200);
     expect(saveHoursResponse.request().postData() || "").toContain(expectedHours);
+    expect(saveHoursResponse.request().postData() || "").toContain(expectedFooter);
 
     const managerSessionAfterSaveResponse = await managerPage.request.get(
       "/api/app/session",
@@ -608,6 +793,16 @@ test.describe("real PocketBase release flow", () => {
     const managerSessionAfterSave =
       (await managerSessionAfterSaveResponse.json()) as JsonObject;
     expect((managerSessionAfterSave.dealer as JsonObject).hours).toBe(expectedHours);
+    expect((managerSessionAfterSave.dealer as JsonObject).default_footer).toBe(
+      expectedFooter,
+    );
+    // Setup notes belong to the system admin alone; no session payload carries them.
+    expect(
+      Object.hasOwn(managerSessionAfterSave.dealer as JsonObject, "setup_notes"),
+    ).toBe(false);
+    expect(JSON.stringify(managerSessionAfterSave)).not.toContain(
+      `E2E setup notes ${suffix}`,
+    );
 
     // The explicit loopback session probe above also receives PocketBase's
     // production Secure refresh cookie. Restore the HTTP-only test shim before
@@ -618,15 +813,23 @@ test.describe("real PocketBase release flow", () => {
       timeout: 15_000,
     });
     await managerPage.getByRole("tab", { name: "Settings" }).click();
-    managerSettingsCard = managerPage
-      .getByRole("heading", { name: "Dealership settings" })
-      .locator("xpath=../../..");
+    managerSettingsCard = managerPage.getByRole("tabpanel", { name: "Settings" });
     await expect(managerSettingsCard.getByLabel("Monday opens")).toHaveValue("8:30 AM");
     await expect(managerSettingsCard.getByLabel("Monday closes")).toHaveValue(
       "7:30 PM",
     );
     await expect(
       managerSettingsCard.getByText(expectedHours, { exact: true }),
+    ).toBeVisible();
+    // After the reload the sample post is built from the saved record alone.
+    await openSettingsSection("Voice");
+    await expect(managerSettingsCard.getByLabel("Footer", { exact: true })).toHaveValue(
+      expectedFooter,
+    );
+    await expect(
+      samplePost().locator('[data-part="footer"]').getByText(expectedFooter, {
+        exact: true,
+      }),
     ).toBeVisible();
 
     // Sign in directly as the newly created salesperson (not through admin
@@ -659,7 +862,7 @@ test.describe("real PocketBase release flow", () => {
       salespersonCookie,
     );
     await expect(
-      salespersonPage.getByRole("heading", { name: "Start with a photo" }),
+      salespersonPage.getByRole("heading", { name: "What are you posting?" }),
     ).toBeVisible({ timeout: 15_000 });
 
     const restoredSalespersonResponse = await salespersonPage.request.get(
@@ -983,7 +1186,7 @@ test.describe("real PocketBase release flow", () => {
       name: salespersonName,
       role: "salesperson",
     });
-    const impersonationCookie = await responseSessionCookie(impersonateResponse);
+    const impersonationCookie = await sessionSwaps.mintedCookie(impersonateResponse);
     await installLoopbackSessionCookie(context, page, impersonationCookie);
 
     // The source bearer is parked while its child is active. Rejecting a copied
@@ -1029,7 +1232,7 @@ test.describe("real PocketBase release flow", () => {
     const restored = (await exitResponse.json()) as JsonObject;
     expect(restored.role).toBe("super_admin");
     expect(restored.is_impersonation).toBe(false);
-    adminCookie = await responseSessionCookie(exitResponse);
+    adminCookie = await sessionSwaps.mintedCookie(exitResponse);
     expect(adminCookie).not.toBe(preImpersonationAdminCookie);
     expect(adminCookie).not.toBe(impersonationCookie);
     await installLoopbackSessionCookie(context, page, adminCookie);
@@ -1043,6 +1246,76 @@ test.describe("real PocketBase release flow", () => {
     await installLoopbackSessionCookie(context, page, adminCookie);
 
     await expect(page.getByRole("heading", { name: "System Admin" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(impersonationBanner).toBeHidden();
+
+    // A row's deep link opens the store as its manager on the settings section
+    // that fixes it: "Open Voice" lands on Voice, holding the saved footer.
+    storeDetail = await openSetupBoardStore(page, dealerName);
+    await expect(storeDetail.getByLabel("Setup notes", { exact: true })).toHaveValue(
+      setupNotes,
+    );
+    const openVoice = storeDetail.getByRole("button", { name: "Open Voice" });
+    await expect(openVoice).toBeEnabled();
+    const preDeepLinkAdminCookie = adminCookie;
+    const deepLinkPromise = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/app/session/impersonate") &&
+        response.request().method() === "POST",
+    );
+    await openVoice.click();
+    const deepLinkResponse = await deepLinkPromise;
+    expect(deepLinkResponse.status()).toBe(200);
+    const deepLinked = (await deepLinkResponse.json()) as JsonObject;
+    expect(deepLinked.is_impersonation).toBe(true);
+    expectSessionPersonSummary(deepLinked.person, {
+      name: managerName,
+      role: "manager",
+    });
+    expect(JSON.stringify(deepLinked)).not.toContain("setup_notes");
+    expect(JSON.stringify(deepLinked)).not.toContain(`E2E setup notes ${suffix}`);
+    const deepLinkCookie = await sessionSwaps.mintedCookie(deepLinkResponse);
+    await installLoopbackSessionCookie(context, page, deepLinkCookie);
+
+    await expect(
+      impersonationBanner.getByText(managerName, { exact: true }),
+    ).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const deepLinkSettings = page.getByRole("tabpanel", { name: "Settings" });
+    await expect(
+      deepLinkSettings
+        .getByRole("navigation", { name: "Dealership settings sections" })
+        .getByRole("button", { name: /^Voice(,|$)/ }),
+    ).toHaveAttribute("aria-current", "page");
+    await expect(
+      deepLinkSettings.getByRole("heading", { name: "Voice", exact: true }),
+    ).toBeVisible();
+    await expect(deepLinkSettings.getByLabel("Footer", { exact: true })).toHaveValue(
+      expectedFooter,
+    );
+
+    const deepLinkExitPromise = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/app/session/exit-impersonate") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Exit to System Admin" }).click();
+    const deepLinkExitResponse = await deepLinkExitPromise;
+    expect(deepLinkExitResponse.status()).toBe(200);
+    expect((await deepLinkExitResponse.json()) as JsonObject).toMatchObject({
+      role: "super_admin",
+      is_impersonation: false,
+    });
+    adminCookie = await sessionSwaps.mintedCookie(deepLinkExitResponse);
+    expect(adminCookie).not.toBe(preDeepLinkAdminCookie);
+    await installLoopbackSessionCookie(context, page, adminCookie);
+    await expect(page.getByRole("heading", { name: "System admin" })).toBeVisible({
       timeout: 15_000,
     });
     await expect(impersonationBanner).toBeHidden();

@@ -54,6 +54,7 @@ const basePost: GeneratedPost = {
   captionSource: "ai",
   isBasicFallback: false,
   postId: "post-1",
+  postRevision: "revision-before-link",
   releaseId: "release-1",
   releaseStatus: "save_failed",
   releaseLinkStatus: "link_failed",
@@ -85,7 +86,12 @@ describe("useReleaseRepair", () => {
   });
 
   it("a manual retry links the release and unlocks delivery", async () => {
-    mocks.linkReleaseToPostWithRetry.mockResolvedValue(undefined);
+    mocks.linkReleaseToPostWithRetry.mockResolvedValue({
+      id: "release-1",
+      post_id: "post-1",
+      has_release: true,
+      post_revision: "revision-after-link",
+    });
     const { result } = renderHook(() => useReleaseRepair({ post: basePost }));
 
     await act(async () => {
@@ -98,6 +104,9 @@ describe("useReleaseRepair", () => {
     );
     expect(result.current.releaseStatus).toBe("saved");
     expect(result.current.releaseLinkStatus).toBeUndefined();
+    expect(mocks.setGeneratedPost).toHaveBeenCalledWith(
+      expect.objectContaining({ postRevision: "revision-after-link" }),
+    );
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
       "Photo release saved to this post. Copy, share, save, and export are unlocked.",
     );
@@ -123,7 +132,12 @@ describe("useReleaseRepair", () => {
   });
 
   it("retries automatically exactly once per mount when the connection returns", async () => {
-    mocks.linkReleaseToPostWithRetry.mockResolvedValue(undefined);
+    mocks.linkReleaseToPostWithRetry.mockResolvedValue({
+      id: "release-1",
+      post_id: "post-1",
+      has_release: true,
+      post_revision: "revision-after-link",
+    });
     renderHook(() => useReleaseRepair({ post: basePost }));
 
     expect(mocks.connectionSubscribers.size).toBe(1);

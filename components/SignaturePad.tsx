@@ -7,24 +7,61 @@ import React, {
   forwardRef,
   useState,
 } from "react";
-import { m } from "framer-motion";
 import { Eraser, PenLine } from "lucide-react";
+import { Button } from "./ui/Button";
+import { TYPED_SIGNATURE_ATTESTATION } from "./details/releaseConsent";
+
+/** What the visible mode still needs before it counts as signed. */
+export type SignatureGap = "drawing" | "typed_name" | "attestation";
 
 export interface SignaturePadHandle {
   clear: () => void;
   isEmpty: () => boolean;
   /** Returns a PNG data URL of the signature on transparent background. */
   toDataURL: () => string | null;
+  /** The step still missing in the visible mode, or null when signed. */
+  missingStep: () => SignatureGap | null;
 }
 
 interface SignaturePadProps {
   width?: number;
   height?: number;
+  /** Stroke and typed-signature colour. Defaults to the theme's `--ink`. */
   strokeColor?: string;
   strokeWidth?: number;
   className?: string;
   onChange?: (isEmpty: boolean) => void;
+  /** Id of a message about the signature (e.g. the sheet's inline error). */
+  describedBy?: string;
 }
+
+/**
+ * The theme's ink as a canvas colour, read from `--ink` on the document root
+ * (where `.theme-light` is toggled). A canvas cannot use the CSS variable
+ * itself, and a fixed white stroke disappears on the Sunlight pad. Returns
+ * undefined when the token is missing or malformed.
+ */
+export const readInkColor = (): string | undefined => {
+  if (typeof document === "undefined" || typeof getComputedStyle !== "function") {
+    return undefined;
+  }
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--ink");
+  const channels = raw
+    .trim()
+    .split(/[\s,/]+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .map(Number);
+  if (
+    channels.length !== 3 ||
+    channels.some(
+      (channel) => !Number.isFinite(channel) || channel < 0 || channel > 255,
+    )
+  ) {
+    return undefined;
+  }
+  return `rgb(${channels.join(", ")})`;
+};
 
 /**
  * Pointer-event signature pad. Works with mouse, touch, and Apple Pencil.
@@ -35,13 +72,19 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
     {
       width = 600,
       height = 220,
-      strokeColor = "#ffffff",
+      strokeColor: strokeColorProp,
       strokeWidth = 2.5,
       className,
       onChange,
+      describedBy,
     },
     ref,
   ) => {
+    // Read once per mount: the pad lives inside a sheet that remounts on open.
+    // "currentColor" only applies when --ink is unreadable; the canvas carries
+    // text-ink so it still resolves to the theme's ink.
+    const [themeInk] = useState(readInkColor);
+    const strokeColor = strokeColorProp ?? themeInk ?? "currentColor";
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const canvasContainerRef = useRef<HTMLDivElement | null>(null);
     const drawingRef = useRef(false);
@@ -50,8 +93,10 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
     const [signatureMethod, setSignatureMethod] = useState<"draw" | "type">("draw");
     const [typedName, setTypedName] = useState("");
     const [attested, setAttested] = useState(false);
+    const labelId = useId();
     const typedNameId = useId();
-    const statusId = useId();
+    const drawStatusId = useId();
+    const typedStatusId = useId();
     const typedSignatureComplete = typedName.trim().length > 0 && attested;
     const signatureComplete =
       signatureMethod === "draw" ? hasStrokes : typedSignatureComplete;
@@ -72,6 +117,8 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
 
     // Size the bitmap from the rendered container so signatures stay crisp
     // without overflowing narrow phones. Preserve existing strokes on resize.
+    // The canvas stays mounted while the typed mode is showing (it is only
+    // hidden), so strokes survive a switch to "Type name instead" and back.
     useEffect(() => {
       const canvas = canvasRef.current;
       const container = canvasContainerRef.current;
@@ -219,135 +266,141 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
           if (!canvas || !hasStrokes) return null;
           return canvas.toDataURL("image/png");
         },
+        missingStep: () => {
+          if (signatureMethod === "draw") return hasStrokes ? null : "drawing";
+          if (!typedName.trim()) return "typed_name";
+          return attested ? null : "attestation";
+        },
       }),
-      [clear, hasStrokes, signatureComplete, signatureMethod, typedSignatureDataUrl],
+      [
+        attested,
+        clear,
+        hasStrokes,
+        signatureComplete,
+        signatureMethod,
+        typedName,
+        typedSignatureDataUrl,
+      ],
     );
 
     return (
-      <fieldset className={className}>
-        <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-surface-300">
-          Customer signature
-        </legend>
-        <div
-          className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-hairline bg-surface-950/50 p-1"
-          role="group"
-          aria-label="Signature method"
-        >
-          {(["draw", "type"] as const).map((method) => (
-            <button
-              key={method}
-              type="button"
-              aria-pressed={signatureMethod === method}
-              onClick={() => setSignatureMethod(method)}
-              className={`min-h-11 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
-                signatureMethod === method
-                  ? "bg-primary-500/25 text-primary-100 [.theme-light_&]:text-primary-950"
-                  : "text-surface-400 hover:bg-fill-subtle hover:text-surface-200"
-              }`}
-            >
-              {method === "draw" ? "Draw signature" : "Type name"}
-            </button>
-          ))}
+      <fieldset
+        className={className}
+        aria-labelledby={labelId}
+        aria-describedby={describedBy}
+      >
+        <div className="mb-2 flex min-h-11 items-center justify-between gap-3">
+          <span id={labelId} className="text-sm font-medium text-ink-2">
+            Customer&apos;s signature
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="-mr-3 min-h-11 px-3"
+            onClick={() =>
+              setSignatureMethod((method) => (method === "draw" ? "type" : "draw"))
+            }
+          >
+            {signatureMethod === "draw" ? "Type name instead" : "Draw instead"}
+          </Button>
         </div>
 
-        {signatureMethod === "draw" ? (
-          <>
-            <div
-              ref={canvasContainerRef}
-              className="relative w-full overflow-hidden rounded-xl border border-strong bg-surface-950/60"
-              style={{ maxWidth: `${width}px`, aspectRatio: `${width} / ${height}` }}
-            >
-              <canvas
-                ref={canvasRef}
-                role="img"
-                aria-label="Draw the customer's signature with a pointer, finger, or stylus"
-                aria-describedby={statusId}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
-                className="absolute inset-0 block touch-none cursor-crosshair"
-                style={{ touchAction: "none" }}
-              />
-              {!hasStrokes && (
-                <m.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="pointer-events-none absolute inset-0 flex items-center justify-center"
-                >
-                  <div className="flex items-center gap-2 text-xs text-surface-400">
-                    <PenLine className="h-3.5 w-3.5" />
-                    Sign with finger or stylus
-                  </div>
-                </m.div>
-              )}
-            </div>
-            <div className="mt-2 flex items-center justify-between text-[10px] text-surface-400">
-              <span
-                id={statusId}
-                role="status"
-                aria-live="polite"
-                className={hasStrokes ? "text-success-400" : "text-surface-500"}
-              >
-                {hasStrokes ? "Signature captured" : "Awaiting signature…"}
-              </span>
-              <button
-                type="button"
-                onClick={clear}
-                disabled={!hasStrokes}
-                className="flex min-h-11 items-center gap-1 rounded px-3 py-2 text-surface-300 transition-colors hover:bg-fill-subtle disabled:cursor-not-allowed disabled:opacity-30"
-              >
-                <Eraser className="h-3 w-3" />
-                Clear
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="space-y-3 rounded-xl border border-strong bg-surface-950/40 p-3">
-            <div>
-              <label
-                htmlFor={typedNameId}
-                className="mb-1.5 block text-xs font-medium text-surface-300"
-              >
-                Type the customer’s full legal name
-              </label>
-              <input
-                id={typedNameId}
-                type="text"
-                autoComplete="name"
-                value={typedName}
-                onChange={(event) => setTypedName(event.target.value.slice(0, 160))}
-                className="min-h-11 w-full rounded-xl border-2 border-surface-700 bg-surface-900/60 px-3 py-2 text-base text-surface-50 focus:border-primary-500 focus:outline-none"
-              />
-            </div>
-            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-hairline p-3 text-sm text-surface-200">
-              <input
-                type="checkbox"
-                checked={attested}
-                onChange={(event) => setAttested(event.target.checked)}
-                className="mt-0.5 h-5 w-5 shrink-0 accent-primary-500"
-              />
-              <span>
-                I am the named customer and agree that typing my name is my electronic
-                signature for this photo release.
-              </span>
-            </label>
-            <p
-              id={statusId}
+        <div hidden={signatureMethod !== "draw"}>
+          <div
+            ref={canvasContainerRef}
+            className="relative w-full overflow-hidden rounded-lg border border-strong bg-panel-raised"
+            style={{ maxWidth: `${width}px`, aspectRatio: `${width} / ${height}` }}
+          >
+            <canvas
+              ref={canvasRef}
+              role="img"
+              aria-label="Draw the customer's signature with a pointer, finger, or stylus"
+              aria-describedby={drawStatusId}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              className="absolute inset-0 block cursor-crosshair touch-none text-ink"
+              style={{ touchAction: "none" }}
+            />
+            {!hasStrokes && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 text-sm text-ink-2">
+                <PenLine className="h-4 w-4" aria-hidden="true" />
+                Sign with finger or stylus
+              </div>
+            )}
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <span
+              id={drawStatusId}
               role="status"
               aria-live="polite"
-              className={
-                typedSignatureComplete
-                  ? "text-xs text-success-400"
-                  : "text-xs text-surface-400"
-              }
+              className={`text-caption ${hasStrokes ? "text-success-ink" : "text-ink-hint"}`}
             >
-              {typedSignatureComplete
-                ? "Electronic signature ready"
-                : "Enter the customer’s name and confirm the attestation."}
-            </p>
+              {hasStrokes ? "Signed" : "Not signed yet"}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-mr-3 min-h-11 px-3"
+              leftIcon={<Eraser />}
+              onClick={clear}
+              disabled={!hasStrokes}
+            >
+              Clear
+            </Button>
           </div>
-        )}
+        </div>
+
+        <div
+          hidden={signatureMethod !== "type"}
+          className="space-y-4 rounded-lg border border-strong bg-panel-raised p-4"
+        >
+          <div>
+            <label
+              htmlFor={typedNameId}
+              className="mb-1.5 block text-sm font-medium text-ink-2"
+            >
+              Type the customer’s full legal name
+            </label>
+            {/* Never offer AutoFill here: the phone belongs to the salesperson,
+                so a suggested name would be theirs, not the customer's. */}
+            <input
+              id={typedNameId}
+              type="text"
+              name="typed-signature"
+              autoComplete="off"
+              autoCapitalize="words"
+              spellCheck={false}
+              value={typedName}
+              onChange={(event) => setTypedName(event.target.value.slice(0, 160))}
+              className="min-h-11 w-full rounded-sm border border-strong bg-panel px-3 text-base text-ink transition-colors duration-120 ease-out focus:border-brand-ink"
+            />
+          </div>
+          <label className="flex cursor-pointer items-start gap-3 text-sm text-ink">
+            <input
+              type="checkbox"
+              checked={attested}
+              onChange={(event) => setAttested(event.target.checked)}
+              className="mt-0.5 h-5 w-5 shrink-0 accent-brand-fill"
+            />
+            <span>{TYPED_SIGNATURE_ATTESTATION}</span>
+          </label>
+          <p
+            id={typedStatusId}
+            role="status"
+            aria-live="polite"
+            className={`text-caption ${
+              typedSignatureComplete ? "text-success-ink" : "text-ink-hint"
+            }`}
+          >
+            {typedSignatureComplete
+              ? "Electronic signature ready"
+              : "Enter the customer’s name and confirm the attestation."}
+          </p>
+        </div>
       </fieldset>
     );
   },

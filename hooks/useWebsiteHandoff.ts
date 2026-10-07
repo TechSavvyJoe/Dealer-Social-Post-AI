@@ -18,6 +18,7 @@ import {
   type WebsitePublication,
 } from "../services/websitePublishing";
 import { useAppStore } from "../stores/appStore";
+import { adoptPostRevision } from "../utils/postRevision";
 import { useToast } from "../components/ui/Toast";
 import type { Dealer, GeneratedPost } from "../types";
 import type { PendingDraftSync } from "./useDraftAutosave";
@@ -365,7 +366,6 @@ export const useWebsiteHandoff = ({
           imageDataUrl: capturedCreative.image,
           platformCaptions: savedPlatformCaptions,
         });
-        autosave.lastRevisionRef.current = null;
         const draftSaved = await autosave.flush();
         const expectedPostRevision = autosave.lastRevisionRef.current;
         if (!draftSaved || !expectedPostRevision) {
@@ -415,6 +415,12 @@ export const useWebsiteHandoff = ({
           expectedPostRevision,
         );
         persistWebsiteState(next.websiteDraft ?? finalDraft, next, creativePatch);
+        // Freezing the hand-off advances posts.updated; without this the next
+        // social share receipt is rejected as stale.
+        adoptPostRevision(
+          post.postId,
+          (next as { post_revision?: string }).post_revision,
+        );
         setWebsiteCheckError(null);
         toast.success(
           next.status === "waiting_approval"

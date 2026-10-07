@@ -1,5 +1,4 @@
 import React from "react";
-import { AlertTriangle } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
@@ -40,15 +39,10 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
         </>
       }
     >
-      <div className="flex flex-col items-center text-center">
-        <div className="flex items-center justify-center h-16 w-16 rounded-full bg-red-900/20 mb-4">
-          <AlertTriangle className="h-8 w-8 text-red-400" />
-        </div>
-        <p className="text-sm text-surface-300">
-          Are you sure? This action cannot be undone and will permanently remove this
-          item.
-        </p>
-      </div>
+      <p className="text-sm text-ink-2">
+        Are you sure? This action cannot be undone and will permanently remove this
+        item.
+      </p>
     </Modal>
   );
 };

@@ -34,6 +34,12 @@ export type PublishStatus =
       via: "web-share" | "direct-api";
       /** Always true today — remind user to paste caption into the app. */
       pasteRequired: boolean;
+      /**
+       * Whether the caption reached the clipboard alongside the share. Some
+       * apps (Facebook) drop shared text, so when this is false nothing on the
+       * device carries the caption until the salesperson taps Copy caption.
+       */
+      captionCopied: boolean;
       message?: string;
     }
   | {
@@ -637,7 +643,7 @@ export const sharePrepared = async (
       via: "download-copy",
       pasteRequired: true,
       message:
-        "System sharing is unavailable. Copy the caption, save the media, then open the app.",
+        "Sharing isn't available in this browser. Save the file and copy the caption, then open the app.",
     };
   }
 
@@ -648,7 +654,7 @@ export const sharePrepared = async (
     return {
       kind: "error",
       message:
-        "The selected video is not prepared. Retry media preparation; the app will not substitute a still image.",
+        "The video isn't ready yet. Try again in a moment. A still image won't be sent in its place.",
     };
   }
   const shareData = chooseSharePayload(
@@ -663,7 +669,7 @@ export const sharePrepared = async (
       via: "download-copy",
       pasteRequired: true,
       message:
-        "This browser cannot share the prepared media. Save it, then open the app.",
+        "This browser can't share this file. Save it and copy the caption, then open the app.",
     };
   }
 
@@ -685,7 +691,7 @@ export const sharePrepared = async (
         via: "download-copy",
         pasteRequired: true,
         message:
-          "The share sheet could not open. Save the media or open the app below.",
+          "The share sheet didn't open. Save the file and copy the caption, then open the app.",
       };
     }
     const copied = await clipboardPromise;
@@ -693,16 +699,18 @@ export const sharePrepared = async (
       kind: "shared",
       via: "web-share",
       pasteRequired: true,
+      captionCopied: copied,
       message: copied
-        ? "Media sent to the share sheet. The caption is ready to paste in the destination app."
-        : "Media sent to the share sheet. Use Copy caption below before finishing the post.",
+        ? "Sent to the share sheet. The caption is copied and ready to paste."
+        : "Sent to the share sheet. Tap Copy caption, then paste it into your post.",
     };
   } catch {
     return {
       kind: "fallback",
       via: "download-copy",
       pasteRequired: true,
-      message: "The share sheet could not open. Save the media or open the app below.",
+      message:
+        "The share sheet didn't open. Save the file and copy the caption, then open the app.",
     };
   }
 };

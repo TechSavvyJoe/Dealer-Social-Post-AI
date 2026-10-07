@@ -76,7 +76,7 @@ describe("final frontend residuals", () => {
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 
-  it("uses truthful neutral studio chrome and the signed-in posting identity", () => {
+  it("keeps dealer context and the signed-in posting identity", () => {
     render(
       <Header
         dealer={{ id: "dealer-b", name: "Northstar Motors" }}
@@ -93,9 +93,7 @@ describe("final frontend residuals", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Publish studio" }),
-    ).toBeVisible();
+    expect(screen.getByText("Northstar Motors")).toBeVisible();
     expect(screen.queryByText("Ready to publish")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Posting as Jamie Rivera")).toBeVisible();
   });

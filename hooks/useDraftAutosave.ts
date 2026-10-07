@@ -5,7 +5,9 @@ import type {
   DeliveryCaption,
 } from "../utils/complianceDisclosures";
 import { logError } from "../utils/telemetry";
+import { ApiError } from "../services/apiErrors";
 import type { GeneratedPost } from "../types";
+import { useAppStore } from "../stores/appStore";
 
 export interface PendingDraftSync {
   caption: string;
@@ -14,7 +16,14 @@ export interface PendingDraftSync {
   platformCaptions?: Record<string, string>;
 }
 
-export type DraftAutosaveStatus = "idle" | "saving" | "saved" | "failed";
+export type DraftAutosaveStatus = "idle" | "saving" | "saved" | "failed" | "conflict";
+
+/**
+ * Another tab or device saved this post after this editor loaded it. Saving
+ * again would overwrite that edit, so autosave stops until the post is reopened.
+ */
+export const DRAFT_CONFLICT_MESSAGE =
+  "This post changed on another device or tab. Reopen it from My work to keep editing.";
 
 export interface UseDraftAutosaveOptions {
   post: GeneratedPost;
@@ -34,12 +43,26 @@ export interface UseDraftAutosaveOptions {
 export interface UseDraftAutosaveResult {
   status: DraftAutosaveStatus;
   flush: () => Promise<boolean>;
-  /** The "Retry" control after a failed save — same operation as `flush`. */
+  /**
+   * The "Retry save" control after a failed save — same operation as `flush`.
+   * After a conflict it sends nothing: the stale token can only be refused
+   * again, so the edit stays on this device until the post is reopened.
+   */
   retry: () => Promise<boolean>;
   /** Manually queue a draft to save (used by the website handoff's exact-creative send). */
   stage: (draft: PendingDraftSync) => void;
   lastRevisionRef: React.MutableRefObject<string | null>;
 }
+
+/**
+ * The status a new edit shows. After a conflict the edit is kept on this
+ * device but never sent, so "Saving…" would be a false promise and would hide
+ * the "changed somewhere else" banner while the salesperson types.
+ */
+const editStatus = (
+  conflictPostId: string | null,
+  postId: string | undefined,
+): DraftAutosaveStatus => (postId && conflictPostId === postId ? "conflict" : "saving");
 
 /**
  * Draft autosave extracted verbatim from components/PostResult.tsx.
@@ -71,7 +94,26 @@ export const useDraftAutosave = ({
     platformCaptions: JSON.stringify(post.platformCaptions || {}),
   });
   /** Server revision returned by the latest exact draft save. */
-  const lastRevisionRef = useRef<string | null>(null);
+  const lastRevisionRef = useRef<string | null>(post.postRevision || null);
+  /**
+   * The post the server reported a newer edit for. Keyed by id, so a save the
+   * old post queued during a switch stays blocked while the next post starts
+   * clean.
+   */
+  const conflictPostIdRef = useRef<string | null>(null);
+  /** The post on screen now; a queued save never reports status for another. */
+  const livePostIdRef = useRef(post.postId);
+  livePostIdRef.current = post.postId;
+  useEffect(() => {
+    // Another post must not inherit the "changed elsewhere" state.
+    setStatus((current) => (current === "conflict" ? "idle" : current));
+  }, [post.postId]);
+  useEffect(() => {
+    // Release linking and other same-post server transitions can advance the
+    // revision outside autosave. Adopt the revision carried by the live post;
+    // the response path below still refuses to replace a newer observed token.
+    if (post.postRevision) lastRevisionRef.current = post.postRevision;
+  }, [post.postId, post.postRevision]);
 
   const flush = useCallback((): Promise<boolean> => {
     const draft = pendingDraftSyncRef.current;
@@ -79,34 +121,91 @@ export const useDraftAutosave = ({
       clearTimeout(draftSyncTimeoutRef.current);
       draftSyncTimeoutRef.current = null;
     }
-    if (!draft || !post.postId || !editable) return Promise.resolve(true);
+    const postId = post.postId;
+    if (!draft || !postId || !editable) return Promise.resolve(true);
+    const report = (next: DraftAutosaveStatus) => {
+      if (draftSyncMountedRef.current && livePostIdRef.current === postId) {
+        setStatus(next);
+      }
+    };
 
     const operation = draftSyncChainRef.current.then(async () => {
+      // Retrying with the stale token can only fail again and would never
+      // tell the salesperson why; keep the conflict state until a reopen.
+      if (conflictPostIdRef.current === postId) {
+        report("conflict");
+        return false;
+      }
+      const expectedPostRevision = lastRevisionRef.current;
+      if (!expectedPostRevision) {
+        // The server would refuse this as POST_DRAFT_REVISION_REQUIRED, and a
+        // retry cannot invent the token: only a reopen loads one. Treat it as
+        // the conflict it is, not a connection failure with a futile Retry.
+        conflictPostIdRef.current = postId;
+        logError("post.draft_sync_conflict", {
+          postId,
+          message: "Reopen this post from My work to keep going.",
+        });
+        report("conflict");
+        return false;
+      }
       try {
-        const updated = await updatePostDraft(post.postId as string, {
+        const updated = await updatePostDraft(postId, {
           ...draft,
+          expectedPostRevision,
           grounding,
         });
-        lastRevisionRef.current = updated.post_revision;
         lastSyncedDraftRef.current = {
           caption: draft.caption,
           disclosures: draft.disclosures,
           image: draft.imageDataUrl || lastSyncedDraftRef.current.image,
           platformCaptions: JSON.stringify(draft.platformCaptions || {}),
         };
+        const store = useAppStore.getState();
+        const current = store.generatedPost;
+        let authoritativeRevision = updated.post_revision;
+        if (
+          current &&
+          current.postId === postId &&
+          current.postRevision &&
+          current.postRevision !== expectedPostRevision
+        ) {
+          authoritativeRevision = current.postRevision;
+        }
+        lastRevisionRef.current = authoritativeRevision;
+        if (current && current.postId === postId) {
+          const currentPost = current;
+          const savedDraftIsStillLatest = pendingDraftSyncRef.current === draft;
+          store.setGeneratedPost(
+            savedDraftIsStillLatest
+              ? {
+                  ...currentPost,
+                  text: draft.caption,
+                  disclosures: draft.disclosures || undefined,
+                  platformCaptions: draft.platformCaptions,
+                  image: draft.imageDataUrl || currentPost.image,
+                  postRevision: authoritativeRevision,
+                }
+              : { ...currentPost, postRevision: authoritativeRevision },
+            { archive: false },
+          );
+        }
         if (pendingDraftSyncRef.current === draft) {
           pendingDraftSyncRef.current = null;
         }
-        if (draftSyncMountedRef.current) {
-          setStatus(pendingDraftSyncRef.current ? "saving" : "saved");
-        }
+        report(pendingDraftSyncRef.current ? "saving" : "saved");
         return true;
       } catch (err) {
-        logError("post.draft_sync_failed", {
-          postId: post.postId,
+        const conflict =
+          err instanceof ApiError &&
+          (err.code === "POST_DRAFT_REVISION_CONFLICT" ||
+            err.code === "POST_DRAFT_REVISION_REQUIRED");
+        if (conflict) conflictPostIdRef.current = postId;
+        logError(conflict ? "post.draft_sync_conflict" : "post.draft_sync_failed", {
+          postId,
           message: err instanceof Error ? err.message : String(err),
         });
-        if (draftSyncMountedRef.current) setStatus("failed");
+        report(conflict ? "conflict" : "failed");
         return false;
       }
     });
@@ -116,7 +215,7 @@ export const useDraftAutosave = ({
 
   const stage = useCallback((draft: PendingDraftSync) => {
     pendingDraftSyncRef.current = draft;
-    setStatus("saving");
+    setStatus(editStatus(conflictPostIdRef.current, livePostIdRef.current));
   }, []);
 
   useEffect(() => {
@@ -151,7 +250,7 @@ export const useDraftAutosave = ({
       ...(imageChanged ? { imageDataUrl: post.image } : {}),
       platformCaptions: effectivePack,
     };
-    setStatus("saving");
+    setStatus(editStatus(conflictPostIdRef.current, post.postId));
     if (draftSyncTimeoutRef.current) clearTimeout(draftSyncTimeoutRef.current);
     draftSyncTimeoutRef.current = setTimeout(() => {
       void flush();

@@ -11,7 +11,8 @@ export type PlatformGlyphKey =
   | "native"
   | "generic";
 
-export type PlatformGlyphSize = "sm" | "md" | "lg";
+/** `xs` is the 16 px mark that sits inside a chip: a flat tile, no shadow. */
+export type PlatformGlyphSize = "xs" | "sm" | "md" | "lg";
 
 export interface PlatformGlyphProps extends Omit<
   React.HTMLAttributes<HTMLSpanElement>,
@@ -255,32 +256,43 @@ const GLYPHS: Readonly<Record<PlatformGlyphKey, React.FC<GlyphSvgProps>>> = {
   generic: GenericGlyph,
 };
 
+/** Each platform's own tile colours: these are its brand mark, not app chrome. */
 const TONE_CLASSES: Readonly<Record<PlatformGlyphKey, string>> = {
   instagram:
-    "border-strong bg-[linear-gradient(135deg,#6d28d9_0%,#db2777_48%,#f97316_100%)] text-white shadow-[0_5px_14px_rgba(219,39,119,0.24)]",
-  facebook:
-    "border-[#4391f5] bg-[#1877f2] text-white shadow-[0_5px_14px_rgba(24,119,242,0.22)]",
-  tiktok: "border-strong bg-[#09090b] text-white shadow-[0_5px_14px_rgba(0,0,0,0.28)]",
-  google_business:
-    "border-slate-200 bg-white text-slate-900 shadow-[0_5px_14px_rgba(15,23,42,0.14)]",
-  linkedin:
-    "border-[#2f7fbd] bg-[#0a66c2] text-white shadow-[0_5px_14px_rgba(10,102,194,0.22)]",
-  x: "border-strong bg-[#050505] text-white shadow-[0_5px_14px_rgba(0,0,0,0.28)]",
+    "border-strong bg-[linear-gradient(135deg,#6d28d9_0%,#db2777_48%,#f97316_100%)] text-white",
+  facebook: "border-[#4391f5] bg-[#1877f2] text-white",
+  tiktok: "border-strong bg-[#09090b] text-white",
+  google_business: "border-slate-200 bg-white text-slate-900",
+  linkedin: "border-[#2f7fbd] bg-[#0a66c2] text-white",
+  x: "border-strong bg-[#050505] text-white",
   marketplace:
-    "border-[#4391f5] bg-[linear-gradient(145deg,#2584ff,#0a5dd8)] text-white shadow-[0_5px_14px_rgba(24,119,242,0.22)]",
-  native:
-    "border-slate-600/70 bg-slate-800 text-slate-100 shadow-[0_5px_14px_rgba(2,6,23,0.2)]",
-  generic:
-    "border-slate-600/70 bg-slate-800 text-slate-200 shadow-[0_5px_14px_rgba(2,6,23,0.2)]",
+    "border-[#4391f5] bg-[linear-gradient(145deg,#2584ff,#0a5dd8)] text-white",
+  native: "border-slate-600/70 bg-slate-800 text-slate-100",
+  generic: "border-slate-600/70 bg-slate-800 text-slate-200",
+};
+
+/** The lifted tile of a standalone mark. A mark inside a chip (xs) sits flat. */
+const TILE_SHADOW_CLASSES: Readonly<Record<PlatformGlyphKey, string>> = {
+  instagram: "shadow-[0_5px_14px_rgba(219,39,119,0.24)]",
+  facebook: "shadow-[0_5px_14px_rgba(24,119,242,0.22)]",
+  tiktok: "shadow-[0_5px_14px_rgba(0,0,0,0.28)]",
+  google_business: "shadow-[0_5px_14px_rgba(15,23,42,0.14)]",
+  linkedin: "shadow-[0_5px_14px_rgba(10,102,194,0.22)]",
+  x: "shadow-[0_5px_14px_rgba(0,0,0,0.28)]",
+  marketplace: "shadow-[0_5px_14px_rgba(24,119,242,0.22)]",
+  native: "shadow-[0_5px_14px_rgba(2,6,23,0.2)]",
+  generic: "shadow-[0_5px_14px_rgba(2,6,23,0.2)]",
 };
 
 const SIZE_CLASSES: Readonly<Record<PlatformGlyphSize, string>> = {
+  xs: "size-4 rounded-[0.3rem]",
   sm: "size-6 rounded-[0.45rem]",
   md: "size-7 rounded-[0.55rem]",
   lg: "size-9 rounded-[0.7rem]",
 };
 
 const ICON_SIZE_CLASSES: Readonly<Record<PlatformGlyphSize, string>> = {
+  xs: "size-3",
   sm: "size-4",
   md: "size-[1.15rem]",
   lg: "size-6",
@@ -309,6 +321,7 @@ export const PlatformGlyph: React.FC<PlatformGlyphProps> = ({
         "relative inline-flex shrink-0 items-center justify-center overflow-hidden border",
         SIZE_CLASSES[size],
         TONE_CLASSES[glyphKey],
+        size === "xs" ? null : TILE_SHADOW_CLASSES[glyphKey],
         className,
       ]
         .filter(Boolean)

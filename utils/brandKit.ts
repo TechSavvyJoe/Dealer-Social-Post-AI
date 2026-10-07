@@ -24,6 +24,31 @@ export interface DealerBrandKit {
   required_hashtags_locked?: boolean;
 }
 
+/** The dealer fields the brand kit reads, as the saved record names them. */
+export interface DealerBrandKitSource {
+  name?: string;
+  default_hashtags?: string;
+  default_footer?: string;
+  required_hashtags_locked?: boolean;
+}
+
+/**
+ * The brand kit for a dealer record, exactly as generation builds it
+ * (hooks/useGeneration.ts `brandKitFromDealer`), so any other caller that
+ * needs the store's footer and hashtags applies the same kit.
+ */
+export const dealerBrandKit = (
+  dealer?: DealerBrandKitSource | null,
+): DealerBrandKit | null => {
+  if (!dealer) return null;
+  return {
+    name: dealer.name,
+    default_hashtags: dealer.default_hashtags,
+    default_footer: dealer.default_footer,
+    required_hashtags_locked: dealer.required_hashtags_locked === true,
+  };
+};
+
 /**
  * Agency discovery tags used when AI or dealer kit leave a caption under-tagged.
  * Ordered by dealership marketing usefulness (delivery → social proof → intent).
@@ -129,6 +154,32 @@ const ensureMarketingBodyFloor = (
   if (proseLen >= MIN_MARKETING_BODY_CHARS) return trimmed;
 
   const name = storeName?.trim();
+
+  // A normalized caption can come back through this function after autosave
+  // or reload. Once one of our floor CTAs is present, keep the first-pass
+  // result intact instead of appending another copy on every pass. Match the
+  // generated phrases only; arbitrary short copy still follows the original
+  // branch behavior below.
+  const floorCtas = !deliveryLanguageAllowed
+    ? name
+      ? [
+          `Thank you for being part of the ${name} family.`,
+          `We're grateful for the trust our customers place in ${name} every day.`,
+        ]
+      : [
+          "Thank you for being part of our story.",
+          "We're grateful for the trust our customers place in us every day.",
+        ]
+    : name
+      ? [
+          `Visit ${name} this week and let's get you behind the wheel.`,
+          "Stop by this week — we'd love to help you find the one.",
+        ]
+      : ["Ready for your next delivery day? Stop by and let's find the one."];
+  const normalizedBody = trimmed.replace(/\s+/g, " ").toLowerCase();
+  if (floorCtas.some((cta) => normalizedBody.includes(cta.toLowerCase()))) {
+    return trimmed;
+  }
 
   if (!deliveryLanguageAllowed) {
     if (!name) {

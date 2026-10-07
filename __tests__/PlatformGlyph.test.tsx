@@ -68,6 +68,27 @@ describe("PlatformGlyph", () => {
     );
   });
 
+  it("draws a flat 16 px tile with a 12 px mark at xs, and keeps the lift on larger tiles", () => {
+    const { container } = render(
+      <div>
+        <PlatformGlyph platformId="facebook_feed" size="xs" />
+        <PlatformGlyph platformId="instagram_feed" size="sm" />
+      </div>,
+    );
+    const xs = container.querySelector('[data-platform-glyph="facebook"]');
+    const xsClasses = Array.from(xs?.classList ?? []);
+    expect(xsClasses).toContain("size-4");
+    expect(xsClasses.some((name) => name.includes("shadow"))).toBe(false);
+    expect(xs?.querySelector("svg")).toHaveClass("size-3");
+
+    const sm = container.querySelector('[data-platform-glyph="instagram"]');
+    expect(sm).toHaveClass("size-6");
+    expect(
+      Array.from(sm?.classList ?? []).some((name) => name.startsWith("shadow-")),
+    ).toBe(true);
+    expect(sm?.querySelector("svg")).toHaveClass("size-4");
+  });
+
   it("keeps a caller-provided accessible label on a neutral fallback", () => {
     render(
       <PlatformGlyph

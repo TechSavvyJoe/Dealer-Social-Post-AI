@@ -178,6 +178,16 @@ describe("signature looks", () => {
     },
   };
 
+  it("never names a logo corner in a Look, so it cannot contradict the store's corner", () => {
+    // The store's own corner (dealer.logo_placement) decides where the logo
+    // goes; a Look that said "bottom-right" would argue with a top-left store.
+    for (const look of Object.values(LOOK_DEFINITIONS)) {
+      expect(look.description, look.label).not.toMatch(
+        /\b(?:top|bottom|upper|lower)[\s-]*(?:left|right)\b/i,
+      );
+    }
+  });
+
   it("maps each look exactly as the spec table specifies", () => {
     expect(Object.keys(LOOK_DEFINITIONS).sort()).toEqual([
       "hometown",

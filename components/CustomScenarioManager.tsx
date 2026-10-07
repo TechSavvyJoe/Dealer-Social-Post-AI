@@ -74,6 +74,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
   const categoryId = useId();
   const defaultStyleId = useId();
   const defaultToneId = useId();
+  const headingId = useId();
 
   const startNew = () => {
     setEditing(blankScenario());
@@ -126,7 +127,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
       return;
     }
     if (!editing.promptAdditions || !editing.promptAdditions.trim()) {
-      setError("Prompt additions are required — this is what tunes the AI.");
+      setError("Prompt additions are required. They are what tunes the AI.");
       return;
     }
     const tags = hashtagsInput
@@ -172,23 +173,26 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
   };
 
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
+    <section aria-labelledby={headingId} className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-surface-50">Custom scenarios</div>
-          <p className="text-[11px] text-surface-400">
-            Define your own post types alongside the 12 built-in ones. They appear in
-            the showroom picker with your team's options.
+          {/* An h4 like its siblings in "Video and advanced" (SettingsSubgroup). */}
+          <h4 id={headingId} className="text-lg leading-6 text-ink">
+            Custom scenarios
+          </h4>
+          <p className="text-sm text-ink-2">
+            Add your own post types. Each one appears on your team&rsquo;s Home screen
+            as an extra tile.
           </p>
         </div>
         {!editing && (
           <Button
-            variant="filled"
-            size="sm"
-            leftIcon={<Plus className="w-3.5 h-3.5" />}
+            variant="secondary"
+            size="md"
+            className="shrink-0 whitespace-nowrap px-3.5 text-sm"
+            leftIcon={<Plus className="w-4 h-4" />}
             onClick={startNew}
             disabled={saving}
-            className="whitespace-nowrap"
           >
             Add scenario
           </Button>
@@ -196,7 +200,10 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
       </div>
 
       {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800">
+        <div
+          role="alert"
+          className="rounded-sm border border-error-ink/30 bg-error-fill px-3 py-2 text-sm text-error-ink"
+        >
           {error}
         </div>
       )}
@@ -207,33 +214,32 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
-            className="rounded-xl border border-primary-500/30 bg-primary-500/5 p-3 space-y-3"
+            className="space-y-4 rounded-md border border-hairline bg-panel p-4"
           >
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Input
                 label="Label"
                 value={editing.label}
                 onChange={(e) => setEditing({ ...editing, label: e.target.value })}
-                placeholder="Spring Clearance — F-150"
+                placeholder="Spring Clearance, F-150"
                 fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
               <div>
                 <label
                   htmlFor={categoryId}
-                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                  className="block text-sm font-medium text-ink-2"
                 >
                   Category
                 </label>
-                <div className="mt-1 flex items-center gap-2">
+                <div className="mt-1.5 flex items-center gap-2">
                   {(() => {
                     const Icon = SCENARIO_CATEGORY_ICON[editing.category];
                     return (
                       <span
-                        className="flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-primary-500/10 border border-primary-500/20"
+                        className="flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-sm border border-hairline bg-panel-raised"
                         title="Tile icon (set automatically by category)"
                       >
-                        <Icon className="w-5 h-5 text-primary-300" />
+                        <Icon className="w-5 h-5 text-ink-2" aria-hidden="true" />
                       </span>
                     );
                   })()}
@@ -246,7 +252,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                         category: e.target.value as ScenarioCategory,
                       })
                     }
-                    className="w-full bg-surface-900/60 border-2 border-surface-700 focus:border-primary-500 rounded-xl px-3 py-3 text-base text-surface-50"
+                    className="min-h-11 w-full rounded-sm border border-strong bg-panel-raised px-3 text-base text-ink transition-colors duration-120 ease-out focus:border-brand-ink"
                   >
                     {Object.entries(SCENARIO_CATEGORY_LABELS).map(([k, v]) => (
                       <option key={k} value={k}>
@@ -259,12 +265,11 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
             </div>
 
             <Input
-              label="Short blurb (shown on the picker tile)"
+              label="Short blurb (shown on the Home tile)"
               value={editing.blurb || ""}
               onChange={(e) => setEditing({ ...editing, blurb: e.target.value })}
-              placeholder="F-150 push, April 1–30"
+              placeholder="F-150 push, April 1 to 30"
               fullWidth
-              className="bg-fill-subtle border-hairline focus:border-primary-400"
             />
 
             <Textarea
@@ -275,15 +280,15 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               }
               rows={4}
               fullWidth
-              placeholder={`Scenario: April F-150 clearance push. Emphasize trim levels still on the lot. Soft "limited stock" framing — never "guaranteed lowest price". End with CTA to schedule a test drive this weekend.`}
-              className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
+              placeholder={`Scenario: April F-150 clearance push. Emphasize trim levels still on the lot. Soft "limited stock" framing, never "guaranteed lowest price". End with CTA to schedule a test drive this weekend.`}
+              className="font-mono text-sm"
             />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label
                   htmlFor={defaultStyleId}
-                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                  className="block text-sm font-medium text-ink-2"
                 >
                   Default style
                 </label>
@@ -296,7 +301,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                       defaultStyle: e.target.value as StyleOption,
                     })
                   }
-                  className="mt-1 w-full bg-surface-900/60 border-2 border-surface-700 focus:border-primary-500 rounded-xl px-3 py-3 text-base text-surface-50"
+                  className="mt-1.5 min-h-11 w-full rounded-sm border border-strong bg-panel-raised px-3 text-base text-ink transition-colors duration-120 ease-out focus:border-brand-ink"
                 >
                   {Object.values(StyleOption).map((s) => (
                     <option key={s} value={s}>
@@ -308,7 +313,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               <div>
                 <label
                   htmlFor={defaultToneId}
-                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                  className="block text-sm font-medium text-ink-2"
                 >
                   Default tone
                 </label>
@@ -321,7 +326,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                       defaultTone: e.target.value as ToneOption,
                     })
                   }
-                  className="mt-1 w-full bg-surface-900/60 border-2 border-surface-700 focus:border-primary-500 rounded-xl px-3 py-3 text-base text-surface-50"
+                  className="mt-1.5 min-h-11 w-full rounded-sm border border-strong bg-panel-raised px-3 text-base text-ink transition-colors duration-120 ease-out focus:border-brand-ink"
                 >
                   {Object.values(ToneOption).map((t) => (
                     <option key={t} value={t}>
@@ -338,7 +343,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               onChange={(e) => setHashtagsInput(e.target.value)}
               placeholder="#F150 #SpringEvent #TruckMonth"
               fullWidth
-              className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
+              className="font-mono text-sm"
             />
 
             <Input
@@ -349,11 +354,10 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               }
               placeholder="The F-150 you've been waiting on is here."
               fullWidth
-              className="bg-fill-subtle border-hairline focus:border-primary-400"
             />
 
-            <div className="flex flex-wrap gap-3 text-[11px] text-surface-300 pt-1">
-              <label className="flex items-center gap-1.5">
+            <div className="flex flex-wrap gap-x-5 text-sm text-ink-2">
+              <label className="flex min-h-11 cursor-pointer items-center gap-2">
                 <input
                   type="checkbox"
                   checked={!!editing.requiresCustomer}
@@ -363,11 +367,11 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                       requiresCustomer: e.target.checked,
                     })
                   }
-                  className="rounded border-strong bg-fill-subtle"
+                  className="h-[18px] w-[18px] accent-brand-ink"
                 />
                 Requires customer in photo
               </label>
-              <label className="flex items-center gap-1.5">
+              <label className="flex min-h-11 cursor-pointer items-center gap-2">
                 <input
                   type="checkbox"
                   checked={!!editing.requiresVehicle}
@@ -377,30 +381,30 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                       requiresVehicle: e.target.checked,
                     })
                   }
-                  className="rounded border-strong bg-fill-subtle"
+                  className="h-[18px] w-[18px] accent-brand-ink"
                 />
                 Requires vehicle in photo
               </label>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-hairline">
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-hairline">
               <Button
                 variant="ghost"
-                size="sm"
-                leftIcon={<X className="w-3.5 h-3.5" />}
+                size="md"
+                leftIcon={<X className="w-4 h-4" />}
                 onClick={cancelEdit}
                 disabled={saving}
               >
                 Cancel
               </Button>
               <Button
-                variant="filled"
-                size="sm"
+                variant="secondary"
+                size="md"
                 leftIcon={
                   saving ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
-                    <Save className="w-3.5 h-3.5" />
+                    <Save className="w-4 h-4" />
                   )
                 }
                 onClick={handleSubmit}
@@ -414,62 +418,63 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
       </AnimatePresence>
 
       {scenarios.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-strong bg-fill-subtle p-4 text-center text-xs text-surface-400">
-          No custom scenarios yet — add one to give your team more on-brand options.
-        </div>
+        <p className="text-sm text-ink-3">
+          No custom scenarios yet. Add one to give your team more on-brand options.
+        </p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="border-b border-hairline">
           {scenarios.map((s) => (
             <li
               key={s.id}
-              className="rounded-xl border border-hairline bg-surface-900/40 px-3 py-2.5 flex items-center justify-between gap-3"
+              className="flex items-center justify-between gap-3 border-t border-hairline py-2.5"
             >
-              <div className="min-w-0 flex items-start gap-2.5">
+              <div className="min-w-0 flex items-start gap-3">
                 {(() => {
                   const Icon = SCENARIO_CATEGORY_ICON[s.category];
                   return (
-                    <span className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-fill-subtle text-surface-300 mt-0.5">
-                      <Icon className="w-4 h-4" />
-                    </span>
+                    <Icon
+                      className="mt-1 h-4 w-4 flex-shrink-0 text-ink-2"
+                      aria-hidden="true"
+                    />
                   );
                 })()}
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-surface-50 truncate">
+                  <div className="truncate text-base font-semibold text-ink">
                     {s.label}
-                    <span className="ml-2 text-[10px] uppercase tracking-wide text-surface-400">
+                    <span className="ml-2 text-caption font-normal text-ink-2">
                       {SCENARIO_CATEGORY_LABELS[s.category]}
                     </span>
                   </div>
-                  <div className="text-[11px] text-surface-400 truncate">
+                  <div className="truncate text-sm text-ink-2">
                     {s.blurb || s.promptAdditions.split("\n")[0]}
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 flex-shrink-0">
+              <div className="flex flex-shrink-0 items-center gap-1">
                 <button
                   type="button"
                   onClick={() => startEdit(s)}
                   className={cn(
-                    "text-[11px] px-2 py-1 rounded-md transition-colors",
-                    "bg-fill-subtle hover:bg-fill-hover text-surface-200",
-                    "flex items-center gap-1",
+                    "inline-flex min-h-11 items-center gap-1.5 rounded-sm px-3 text-sm font-semibold text-ink-2",
+                    "transition-colors duration-120 ease-out hover:bg-fill-subtle hover:text-ink",
                   )}
                   title="Edit scenario"
+                  aria-label={`Edit ${s.label}`}
                 >
-                  <Pencil className="w-3 h-3" />
+                  <Pencil className="h-4 w-4" aria-hidden="true" />
                   Edit
                 </button>
                 <button
                   type="button"
                   onClick={() => setPendingDeleteId(s.id)}
                   className={cn(
-                    "text-[11px] px-2 py-1 rounded-md transition-colors",
-                    "bg-error-500/10 hover:bg-error-500/20 text-error-200 [.theme-light_&]:text-error-800",
-                    "flex items-center gap-1",
+                    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm text-error-ink",
+                    "transition-colors duration-120 ease-out hover:bg-error-fill",
                   )}
                   title="Delete scenario"
+                  aria-label={`Delete ${s.label}`}
                 >
-                  <Trash2 className="w-3 h-3" />
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
             </li>
@@ -487,7 +492,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
         footer={
           <>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={() => setPendingDeleteId(null)}
               disabled={saving}
               fullWidth
@@ -505,12 +510,12 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
           </>
         }
       >
-        <p className="text-sm leading-relaxed text-surface-300">
+        <p className="text-sm leading-relaxed text-ink-2">
           {(() => {
             const pending = scenarios.find((s) => s.id === pendingDeleteId);
             return pending
-              ? `Removing “${pending.label}” takes it out of the showroom picker for your whole team.`
-              : "Removing this scenario takes it out of the showroom picker for your whole team.";
+              ? `Removing “${pending.label}” takes its tile off the Home screen for your whole team.`
+              : "Removing this scenario takes its tile off the Home screen for your whole team.";
           })()}
         </p>
       </Modal>
