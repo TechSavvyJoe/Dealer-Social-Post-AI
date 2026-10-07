@@ -97,15 +97,16 @@ const handOffSessionSwapsToLoopbackShim = async (
   );
   return {
     /** The dealer_session cookie the server minted for this swap's response. */
-    mintedCookie: (response: Response): string => {
+    mintedCookie: async (response: Response): Promise<string> => {
       const path = new URL(response.url()).pathname;
-      const minted = mintedByPath.get(path);
+      const routed = mintedByPath.get(path);
       mintedByPath.delete(path);
-      expect(
-        minted,
-        "the session swap should mint a dealer_session cookie",
-      ).toBeTruthy();
-      return `dealer_session=${minted || ""}`;
+      if (routed) return `dealer_session=${routed}`;
+      // WebKit does not route a request its service worker handles (this spec
+      // runs with the production worker active), so the shim never saw this
+      // swap; read the bearer from the page's own response, as the sign-ins
+      // above do.
+      return responseSessionCookie(response);
     },
   };
 };
@@ -1185,7 +1186,7 @@ test.describe("real PocketBase release flow", () => {
       name: salespersonName,
       role: "salesperson",
     });
-    const impersonationCookie = sessionSwaps.mintedCookie(impersonateResponse);
+    const impersonationCookie = await sessionSwaps.mintedCookie(impersonateResponse);
     await installLoopbackSessionCookie(context, page, impersonationCookie);
 
     // The source bearer is parked while its child is active. Rejecting a copied
@@ -1231,7 +1232,7 @@ test.describe("real PocketBase release flow", () => {
     const restored = (await exitResponse.json()) as JsonObject;
     expect(restored.role).toBe("super_admin");
     expect(restored.is_impersonation).toBe(false);
-    adminCookie = sessionSwaps.mintedCookie(exitResponse);
+    adminCookie = await sessionSwaps.mintedCookie(exitResponse);
     expect(adminCookie).not.toBe(preImpersonationAdminCookie);
     expect(adminCookie).not.toBe(impersonationCookie);
     await installLoopbackSessionCookie(context, page, adminCookie);
@@ -1274,7 +1275,7 @@ test.describe("real PocketBase release flow", () => {
     });
     expect(JSON.stringify(deepLinked)).not.toContain("setup_notes");
     expect(JSON.stringify(deepLinked)).not.toContain(`E2E setup notes ${suffix}`);
-    const deepLinkCookie = sessionSwaps.mintedCookie(deepLinkResponse);
+    const deepLinkCookie = await sessionSwaps.mintedCookie(deepLinkResponse);
     await installLoopbackSessionCookie(context, page, deepLinkCookie);
 
     await expect(
@@ -1311,7 +1312,7 @@ test.describe("real PocketBase release flow", () => {
       role: "super_admin",
       is_impersonation: false,
     });
-    adminCookie = sessionSwaps.mintedCookie(deepLinkExitResponse);
+    adminCookie = await sessionSwaps.mintedCookie(deepLinkExitResponse);
     expect(adminCookie).not.toBe(preDeepLinkAdminCookie);
     await installLoopbackSessionCookie(context, page, adminCookie);
     await expect(page.getByRole("heading", { name: "System admin" })).toBeVisible({
