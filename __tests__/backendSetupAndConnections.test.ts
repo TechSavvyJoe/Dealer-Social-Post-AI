@@ -144,6 +144,7 @@ describe("system connection inventory", () => {
           configured: true,
           enabled: true,
           verification: "not_tested",
+          dealerId: "configured-dealer",
         },
         walkaround: {
           configured: true,
@@ -175,6 +176,26 @@ describe("system connection inventory", () => {
           verification: "not_tested",
         },
       },
+    });
+  });
+
+  it("names the dealership the customer website is mapped to, even before it is usable", () => {
+    const mapped = runConnections("super_admin", {
+      CUSTOMER_HUB_DEALER_ID: "  dealer-7  ",
+    });
+    expect(mapped.payload).toMatchObject({
+      automation: {
+        customer_hub: {
+          configured: false,
+          enabled: false,
+          verification: "not_tested",
+          dealerId: "dealer-7",
+        },
+      },
+    });
+    const unmapped = runConnections("super_admin", {});
+    expect(unmapped.payload).toMatchObject({
+      automation: { customer_hub: { configured: false, dealerId: "" } },
     });
   });
 

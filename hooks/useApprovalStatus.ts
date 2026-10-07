@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getPostApprovalStatus } from "../services/posts";
+import { adoptPostRevision } from "../utils/postRevision";
 import { useToast } from "../components/ui/Toast";
 import type { GeneratedPost } from "../types";
 
@@ -82,19 +83,25 @@ export const useApprovalStatus = ({
           controller.signal,
         );
         if (!active) return;
+        // A manager decision advances the post revision. This post left the
+        // n_a state, so its content is immutable and the new token is safe to
+        // adopt for share receipts.
+        if (result.approval_status !== "n_a") {
+          adoptPostRevision(post.postId as string, result.post_revision);
+        }
         setApprovalCheckError(null);
         setImageReviewRequired(Boolean(result.image_review_required));
         setApprovalStatus(result.approval_status);
         setRejectionReason(result.rejection_reason || "");
         if (result.approval_status === "approved") {
-          toast.success("Manager approved this post. Delivery is unlocked.");
+          toast.success("Your manager approved this post. You can share it now.");
           return;
         }
         if (result.approval_status === "rejected") {
           toast.warning(
             result.rejection_reason
               ? `Manager asked for a change: ${result.rejection_reason}`
-              : "Manager requested changes. Delivery remains locked.",
+              : "Your manager sent this back. Start a new post with the changes.",
           );
           return;
         }

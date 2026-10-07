@@ -163,7 +163,10 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
       break;
     case AppStep.DEALER_ADMIN:
       content = (
-        <LazyDealerAdmin onSettingsDirtyChange={props.onManagementDirtyChange} />
+        <LazyDealerAdmin
+          onSettingsDirtyChange={props.onManagementDirtyChange}
+          onOpenPost={openPost}
+        />
       );
       break;
     case AppStep.HOME:

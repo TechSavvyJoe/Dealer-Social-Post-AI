@@ -23,10 +23,13 @@ switched on.
 
 ## Hard dates
 
-- **2026-10-17** — `config/gemini-model-policy.json` `verifiedAt` (re-verified
-  2026-09-02) turns 45 days old and `scripts/check-model-policy.mjs` turns CI
-  red, which silently blocks Fly deploys. Re-verify and bump `verifiedAt`
-  before then — but never bump `version` casually (see the pin note below).
+- **2026-11-19** — `config/gemini-model-policy.json` `verifiedAt` (re-verified
+  2026-10-05 against the live `models.list` catalog: all eight pinned ids are
+  listed with their generation methods and none is marked deprecated) turns 45
+  days old and `scripts/check-model-policy.mjs` turns CI red, which silently
+  blocks Fly deploys; the warning window opens 2026-11-05. Re-verify and bump
+  `verifiedAt` before then — but never bump `version` casually (see the pin
+  note below).
 - **2026-09-30** — `gemini-omni-flash-preview` shuts down (not pinned; do not
   adopt it — go straight to `gemini-omni-1.1-flash`).
 - **2027-01-01** — 3.6/3.7 Flash text pricing doubles ($0.75→$1.50 in,

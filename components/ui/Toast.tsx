@@ -233,9 +233,9 @@ interface ToastContainerProps {
   onResume: (id: string) => void;
 }
 
-/** Below this width the result screen is a single column and a bottom-docked
- *  toast lands on the creative rather than beside it. */
-const PHONE_VIEWPORT_QUERY = "(max-width: 767px)";
+/** Below lg (1024px) the Post screen is a single column with a fixed share
+ *  bar, so a bottom-docked toast lands on the creative rather than beside it. */
+const PHONE_VIEWPORT_QUERY = "(max-width: 1023px)";
 /**
  * The result screen's media preview declares itself. Toasts are the only
  * fixed overlay that can land on it, so they measure it and step aside — a

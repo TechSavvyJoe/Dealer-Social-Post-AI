@@ -1,6 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StyleOption, ToneOption, VideoStyle, type GeneratedPost } from "../types";
+import {
+  StyleOption,
+  ToneOption,
+  VideoStyle,
+  type GeneratedPost,
+  type GenerationParams,
+} from "../types";
 import type { StoreDefaults } from "../services/storeDefaults";
 
 const mocks = vi.hoisted(() => ({ toastWarning: vi.fn() }));
@@ -45,6 +51,21 @@ const defaults: StoreDefaults = {
   websiteChannel: false,
   style: StyleOption.Modern,
   tone: ToneOption.Excited,
+};
+
+/** The brief Details rendered with: the showroom Look's style. */
+const paramsA: GenerationParams = {
+  style: StyleOption.Modern,
+  tone: ToneOption.Excited,
+  customerName: "",
+  creativeBrief: "brief-A",
+};
+/** What a successful Look render writes for the turbo Look. */
+const paramsB: GenerationParams = {
+  style: StyleOption.Sporty,
+  tone: ToneOption.Excited,
+  customerName: "",
+  creativeBrief: "brief-B",
 };
 
 const setup = (overrides: Record<string, unknown> = {}) => {
@@ -93,7 +114,11 @@ const setup = (overrides: Record<string, unknown> = {}) => {
 describe("usePostCreativeTools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useAppStore.setState({ generatedPost: basePost });
+    useAppStore.setState({
+      generatedPost: basePost,
+      generationParams: paramsA,
+      error: null,
+    });
   });
 
   it("spends Try another once and keeps that budget after a remount", async () => {
@@ -222,5 +247,138 @@ describe("usePostCreativeTools", () => {
     expect(test.onChangeLook).toHaveBeenCalledTimes(1);
     expect(test.onFunMode).toHaveBeenCalledTimes(1);
     expect(test.startVideoJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens on the Look whose style the post was rendered with", async () => {
+    useAppStore.setState({ generationParams: paramsB });
+    const test = setup();
+    const { result } = renderHook(() => usePostCreativeTools(test.options));
+    expect(result.current.selectedLookId).toBe("turbo");
+
+    // The render on screen belongs to turbo, so showroom has never been made.
+    await act(async () => result.current.changeLook(defaults.looks[0]));
+    expect(test.onChangeLook).toHaveBeenCalledWith("showroom");
+
+    await act(async () => result.current.changeLook(defaults.looks[1]));
+    expect(test.onChangeLook).toHaveBeenCalledTimes(1);
+    expect(useAppStore.getState().generatedPost?.image).toBe("image-clean");
+  });
+
+  it("falls back to the store's default Look when the brief matches none", () => {
+    useAppStore.setState({
+      generationParams: { ...paramsA, style: StyleOption.DepthPop },
+    });
+    const test = setup();
+    const { result } = renderHook(() => usePostCreativeTools(test.options));
+    expect(result.current.selectedLookId).toBe(defaults.defaultLookId);
+  });
+
+  it("puts the selection back when a Look change fails and lets it be retried", async () => {
+    const onChangeLook = vi
+      .fn<(look: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("This Look is not enabled by your store."))
+      .mockImplementationOnce(async () => {
+        useAppStore.getState().setGeneratedPost({ ...basePost, image: "image-bold" });
+      });
+    const test = setup({ onChangeLook });
+    const { result } = renderHook(() => usePostCreativeTools(test.options));
+
+    await act(async () => result.current.changeLook(defaults.looks[1]));
+    expect(result.current.selectedLookId).toBe("showroom");
+    expect(result.current.busy).toBe(false);
+    expect(useAppStore.getState().generatedPost?.image).toBe("image-clean");
+    expect(mocks.toastWarning).toHaveBeenCalledWith(
+      "This Look is not enabled by your store.",
+    );
+
+    await act(async () => result.current.changeLook(defaults.looks[1]));
+    expect(onChangeLook).toHaveBeenCalledTimes(2);
+    expect(result.current.selectedLookId).toBe("turbo");
+    expect(useAppStore.getState().generatedPost?.image).toBe("image-bold");
+  });
+
+  it("does not repeat a failure the generation pipeline already announced", async () => {
+    const onChangeLook = vi.fn(async () => {
+      // useGeneration's onError sets the store error and shows its own toast.
+      useAppStore
+        .getState()
+        .setError("Failed to regenerate image. Something went wrong.");
+      throw new Error("provider 503");
+    });
+    const test = setup({ onChangeLook });
+    const { result } = renderHook(() => usePostCreativeTools(test.options));
+
+    await act(async () => result.current.changeLook(defaults.looks[1]));
+    expect(result.current.selectedLookId).toBe("showroom");
+    expect(mocks.toastWarning).not.toHaveBeenCalled();
+  });
+
+  it("gives a technical failure a plain message", async () => {
+    const onChangeLook = vi.fn(async () => {
+      throw new TypeError("Failed to fetch dynamically imported module");
+    });
+    const test = setup({ onChangeLook });
+    const { result } = renderHook(() => usePostCreativeTools(test.options));
+
+    await act(async () => result.current.changeLook(defaults.looks[1]));
+    expect(mocks.toastWarning).toHaveBeenCalledWith("Couldn't apply Bold. Try again.");
+  });
+
+  it("renders Try another from the selected Look's brief after a cached switch", async () => {
+    const briefsUsed: (string | undefined)[] = [];
+    const onChangeLook = vi.fn(async () => {
+      // A successful Look render stores that Look's brief, then its image.
+      useAppStore.getState().setGenerationParams(paramsB);
+      useAppStore.getState().setGeneratedPost({ ...basePost, image: "image-bold" });
+    });
+    const onRegenerateImage = vi.fn(async () => {
+      briefsUsed.push(useAppStore.getState().generationParams?.creativeBrief);
+      const current = useAppStore.getState().generatedPost!;
+      useAppStore.getState().setGeneratedPost({ ...current, image: "image-another" });
+    });
+    const test = setup({ onChangeLook, onRegenerateImage });
+    const { result } = renderHook(() => usePostCreativeTools(test.options));
+
+    await act(async () => result.current.changeLook(defaults.looks[1]));
+    expect(useAppStore.getState().generationParams).toEqual(paramsB);
+
+    await act(async () => result.current.changeLook(defaults.looks[0]));
+    expect(useAppStore.getState().generatedPost?.image).toBe("image-clean");
+    expect(useAppStore.getState().generationParams).toEqual(paramsA);
+
+    await act(async () => result.current.tryAnother());
+    expect(briefsUsed).toEqual(["brief-A"]);
+
+    // The new version is cached under showroom, the Look it was rendered for.
+    await act(async () => result.current.changeLook(defaults.looks[1]));
+    expect(useAppStore.getState().generatedPost?.image).toBe("image-bold");
+    expect(useAppStore.getState().generationParams).toEqual(paramsB);
+    await act(async () => result.current.changeLook(defaults.looks[0]));
+    expect(useAppStore.getState().generatedPost?.image).toBe("image-another");
+    expect(useAppStore.getState().generationParams).toEqual(paramsA);
+    expect(onChangeLook).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles a failed Try another without an unhandled rejection", async () => {
+    const onRegenerateImage = vi.fn(async () => {
+      throw new TypeError("network down");
+    });
+    const test = setup({ onRegenerateImage });
+    const { result } = renderHook(() => usePostCreativeTools(test.options));
+
+    await act(async () => {
+      await expect(result.current.tryAnother()).resolves.toBeUndefined();
+    });
+    expect(test.onRegenerateText).not.toHaveBeenCalled();
+    expect(result.current.busy).toBe(false);
+    // The one-shot budget stays spent: a provider failure buys no retry.
+    expect(
+      (
+        useAppStore.getState().generatedPost as GeneratedPost & {
+          tryAnotherUsed?: boolean;
+        }
+      )?.tryAnotherUsed,
+    ).toBe(true);
+    expect(mocks.toastWarning).toHaveBeenCalledWith("Couldn't create another version.");
   });
 });

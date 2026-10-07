@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { postStatusCopy } from "../utils/postLabels";
 
 /**
  * The approval gate could reject a post but never say why. The salesperson's
@@ -29,11 +30,11 @@ describe("a rejection has to say what to change", () => {
   });
 
   it("accepts a rejection with no reason rather than failing the request", () => {
-    // The fallback that makes the above safe: components/PostResult.tsx's
-    // approvalGateMessage already renders sensible copy when
-    // rejectionReason is empty ("A manager rejected this creative...") — the
-    // exact message a salesperson saw before this feature existed. A missing
-    // reason must reach that branch, not a 400.
+    // The fallback that makes the above safe: utils/postLocks.ts's approval
+    // message already renders sensible copy when rejectionReason is empty
+    // ("Your manager sent this back..."), and My work shows "Changes
+    // requested" with no second line. A missing reason must reach that
+    // branch, not a 400.
     const anchor = [
       "if (",
       '      decision === "approved" &&',
@@ -90,48 +91,109 @@ describe("a rejection has to say what to change", () => {
   });
 });
 
+/** Code, not comments: `://` survives so a URL is not cut short. */
+const withoutComments = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+const BANNER_COPY = "Your manager asked for a change: ${input.rejectionReason}";
+
+const bannerLeadsWithReason = (locks: string): boolean => locks.includes(BANNER_COPY);
+
+/**
+ * My work's row hands the whole saved record (rejection_reason included) to
+ * postStatusCopy on the "work" surface, which is the only surface that adds
+ * the reason as a second line, and renders that line.
+ */
+const myWorkRowShowsReason = (myWork: string): boolean => {
+  const code = withoutComments(myWork);
+  const at = code.indexOf("postStatusCopy(");
+  if (at < 0) return false;
+  const call = code.slice(at, code.indexOf(");", at) + 2);
+  return (
+    /\bsurface:\s*"work"/.test(call) &&
+    /postStatusCopy\(\s*(?:blocked\s*\?\s*\{\s*\.\.\.post\b[^}]*\}\s*:\s*)?post\s*,/.test(
+      call,
+    ) &&
+    /\{status\.detail\}/.test(code)
+  );
+};
+
 describe("the reason reaches the salesperson", () => {
-  it("leads the locked-delivery message on the result screen", () => {
-    // The banner copy moved into utils/postLocks.ts's derivePostLocks
-    // (approvalMessage) as part of the pure lock-derivation extraction;
-    // PostResult.tsx now renders it via that module.
-    const locks = read("utils/postLocks.ts");
-    expect(locks).toContain("A manager asked for a change: ${input.rejectionReason}");
+  it("leads the locked-delivery message on the Post screen", () => {
+    // The banner copy lives in utils/postLocks.ts's derivePostLocks
+    // (approvalMessage); the Post screen renders it via that module.
+    expect(bannerLeadsWithReason(read("utils/postLocks.ts"))).toBe(true);
     // And the toast, for someone who is not looking at the banner. This one
-    // stays with the approval-status polling effect, not the derived lock
-    // message — moved into hooks/useApprovalStatus.ts as part of the PR2-0
-    // extraction (PostResult.tsx now just calls the hook).
+    // stays with the approval-status polling effect in
+    // hooks/useApprovalStatus.ts.
     const approvalHook = read("hooks/useApprovalStatus.ts");
     expect(approvalHook).toContain(
       "Manager asked for a change: ${result.rejection_reason}",
     );
   });
 
-  it("the retargeted banner-copy guard actually fails on a wrong wording (planted mutant)", () => {
+  it("the banner-copy guard fails on a wrong wording (planted mutant)", () => {
     const locks = read("utils/postLocks.ts");
     const mutated = locks.replace(
-      "A manager asked for a change: ${input.rejectionReason}",
-      "A manager requested a change: ${input.rejectionReason}",
+      BANNER_COPY,
+      "Your manager requested a change: ${input.rejectionReason}",
     );
-    expect(mutated).not.toContain(
-      "A manager asked for a change: ${input.rejectionReason}",
-    );
+    expect(mutated).not.toBe(locks);
+    expect(bannerLeadsWithReason(mutated)).toBe(false);
   });
 
   it("appears on the row in My work", () => {
+    // The salesperson's list is components/MyWork.tsx. Its status line comes
+    // from utils/postLabels.ts's postStatusCopy, which puts the reason under
+    // "Changes requested" on the "work" surface only.
+    expect(
+      postStatusCopy(
+        { approval_status: "rejected", rejection_reason: "  Remove the price.  " },
+        { surface: "work" },
+      ),
+    ).toMatchObject({ label: "Changes requested", detail: "Remove the price." });
+    expect(myWorkRowShowsReason(read("components/MyWork.tsx"))).toBe(true);
+  });
+
+  it.each([
+    {
+      regression: "drops the second status line",
+      from: "{status.detail}",
+      to: "{null}",
+    },
+    {
+      regression: "asks for the Home surface, which has no reason line",
+      from: '{ surface: "work", now }',
+      to: '{ surface: "home", now }',
+    },
+    {
+      regression: "passes a record without the reason",
+      from: ": post,",
+      to: ": { ...post, rejection_reason: undefined },",
+    },
+  ])(
+    "the My work guard fails when the row $regression (planted mutant)",
+    ({ from, to }) => {
+      const myWork = read("components/MyWork.tsx");
+      expect(myWork, `MyWork.tsx no longer contains ${from}`).toContain(from);
+      const mutated = myWork.split(from).join(to);
+      expect(mutated).not.toBe(myWork);
+      expect(myWorkRowShowsReason(mutated)).toBe(false);
+    },
+  );
+
+  it("appears on the row in the manager's post history", () => {
     const history = read("components/PostHistory.tsx");
     expect(history).toContain("p.rejection_reason");
   });
 
   it("survives reopening the post from My work", () => {
-    // PostResult seeds its state from post.rejectionReason, but the History
-    // reopen mapping built a full GeneratedPost with approvalStatus and never
-    // set rejectionReason, so reopening a rejected post showed the generic
-    // "a manager rejected this" copy with the actual reason dropped on the
-    // floor — while the same record rendered it in the list two hundred lines
-    // down. The mapping moved to utils/historyPost.ts's
-    // toGeneratedPostFromRecord (PR2-0 extraction); PostHistory.tsx now calls
-    // it instead of building the object inline.
+    // The reopen mapping built a full GeneratedPost with approvalStatus and
+    // never set rejectionReason, so reopening a rejected post showed the
+    // generic "sent back" copy with the actual reason dropped on the floor,
+    // while the same record rendered it in the list. The mapping lives in
+    // utils/historyPost.ts's toGeneratedPostFromRecord, which My work and the
+    // manager's history both call.
     const historyPost = read("utils/historyPost.ts");
     const mapping = historyPost.slice(
       historyPost.indexOf("const approval ="),
@@ -139,6 +201,7 @@ describe("the reason reaches the salesperson", () => {
     );
     expect(mapping).toContain("approvalStatus: approval");
     expect(mapping).toContain("rejectionReason: post.rejection_reason || undefined");
+    expect(read("components/MyWork.tsx")).toContain("toGeneratedPostFromRecord");
   });
 
   it("gives the manager quick picks for the common cases", () => {
@@ -146,6 +209,6 @@ describe("the reason reaches the salesperson", () => {
     expect(queue).toContain("QUICK_REASONS");
     expect(queue).toContain("Pricing claim needs a disclosure");
     // The send button stays disabled until there is something to send.
-    expect(queue).toContain("disabled={busy[post.id] || !reason.trim()}");
+    expect(queue).toContain("disabled={Boolean(busy[post.id]) || !reason.trim()}");
   });
 });

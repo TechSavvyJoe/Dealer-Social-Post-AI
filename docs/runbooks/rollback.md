@@ -20,6 +20,7 @@ looks fine.
 1. [The three moving parts](#1-the-three-moving-parts)
 2. [Before you change anything](#0-before-you-change-anything)
 3. [Decide: roll back or roll forward](#2-decide-roll-back-or-roll-forward)
+   - [The post-revision contract (stages A, B, C)](#2a-the-post-revision-contract-stages-a-b-c)
 4. [Frontend rollback (Vercel) — do this first](#3-frontend-rollback-vercel--do-this-first)
 5. [The trap: a naive image rollback takes health to 503](#4-the-trap-a-naive-image-rollback-takes-health-to-503)
 6. [Backend rollback (Fly)](#5-backend-rollback-fly)
@@ -176,7 +177,9 @@ and it cannot undo a schema change. Prefer roll-forward whenever roll-forward is
 - The failure is in the frontend only. A frontend-only rollback is a single alias move
   ([Section 3](#3-frontend-rollback-vercel--do-this-first)), takes seconds, touches no
   database, and is the cheapest and safest action in this document. Do this one
-  readily.
+  readily — **with one exception**: once the backend enforces post revisions
+  (stage C below), an older frontend cannot save a draft, so check
+  [Section 2a](#2a-the-post-revision-contract-stages-a-b-c) first.
 - The bad release changed no migration file. Confirm with:
 
   ```bash
@@ -194,6 +197,45 @@ make it worse, not better.
 _(Numeric thresholds — error rate, affected-user count, minutes-of-degradation — that
 should trigger a rollback are not defined anywhere in this repository. See
 [Decide and fill in](#decide-and-fill-in), item 2.)_
+
+---
+
+## 2a. The post-revision contract (stages A, B, C)
+
+Draft saves and share receipts carry the revision of the saved post the editor last
+saw, so a second tab or device cannot silently overwrite it. That contract shipped in
+three stages, and a rollback must not put a frontend and a backend on the wrong sides
+of it.
+
+| Stage | What it is                                                                                        | How to recognise it                                                       |
+| ----- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| A     | Backend returns revisions and still accepts a draft save without one                              | `pb_hooks/main.pb.js` contains `[revision-legacy-client]`                 |
+| B     | Frontend sends `expected_post_revision` on every draft save and share receipt                     | `services/posts.ts` appends `expected_post_revision` in `updatePostDraft` |
+| C     | Backend rejects a draft save or share receipt without a revision (`POST_DRAFT_REVISION_REQUIRED`) | `pb_hooks/main.pb.js` no longer contains `[revision-legacy-client]`       |
+
+What must stay true at every moment:
+
+- **A stage B frontend needs a backend at stage A or later.** It refuses to edit or
+  share a post whose revision the backend did not return. Never roll the backend
+  below stage A while a stage B frontend is live.
+- **A stage C backend needs a frontend at stage B or later.** An older frontend sends
+  no revision; every autosave and share receipt would return `409`.
+
+So the usual order in [Section 3](#3-frontend-rollback-vercel--do-this-first)
+("frontend first") holds for stages A and B, and reverses once stage C is live:
+
+| Live now                | You want to undo       | Do this                                                                                                    |
+| ----------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| backend A, frontend old | stage A                | Roll the backend back ([Section 5](#5-backend-rollback-fly)). No frontend action.                          |
+| backend A, frontend B   | the redesign (stage B) | Frontend alias back first ([Section 3](#3-frontend-rollback-vercel--do-this-first)). The backend may stay. |
+| backend A, frontend B   | both                   | Frontend first, then backend.                                                                              |
+| backend C, frontend B   | stage C only           | Roll the backend image back to the stage A/B image, or revert the stage C commit on `main`.                |
+| backend C, frontend B   | the redesign (stage B) | **Backend first**: back to a stage A/B image. Only then move the frontend alias.                           |
+
+Revert stage C before, or in the same change as, any revert of stage B. Installed
+apps that were never reopened behave like the older frontend: after stage C they
+cannot save until they reload, which is why stage C has a release gate
+([release runbook](../production-backups-and-release.md#the-post-revision-contract-stage-by-stage)).
 
 ---
 

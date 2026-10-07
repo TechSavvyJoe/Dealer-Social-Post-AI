@@ -21,6 +21,7 @@ vi.mock("../components/ui/Toast", () => ({
 }));
 
 import { useApprovalStatus } from "./useApprovalStatus";
+import { useAppStore } from "../stores/appStore";
 
 const basePost: GeneratedPost = {
   image: "data:image/png;base64,aW1hZ2U=",
@@ -112,7 +113,7 @@ describe("useApprovalStatus", () => {
     });
     expect(result.current.approvalStatus).toBe("approved");
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
-      "Manager approved this post. Delivery is unlocked.",
+      "Your manager approved this post. You can share it now.",
     );
 
     mocks.getPostApprovalStatus.mockClear();
@@ -144,6 +145,58 @@ describe("useApprovalStatus", () => {
     expect(mocks.toastWarning).toHaveBeenCalledWith(
       "Manager asked for a change: Pricing needs a disclosure",
     );
+  });
+
+  it.each(["pending", "approved", "rejected"] as const)(
+    "adopts the post revision a %s status carries, so the next share receipt is current",
+    async (approvalStatus) => {
+      useAppStore.setState({ generatedPost: { ...basePost, postRevision: "rev-1" } });
+      mocks.getPostApprovalStatus.mockResolvedValue({
+        id: "post-1",
+        post_revision: "rev-2",
+        approval_status: approvalStatus,
+        image_review_required: false,
+      });
+      renderHook(() =>
+        useApprovalStatus({
+          post: { ...basePost, postRevision: "rev-1", approvalStatus: "pending" },
+          requiresApproval: true,
+        }),
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(mocks.getPostApprovalStatus).toHaveBeenCalledTimes(1);
+      expect(useAppStore.getState().generatedPost?.postRevision).toBe("rev-2");
+    },
+  );
+
+  it("never adopts a revision when the server says the post needs no approval", async () => {
+    // An n_a post is still editable, so its revision may carry another
+    // editor's content; adopting it would hide a real conflict.
+    useAppStore.setState({ generatedPost: { ...basePost, postRevision: "rev-1" } });
+    mocks.getPostApprovalStatus.mockResolvedValue({
+      id: "post-1",
+      post_revision: "rev-2",
+      approval_status: "n_a",
+      image_review_required: false,
+    });
+    const { result } = renderHook(() =>
+      useApprovalStatus({
+        post: { ...basePost, postRevision: "rev-1", approvalStatus: "pending" },
+        requiresApproval: true,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.getPostApprovalStatus).toHaveBeenCalledTimes(1);
+    expect(result.current.approvalStatus).toBe("n_a");
+    expect(useAppStore.getState().generatedPost?.postRevision).toBe("rev-1");
   });
 
   it("aborts the in-flight request on unmount", async () => {

@@ -1,0 +1,1171 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`image prompts for a store that never chose a logo corner > keeps the V2 prompts byte-identical for the text watermark 1`] = `
+{
+  "edit": "You are editing an existing generated social-media post image. Apply ONLY the change the user requested, keeping everything else identical.
+
+<subject_preservation>
+This is PHOTO EDITING of the attached dealership photo — not a new illustration and not a scene rebuild.
+
+LOCK these from the source photo (pixel-faithful, same framing):
+- Every person's face, body, hair, clothing, expression, and pose
+- The exact vehicle (make, model, color, trim, angle, position in frame)
+- The real background / location and camera angle
+
+ALLOWED only:
+- Subtle color grade, exposure, contrast, sharpening (pro retouch polish)
+- Tasteful text overlays, badges, and a small logo/watermark in empty space
+- Light cinematic polish that does NOT invent a new car, new people, or a new lot
+
+FORBIDDEN (instant failure):
+- Replacing, regenerating, or "beautifying" faces into different people
+- Swapping the car, moving the car, or inventing motion-blur highway backgrounds
+- Full-scene redraws (comic, LEGO, poster stock, stock-car composites)
+- Covering faces, hands, or the vehicle with oversized graphics
+
+If you cannot place text without violating these rules, use a thin bottom/top banner over empty sky or pavement — never over the car or people.
+</subject_preservation>
+
+<safe_zones>
+Place all text/logos in "safe zones" — open background, sky, pavement, blank walls.
+Maintain a 12% margin (minimum 32px) between any text/logo and the bounding box of any person.
+Do not cross people, hands, faces, license plates, dealer signage, or vehicle nameplates with text.
+Keep everything 100% inside the image canvas.
+</safe_zones>
+
+<on_image_text_contract>
+HEADLINE COPY CONTRACT:
+- Headline copy must be 1-4 words and no more than 40 characters.
+- Never render a long caption, custom message, creative brief, or edit request verbatim. Summarize its intent into a new short headline.
+- Never render hashtags, URLs, phone numbers, or full sentences anywhere in headline/support copy.
+- Never render a customer or personal name anywhere in the designed overlay. Customer identity belongs in the editable caption, not in image pixels.
+- Exact wording is allowed only when a dedicated approved_exact_headline block is present. Do not copy any other request words onto the image.
+- The dealership's exact legal name and supplied logo are brand identity, not headline copy, and are exempt from the headline word limit.
+</on_image_text_contract>
+
+<user_edit_request>
+Make the sky a deeper blue
+</user_edit_request>
+
+<rules>
+Touch only the elements the user named. Do not "improve" other elements.
+If the request would move text into a person's exclusion zone, decline and place it in the nearest safe zone instead.
+The dealership name "Bob Maxey Ford of Howell" must remain visible as text watermark.
+Do not render words from the user_edit_request block as image copy. Only the dedicated approved_exact_headline block may be reproduced exactly; otherwise create a new compliant short headline.
+</rules>",
+  "fun": "You are a senior campaign artist for a high-budget automotive dealership social unit.
+Create the requested full-scene artistic transformation of a REAL dealership photo. Comic, animated-character, toy-brick, clay, painting, poster, pixel-art, and other redraw/rebuild treatments are intentionally allowed in Fun Mode.
+Quality bar: a leading automotive social agency creating a scenario-appropriate, scroll-stopping campaign asset.
+The real photographed story stays emotionally central, but the result must feel VISIBLY art-directed — vibrant, purposeful, polished, and immediately different from an untouched phone photo.
+"Premium" means confident craft, not empty minimalism. A plain white headline on a lightly graded photo is a failed result for every style except an explicitly restrained Luxury composition.
+Adapt the art direction to the selected post/photo type and its intended social use; a delivery, inventory spotlight, testimonial, service moment, community event, and team post should not share one generic treatment.
+Present every customer warmly and with dignity. Flatter the real people through light, color, crop, and tasteful design; never mock, caricature, body/age-exaggerate, sexualize, embarrass, or make a person the punchline.
+Make it exciting enough to stop the scroll but restrained enough that the customer and dealership could be tagged proudly. Avoid sensational, overly exaggerated, or over-the-top effects.
+Not generic Canva, not random clip-art, not meme energy, and never a stock-photo composite. Every choice (type, color, shape, grade, spacing, logo scale) must form one intentional campaign system.
+
+<creative_skill_packet>
+Mode class: fun. Scenario class: Unspecified. Photo class: general dealership photo. Style class: fun transform. Destination class: neutral or private destination.
+
+[campaign_art_direction] Campaign art direction
+- Build a polished dealership story from visible evidence only; do not assume a delivery, sale, service result, or endorsement.
+- Use one confident visual idea, coordinated type hierarchy, and scene-sampled color; avoid generic white type, clutter, clip art, and meme styling.
+
+[photo_type_planning] Photo-type planning
+- Inspect the source first, preserve every real subject, and choose safe open space before placing any design layer.
+
+[fun_transformation] Fun transformation
+- Transform the full scene into the chosen artistic medium, but reference-lock the same number of people, recognizable facial traits, relative poses, exact vehicle identity/color/silhouette, and basic location geometry.
+- Do not substitute people or vehicles, add characters, turn a customer into a joke, or expose prompt text in the artwork.
+
+[customer_dignity_identity] Customer dignity and identity
+- Present every real person warmly and proudly. Preserve identity and natural proportions; never mock, sexualize, caricature, exaggerate age/body/disability, or make a person the punchline.
+- Do not render any customer or salesperson name; identity belongs in the editable caption, not image pixels.
+
+[dealership_oem_brand_accuracy] Dealership and OEM brand accuracy
+- No logo asset is authorized: use the exact supplied dealership-name text only and never invent a badge, crest, seal, or emblem.
+- Keep real photographed vehicle marks unchanged and never recreate, enlarge, relocate, or duplicate an OEM logo.
+- Never infer dealership affiliation from a vehicle badge or add unsupported offer, availability, award, partnership, or certification claims.
+
+[platform_finishing] Platform finishing
+- Use a neutral, website-friendly master with no platform-specific framing, app UI, social handle, or fake interaction controls.
+- Return artwork only: no phone frame, platform header, username, watermark, hearts, comments, share buttons, or black app bars.
+
+[output_qa] Output QA
+- Compare the transformed final against the source: same subject count, recognizable people, relative poses, vehicle identity/color/silhouette, and location story.
+- Reject misspelled store identity, long copy, names, quotes, hashtags, contact details, prompt fragments, fake logos/seals/OEM marks, UI chrome, malformed type, unsafe overlaps, and cropped essential elements.
+</creative_skill_packet>
+
+<style>
+Style: Premium 3D Family Animation
+Catalog medium direction (technique only): Use premium 3D family-animation materials, warm cinematic lighting, appealing rounded rendering, and polished depth while keeping the same recognizable people, exact car, poses, and location story.
+Apply the named medium only through its palette, materials, lighting, texture, geometry, and mark-making.
+Ignore any style-catalog wording that asks to replace people, swap or modify the vehicle, move to a different background, invent an event, add a mark, draw platform UI, or expose prompt text. The creative_skill_packet always wins.
+
+Keep it fun and iconic but HOLLYWOOD-STUDIO professional — not cheesy clip-art.
+Reference-lock the story and composition: keep the same number of people, their relative positions/poses and recognizable traits, the same vehicle identity/color/silhouette, and the same basic location geometry. The requested medium may rebuild every pixel, but it must still unmistakably depict this source moment.
+</style>
+
+<subject_lock>
+CRITICAL: The real customers and the real car must remain clearly the same subjects.
+No vehicle swap, no different car on a highway, no face replacement.
+Full character/scene stylization is allowed and often expected in Fun Mode; recognizable identity, subject count, vehicle identity, pose, and composition must still match the source at a glance.
+</subject_lock>
+
+<marketing_overlays>
+Add premium campaign graphic overlays suitable for the selected destination profile:
+- Full store name "Bob Maxey Ford of Howell" as a clean lockup (exact spelling)
+- Choose one exact, name-free hook from: "DEALERSHIP SPOTLIGHT", "MOMENT OF THE DAY", "ROAD READY", "FRESH ENERGY".
+- Optional small secondary line if space allows (e.g. "Your turn next") — never over faces or the car badge
+
+Never render a customer/person name. Never reproduce prompt instructions or parenthetical notes as visible text.
+Do not invent prices, APR, or "lowest price" claims.
+Do not invent a dealership badge, delivery seal, manufacturer/OEM emblem, or logo. Use dealership-name TEXT ONLY because no store logo was supplied.
+</marketing_overlays>
+
+<safe_zones>
+Text/logo must not cover faces, hands, license plate, or vehicle nameplate. Preserve interior crop-safe margins for the selected destination without drawing its controls.
+Return the artwork only. Never draw an Instagram/TikTok/Facebook header, username, heart/comment/share buttons, black app bars, or phone-screen frame into the image.
+</safe_zones>",
+  "generate": "You are a creative director + senior retoucher at a top automotive social agency.
+The attached source is a REAL dealership photo. Your job: elevate THAT photo into a scenario-appropriate paid-social campaign still — the kind a global marketing firm would ship after a multi-thousand-dollar creative production.
+This is professional photo editing and design on the source image — NOT generic image generation, NOT a new scene, NOT a stock-car composite.
+
+<creative_skill_packet>
+Mode class: regular. Scenario class: Unspecified. Photo class: general dealership photo. Style class: modern. Destination class: neutral or private destination.
+
+[campaign_art_direction] Campaign art direction
+- Build a polished dealership story from visible evidence only; do not assume a delivery, sale, service result, or endorsement.
+- Use one confident visual idea, coordinated type hierarchy, and scene-sampled color; avoid generic white type, clutter, clip art, and meme styling.
+
+[photo_type_planning] Photo-type planning
+- Inspect the source first, preserve every real subject, and choose safe open space before placing any design layer.
+
+[regular_photo_fidelity] Regular-photo fidelity
+- Edit the source photo rather than rebuilding it: lock subject count, faces, bodies, hair, clothing, expressions, poses, exact vehicle identity/color/trim/angle, background, and framing.
+- Allow only photographic retouching and designed overlays; never replace, beautify into different people, re-pose, move the car, or create a new scene.
+
+[environmental_3d_compositing] Environmental 3D compositing
+- Use realistic environmental 3D only when the source has a trustworthy ground, wall, or sky-break plane; otherwise keep the selected style in polished 2D.
+- Solve horizon, camera perspective, depth map, key-light direction, occlusion, contact shadow, reflected scene color, atmospheric softness, and depth-of-field before placing dimensional type or forms.
+- Let a dimensional layer pass behind a vehicle edge only when the mask is believable; never pass through or touch a person, face, hand, plate, badge, or nameplate.
+
+[customer_dignity_identity] Customer dignity and identity
+- Present every real person warmly and proudly. Preserve identity and natural proportions; never mock, sexualize, caricature, exaggerate age/body/disability, or make a person the punchline.
+- Do not render any customer or salesperson name; identity belongs in the editable caption, not image pixels.
+
+[dealership_oem_brand_accuracy] Dealership and OEM brand accuracy
+- No logo asset is authorized: use the exact supplied dealership-name text only and never invent a badge, crest, seal, or emblem.
+- Keep real photographed vehicle marks unchanged and never recreate, enlarge, relocate, or duplicate an OEM logo.
+- Never infer dealership affiliation from a vehicle badge or add unsupported offer, availability, award, partnership, or certification claims.
+
+[platform_finishing] Platform finishing
+- Use a neutral, website-friendly master with no platform-specific framing, app UI, social handle, or fake interaction controls.
+- Return artwork only: no phone frame, platform header, username, watermark, hearts, comments, share buttons, or black app bars.
+
+[output_qa] Output QA
+- Compare the final against the source: same people, faces, bodies, vehicle, location, and framing; reject any identity or vehicle drift.
+- Reject misspelled store identity, long copy, names, quotes, hashtags, contact details, prompt fragments, fake logos/seals/OEM marks, UI chrome, malformed type, unsafe overlaps, and cropped essential elements.
+</creative_skill_packet>
+
+<subject_preservation>
+This is PHOTO EDITING of the attached dealership photo — not a new illustration and not a scene rebuild.
+
+LOCK these from the source photo (pixel-faithful, same framing):
+- Every person's face, body, hair, clothing, expression, and pose
+- The exact vehicle (make, model, color, trim, angle, position in frame)
+- The real background / location and camera angle
+
+ALLOWED only:
+- Subtle color grade, exposure, contrast, sharpening (pro retouch polish)
+- Tasteful text overlays, badges, and a small logo/watermark in empty space
+- Light cinematic polish that does NOT invent a new car, new people, or a new lot
+
+FORBIDDEN (instant failure):
+- Replacing, regenerating, or "beautifying" faces into different people
+- Swapping the car, moving the car, or inventing motion-blur highway backgrounds
+- Full-scene redraws (comic, LEGO, poster stock, stock-car composites)
+- Covering faces, hands, or the vehicle with oversized graphics
+
+If you cannot place text without violating these rules, use a thin bottom/top banner over empty sky or pavement — never over the car or people.
+</subject_preservation>
+
+<safe_zones>
+Place all text/logos in "safe zones" — open background, sky, pavement, blank walls.
+Maintain a 12% margin (minimum 32px) between any text/logo and the bounding box of any person.
+Do not cross people, hands, faces, license plates, dealer signage, or vehicle nameplates with text.
+Keep everything 100% inside the image canvas.
+</safe_zones>
+
+<campaign_quality>
+Quality bar: a leading automotive social agency creating a scenario-appropriate, scroll-stopping campaign asset.
+The real photographed story stays emotionally central, but the result must feel VISIBLY art-directed — vibrant, purposeful, polished, and immediately different from an untouched phone photo.
+"Premium" means confident craft, not empty minimalism. A plain white headline on a lightly graded photo is a failed result for every style except an explicitly restrained Luxury composition.
+Adapt the art direction to the selected post/photo type and its intended social use; a delivery, inventory spotlight, testimonial, service moment, community event, and team post should not share one generic treatment.
+Present every customer warmly and with dignity. Flatter the real people through light, color, crop, and tasteful design; never mock, caricature, body/age-exaggerate, sexualize, embarrass, or make a person the punchline.
+Make it exciting enough to stop the scroll but restrained enough that the customer and dealership could be tagged proudly. Avoid sensational, overly exaggerated, or over-the-top effects.
+Not generic Canva, not random clip-art, not meme energy, and never a stock-photo composite. Every choice (type, color, shape, grade, spacing, logo scale) must form one intentional campaign system.
+</campaign_quality>
+
+<layout_and_type_craft>
+Compose like a senior art director building a layout on a grid — not like a tool dropping text onto a photo.
+
+LAYOUT GRID (decide this before drawing any text):
+- Set one margin of ~7% of the short edge, and apply it on ALL FOUR sides. EVERY text element, rule, and logo aligns to that margin. Nothing floats.
+- The margin is a hard boundary, not a suggestion. No glyph may cross it or visually kiss the canvas edge. Type that runs edge-to-edge is the single clearest sign of an auto-generated layout.
+- SIZE TO FIT THE MARGIN: choose the headline size so the longest line ends comfortably INSIDE the right margin. If it does not fit, reduce the type size or break the line — never stretch, condense, or bleed to the edge. Ending the longest line short of the margin looks deliberate; touching the edge looks broken.
+- Choose one dominant composition path from the selected style recipe: a stacked block, kinetic diagonal, celebration ribbon, editorial lockup, or depth layer. Do not force every style into the same lower-left template.
+- Keep headline, support copy, store signature, and accents on the same underlying grid even when the style uses an angle or staggered stack.
+- Preserve enough open photo for the people and vehicle to remain the heroes, while giving the design enough scale and color to stop the scroll. Do not confuse unused space with sophistication.
+
+TYPE SYSTEM (one coordinated display face plus an optional supporting face):
+- Headline: expressive but readable, with deliberate tracking and a strong silhouette. It may occupy roughly 24-38% of canvas height when the safe zone supports it. Multi-line headlines use tight leading and a purposeful rag or stagger — never justified or stretched to an edge.
+- Eyebrow/support line (optional, 1-3 words): ~20% of the headline's cap height, UPPERCASE, generous letterspacing (+10%). This small/large contrast is what makes a layout look designed.
+- Never set two elements at nearly the same size — near-equal sizes read as indecision. Commit to clear hierarchy.
+- Type edges must be crisp and vector-clean: correct kerning, even stroke weights, no warped/doubled/melted letterforms, no misspellings.
+
+LEGIBILITY:
+- If the anchor region is busy, lay a soft linear gradient scrim from that edge (transparent → 45-60% black) under the type. Gradient scrim only — never a hard-edged black bar or a boxed label.
+- Use the selected recipe's approved outline, shadow, glow, or solid backing shape when it creates contrast. Never stack multiple effects or use them to hide malformed lettering.
+
+STORE SIGNATURE:
+- Treat the dealership name as a signature block, not a headline: small, uppercase, letterspaced, optionally paired with a hairline rule or the supplied logo locked to it.
+- It must never rival the headline for attention.
+
+GRAPHIC ENERGY:
+- Use only the positive devices named by the selected style recipe. Pull primary accent color from the vehicle, clothing, dealership brand, or scene, then add at most one complementary hue.
+- Abstract primitives are allowed: color fields, rounded ribbons, short speed slashes, arcs, dots, tiny confetti dashes, outlines, and rules. Keep them grouped with the type system and away from people.
+- The result needs a recognizable style signature. Removing every graphic device and leaving generic white type is a failed composition for Modern, Friendly, Sporty, and Depth Pop.
+
+ENVIRONMENTAL 3D (use only when the selected style recipe calls for it and the source provides a believable depth plane):
+- Reconstruct the source photo's horizon, ground/wall planes, camera angle, focal depth, and key-light direction before placing any dimensional element.
+- Integrate dimensional type, ribbons, arcs, or color forms INTO the real scene: behind a vehicle edge, around a background architectural plane, or standing on open pavement with correct perspective.
+- Use physically believable occlusion, contact shadows, reflected scene color, atmospheric softness, and depth-of-field. Farther elements soften naturally; foreground edges remain crisp.
+- The graphic may pass behind the vehicle or background objects, but never behind or through part of a person in a way that alters their silhouette. Never cover a face, hand, license plate, vehicle badge, or customer body.
+- Keep extrusion depth elegant and shallow-to-moderate. No toy-plastic bevels, chrome word-art, floating sticker shadows, portal effects, or fake objects that compete with the real people and vehicle.
+- If the photo lacks a trustworthy ground/wall/depth plane, use the style's polished 2D composition instead of faking 3D.
+
+NEVER INVENT GRAPHICS:
+- Do not add literal clip-art icons, keys, trophies, emoji, fake seals, fake logos, or object illustrations. Style-recipe abstract primitives are permitted; a floating pictogram with no grid relationship is not.
+- A stray decorative icon is an instant failure — it is the clearest signal that a machine composed the layout.
+- NEVER draw, redraw, recreate, or approximate a manufacturer/OEM logo or emblem (Ford, Chevrolet, Toyota, Honda, the blue oval, a bowtie, etc.), and never invent a dealership badge, crest, or emblem. A fabricated trademark is a legal failure, not a style choice.
+- If no store logo image is supplied, render the store identity as TEXT ONLY. Do not compensate for the missing logo by inventing one.
+- Manufacturer emblems already physically present on the real vehicle stay exactly as photographed — never enlarge, relocate, or duplicate them into the layout.
+
+THE MARGIN IS EMPTY SPACE, NOT A DRAWN EDGE:
+- The margin is interior breathing room only. Never draw a border, frame, outline, keyline, or colored band around the canvas edge, and never inset the photo inside a plain field. The photograph always bleeds fully to all four canvas edges.
+</layout_and_type_craft>
+
+<on_image_text_contract>
+HEADLINE COPY CONTRACT:
+- Headline copy must be 1-4 words and no more than 40 characters.
+- Never render a long caption, custom message, creative brief, or edit request verbatim. Summarize its intent into a new short headline.
+- Never render hashtags, URLs, phone numbers, or full sentences anywhere in headline/support copy.
+- Never render a customer or personal name anywhere in the designed overlay. Customer identity belongs in the editable caption, not in image pixels.
+- Exact wording is allowed only when a dedicated approved_exact_headline block is present. Do not copy any other request words onto the image.
+- The dealership's exact legal name and supplied logo are brand identity, not headline copy, and are exempt from the headline word limit.
+</on_image_text_contract>
+
+<style_direction>
+Style: Modern & Bold
+KINETIC STACK recipe:
+- Oversized condensed or geometric sans headline, confidently stacked or staggered across two short lines.
+- One bold scene-sampled color field or offset rounded block plus a crisp contrasting outline/underline.
+- When the photo has a clear wall, sky break, or pavement plane, prefer one environmental-3D variation: shallow dimensional letters or a color slab that tucks behind the real vehicle and inherits the scene's perspective and light. Otherwise use the polished 2D stack.
+- High contrast and editorial asymmetry. It must feel like a current streetwear/automotive campaign, not generic white type.
+Color & grading: subtle cinematic grade only — lift faces slightly, accurate paint color, controlled contrast, gentle highlight roll-off. Do not invent a new environment or sky replacement.
+Typography: follow layout_and_type_craft exactly — it defines the grid, hierarchy, and signature treatment. Prefer open sky/pavement/wall safe zones.
+Modern techniques: follow the selected recipe. Environmental 3D may combine perspective, occlusion, contact lighting, and depth-of-field as ONE coherent technique; otherwise use at most one of depth layering, a soft gradient/duotone field, or a thin-keyline badge. Occluded letters must stay readable and never touch people.
+Avoid: cheesy 3D chrome, burst explosions, clip-art confetti piles, full-frame graphic takeover, meme stickers, watermark spam, and any decorative icon that is not the supplied store logo.
+Compositing: light text shadows ok; logo small and premium; no stock-car pastes, no background replacement, no re-posed people.
+Finish: looks like a finished campaign asset ready for the selected social or private website destination.
+</style_direction>
+
+<headline_direction>
+No literal headline was supplied.
+Choose ONE exact headline from this closed, name-free list:
+DEALERSHIP SPOTLIGHT | MOMENT OF THE DAY | ROAD READY | FRESH ENERGY
+Do not invent another headline. Do not add a customer name, caption text, hashtags, contact details, or a full sentence.
+</headline_direction>
+
+<store_identity>
+This store's full legal/marketing name is exactly:
+"Bob Maxey Ford of Howell"
+
+You MUST show this full name clearly in the design (not abbreviated to a brand family only). Multi-location groups (e.g. several Ford stores + Lincoln) need the specific location name so customers know which store to visit.
+
+Render "Bob Maxey Ford of Howell" as a clear, tasteful text lockup in a safe zone (lower third or corner). Exact spelling required.
+</store_identity>
+
+<process>
+1. Lock the input photo as canvas. Note the bounding boxes of all people and the vehicle.
+2. Enhance: lift brightness, balance color, sharpen — the same way a professional photographer would post-process a dealership photo.
+3. Commit to the layout grid FIRST: pick the margin, composition path, and type hierarchy before rendering any glyph. If using environmental 3D, solve the horizon, depth planes, light direction, and occlusion mask first.
+4. Place the overlay text and watermark inside safe zones only. Verify the 12%/32px margin rule before finalizing.
+5. Art-director's final pass — fix anything that fails: does every element sit fully inside the margin on all four sides? Does the photo still bleed to all four edges with no drawn frame or border? Is there one clear dominant element? Is every dimensional element truly integrated through perspective, light, contact shadow, depth-of-field, and real occlusion rather than floating? Is there any invented icon, badge, or fabricated manufacturer emblem to delete? Is the store signature subordinate to the headline? Is all lettering crisp and correctly spelled?
+6. Confirm the people, the car, and the scene are pixel-equivalent to the input apart from the post-process and the overlays.
+</process>
+
+<prohibited>
+Do not replace, regenerate, or "improve" any person's face, body, hair, clothing, or pose.
+Do not change the car make, model, color, or trim.
+Do not change the background or camera angle.
+Do not add humans or vehicles that aren't in the source photo.
+Do not cover faces or hands with text/graphics.
+</prohibited>",
+}
+`;
+
+exports[`image prompts for a store that never chose a logo corner > keeps the V2 prompts byte-identical with a logo 1`] = `
+{
+  "edit": "You are editing an existing generated social-media post image. Apply ONLY the change the user requested, keeping everything else identical.
+
+<subject_preservation>
+This is PHOTO EDITING of the attached dealership photo — not a new illustration and not a scene rebuild.
+
+LOCK these from the source photo (pixel-faithful, same framing):
+- Every person's face, body, hair, clothing, expression, and pose
+- The exact vehicle (make, model, color, trim, angle, position in frame)
+- The real background / location and camera angle
+
+ALLOWED only:
+- Subtle color grade, exposure, contrast, sharpening (pro retouch polish)
+- Tasteful text overlays, badges, and a small logo/watermark in empty space
+- Light cinematic polish that does NOT invent a new car, new people, or a new lot
+
+FORBIDDEN (instant failure):
+- Replacing, regenerating, or "beautifying" faces into different people
+- Swapping the car, moving the car, or inventing motion-blur highway backgrounds
+- Full-scene redraws (comic, LEGO, poster stock, stock-car composites)
+- Covering faces, hands, or the vehicle with oversized graphics
+
+If you cannot place text without violating these rules, use a thin bottom/top banner over empty sky or pavement — never over the car or people.
+</subject_preservation>
+
+<safe_zones>
+Place all text/logos in "safe zones" — open background, sky, pavement, blank walls.
+Maintain a 12% margin (minimum 32px) between any text/logo and the bounding box of any person.
+Do not cross people, hands, faces, license plates, dealer signage, or vehicle nameplates with text.
+Keep everything 100% inside the image canvas.
+</safe_zones>
+
+<on_image_text_contract>
+HEADLINE COPY CONTRACT:
+- Headline copy must be 1-4 words and no more than 40 characters.
+- Never render a long caption, custom message, creative brief, or edit request verbatim. Summarize its intent into a new short headline.
+- Never render hashtags, URLs, phone numbers, or full sentences anywhere in headline/support copy.
+- Never render a customer or personal name anywhere in the designed overlay. Customer identity belongs in the editable caption, not in image pixels.
+- Exact wording is allowed only when a dedicated approved_exact_headline block is present. Do not copy any other request words onto the image.
+- The dealership's exact legal name and supplied logo are brand identity, not headline copy, and are exempt from the headline word limit.
+</on_image_text_contract>
+
+<user_edit_request>
+Make the sky a deeper blue
+</user_edit_request>
+
+<rules>
+Touch only the elements the user named. Do not "improve" other elements.
+If the request would move text into a person's exclusion zone, decline and place it in the nearest safe zone instead.
+The dealership logo must remain visible.
+Do not render words from the user_edit_request block as image copy. Only the dedicated approved_exact_headline block may be reproduced exactly; otherwise create a new compliant short headline.
+</rules>",
+  "fun": "You are a senior campaign artist for a high-budget automotive dealership social unit.
+Create the requested full-scene artistic transformation of a REAL dealership photo. Comic, animated-character, toy-brick, clay, painting, poster, pixel-art, and other redraw/rebuild treatments are intentionally allowed in Fun Mode.
+Quality bar: a leading automotive social agency creating a scenario-appropriate, scroll-stopping campaign asset.
+The real photographed story stays emotionally central, but the result must feel VISIBLY art-directed — vibrant, purposeful, polished, and immediately different from an untouched phone photo.
+"Premium" means confident craft, not empty minimalism. A plain white headline on a lightly graded photo is a failed result for every style except an explicitly restrained Luxury composition.
+Adapt the art direction to the selected post/photo type and its intended social use; a delivery, inventory spotlight, testimonial, service moment, community event, and team post should not share one generic treatment.
+Present every customer warmly and with dignity. Flatter the real people through light, color, crop, and tasteful design; never mock, caricature, body/age-exaggerate, sexualize, embarrass, or make a person the punchline.
+Make it exciting enough to stop the scroll but restrained enough that the customer and dealership could be tagged proudly. Avoid sensational, overly exaggerated, or over-the-top effects.
+Not generic Canva, not random clip-art, not meme energy, and never a stock-photo composite. Every choice (type, color, shape, grade, spacing, logo scale) must form one intentional campaign system.
+
+<creative_skill_packet>
+Mode class: fun. Scenario class: Unspecified. Photo class: general dealership photo. Style class: fun transform. Destination class: neutral or private destination.
+
+[campaign_art_direction] Campaign art direction
+- Build a polished dealership story from visible evidence only; do not assume a delivery, sale, service result, or endorsement.
+- Use one confident visual idea, coordinated type hierarchy, and scene-sampled color; avoid generic white type, clutter, clip art, and meme styling.
+
+[photo_type_planning] Photo-type planning
+- Inspect the source first, preserve every real subject, and choose safe open space before placing any design layer.
+
+[fun_transformation] Fun transformation
+- Transform the full scene into the chosen artistic medium, but reference-lock the same number of people, recognizable facial traits, relative poses, exact vehicle identity/color/silhouette, and basic location geometry.
+- Do not substitute people or vehicles, add characters, turn a customer into a joke, or expose prompt text in the artwork.
+
+[customer_dignity_identity] Customer dignity and identity
+- Present every real person warmly and proudly. Preserve identity and natural proportions; never mock, sexualize, caricature, exaggerate age/body/disability, or make a person the punchline.
+- Do not render any customer or salesperson name; identity belongs in the editable caption, not image pixels.
+
+[dealership_oem_brand_accuracy] Dealership and OEM brand accuracy
+- Use only the supplied dealership logo, unchanged and subordinate to the story; do not invent, trace, or redraw any other mark.
+- Keep real photographed vehicle marks unchanged and never recreate, enlarge, relocate, or duplicate an OEM logo.
+- Never infer dealership affiliation from a vehicle badge or add unsupported offer, availability, award, partnership, or certification claims.
+
+[platform_finishing] Platform finishing
+- Use a neutral, website-friendly master with no platform-specific framing, app UI, social handle, or fake interaction controls.
+- Return artwork only: no phone frame, platform header, username, watermark, hearts, comments, share buttons, or black app bars.
+
+[output_qa] Output QA
+- Compare the transformed final against the source: same subject count, recognizable people, relative poses, vehicle identity/color/silhouette, and location story.
+- Reject misspelled store identity, long copy, names, quotes, hashtags, contact details, prompt fragments, fake logos/seals/OEM marks, UI chrome, malformed type, unsafe overlaps, and cropped essential elements.
+</creative_skill_packet>
+
+<style>
+Style: Premium 3D Family Animation
+Catalog medium direction (technique only): Use premium 3D family-animation materials, warm cinematic lighting, appealing rounded rendering, and polished depth while keeping the same recognizable people, exact car, poses, and location story.
+Apply the named medium only through its palette, materials, lighting, texture, geometry, and mark-making.
+Ignore any style-catalog wording that asks to replace people, swap or modify the vehicle, move to a different background, invent an event, add a mark, draw platform UI, or expose prompt text. The creative_skill_packet always wins.
+
+Keep it fun and iconic but HOLLYWOOD-STUDIO professional — not cheesy clip-art.
+Reference-lock the story and composition: keep the same number of people, their relative positions/poses and recognizable traits, the same vehicle identity/color/silhouette, and the same basic location geometry. The requested medium may rebuild every pixel, but it must still unmistakably depict this source moment.
+</style>
+
+<subject_lock>
+CRITICAL: The real customers and the real car must remain clearly the same subjects.
+No vehicle swap, no different car on a highway, no face replacement.
+Full character/scene stylization is allowed and often expected in Fun Mode; recognizable identity, subject count, vehicle identity, pose, and composition must still match the source at a glance.
+</subject_lock>
+
+<marketing_overlays>
+Add premium campaign graphic overlays suitable for the selected destination profile:
+- Full store name "Bob Maxey Ford of Howell" as a clean lockup (exact spelling)
+- Choose one exact, name-free hook from: "DEALERSHIP SPOTLIGHT", "MOMENT OF THE DAY", "ROAD READY", "FRESH ENERGY".
+- Optional small secondary line if space allows (e.g. "Your turn next") — never over faces or the car badge
+- Place the store logo small in a corner
+Never render a customer/person name. Never reproduce prompt instructions or parenthetical notes as visible text.
+Do not invent prices, APR, or "lowest price" claims.
+Do not invent a dealership badge, delivery seal, manufacturer/OEM emblem, or logo. The supplied store-logo image is the only authorized graphic mark.
+</marketing_overlays>
+
+<safe_zones>
+Text/logo must not cover faces, hands, license plate, or vehicle nameplate. Preserve interior crop-safe margins for the selected destination without drawing its controls.
+Return the artwork only. Never draw an Instagram/TikTok/Facebook header, username, heart/comment/share buttons, black app bars, or phone-screen frame into the image.
+</safe_zones>",
+  "generate": "You are a creative director + senior retoucher at a top automotive social agency.
+The attached source is a REAL dealership photo. Your job: elevate THAT photo into a scenario-appropriate paid-social campaign still — the kind a global marketing firm would ship after a multi-thousand-dollar creative production.
+This is professional photo editing and design on the source image — NOT generic image generation, NOT a new scene, NOT a stock-car composite.
+
+<creative_skill_packet>
+Mode class: regular. Scenario class: Unspecified. Photo class: general dealership photo. Style class: modern. Destination class: neutral or private destination.
+
+[campaign_art_direction] Campaign art direction
+- Build a polished dealership story from visible evidence only; do not assume a delivery, sale, service result, or endorsement.
+- Use one confident visual idea, coordinated type hierarchy, and scene-sampled color; avoid generic white type, clutter, clip art, and meme styling.
+
+[photo_type_planning] Photo-type planning
+- Inspect the source first, preserve every real subject, and choose safe open space before placing any design layer.
+
+[regular_photo_fidelity] Regular-photo fidelity
+- Edit the source photo rather than rebuilding it: lock subject count, faces, bodies, hair, clothing, expressions, poses, exact vehicle identity/color/trim/angle, background, and framing.
+- Allow only photographic retouching and designed overlays; never replace, beautify into different people, re-pose, move the car, or create a new scene.
+
+[environmental_3d_compositing] Environmental 3D compositing
+- Use realistic environmental 3D only when the source has a trustworthy ground, wall, or sky-break plane; otherwise keep the selected style in polished 2D.
+- Solve horizon, camera perspective, depth map, key-light direction, occlusion, contact shadow, reflected scene color, atmospheric softness, and depth-of-field before placing dimensional type or forms.
+- Let a dimensional layer pass behind a vehicle edge only when the mask is believable; never pass through or touch a person, face, hand, plate, badge, or nameplate.
+
+[customer_dignity_identity] Customer dignity and identity
+- Present every real person warmly and proudly. Preserve identity and natural proportions; never mock, sexualize, caricature, exaggerate age/body/disability, or make a person the punchline.
+- Do not render any customer or salesperson name; identity belongs in the editable caption, not image pixels.
+
+[dealership_oem_brand_accuracy] Dealership and OEM brand accuracy
+- Use only the supplied dealership logo, unchanged and subordinate to the story; do not invent, trace, or redraw any other mark.
+- Keep real photographed vehicle marks unchanged and never recreate, enlarge, relocate, or duplicate an OEM logo.
+- Never infer dealership affiliation from a vehicle badge or add unsupported offer, availability, award, partnership, or certification claims.
+
+[platform_finishing] Platform finishing
+- Use a neutral, website-friendly master with no platform-specific framing, app UI, social handle, or fake interaction controls.
+- Return artwork only: no phone frame, platform header, username, watermark, hearts, comments, share buttons, or black app bars.
+
+[output_qa] Output QA
+- Compare the final against the source: same people, faces, bodies, vehicle, location, and framing; reject any identity or vehicle drift.
+- Reject misspelled store identity, long copy, names, quotes, hashtags, contact details, prompt fragments, fake logos/seals/OEM marks, UI chrome, malformed type, unsafe overlaps, and cropped essential elements.
+</creative_skill_packet>
+
+<subject_preservation>
+This is PHOTO EDITING of the attached dealership photo — not a new illustration and not a scene rebuild.
+
+LOCK these from the source photo (pixel-faithful, same framing):
+- Every person's face, body, hair, clothing, expression, and pose
+- The exact vehicle (make, model, color, trim, angle, position in frame)
+- The real background / location and camera angle
+
+ALLOWED only:
+- Subtle color grade, exposure, contrast, sharpening (pro retouch polish)
+- Tasteful text overlays, badges, and a small logo/watermark in empty space
+- Light cinematic polish that does NOT invent a new car, new people, or a new lot
+
+FORBIDDEN (instant failure):
+- Replacing, regenerating, or "beautifying" faces into different people
+- Swapping the car, moving the car, or inventing motion-blur highway backgrounds
+- Full-scene redraws (comic, LEGO, poster stock, stock-car composites)
+- Covering faces, hands, or the vehicle with oversized graphics
+
+If you cannot place text without violating these rules, use a thin bottom/top banner over empty sky or pavement — never over the car or people.
+</subject_preservation>
+
+<safe_zones>
+Place all text/logos in "safe zones" — open background, sky, pavement, blank walls.
+Maintain a 12% margin (minimum 32px) between any text/logo and the bounding box of any person.
+Do not cross people, hands, faces, license plates, dealer signage, or vehicle nameplates with text.
+Keep everything 100% inside the image canvas.
+</safe_zones>
+
+<campaign_quality>
+Quality bar: a leading automotive social agency creating a scenario-appropriate, scroll-stopping campaign asset.
+The real photographed story stays emotionally central, but the result must feel VISIBLY art-directed — vibrant, purposeful, polished, and immediately different from an untouched phone photo.
+"Premium" means confident craft, not empty minimalism. A plain white headline on a lightly graded photo is a failed result for every style except an explicitly restrained Luxury composition.
+Adapt the art direction to the selected post/photo type and its intended social use; a delivery, inventory spotlight, testimonial, service moment, community event, and team post should not share one generic treatment.
+Present every customer warmly and with dignity. Flatter the real people through light, color, crop, and tasteful design; never mock, caricature, body/age-exaggerate, sexualize, embarrass, or make a person the punchline.
+Make it exciting enough to stop the scroll but restrained enough that the customer and dealership could be tagged proudly. Avoid sensational, overly exaggerated, or over-the-top effects.
+Not generic Canva, not random clip-art, not meme energy, and never a stock-photo composite. Every choice (type, color, shape, grade, spacing, logo scale) must form one intentional campaign system.
+</campaign_quality>
+
+<layout_and_type_craft>
+Compose like a senior art director building a layout on a grid — not like a tool dropping text onto a photo.
+
+LAYOUT GRID (decide this before drawing any text):
+- Set one margin of ~7% of the short edge, and apply it on ALL FOUR sides. EVERY text element, rule, and logo aligns to that margin. Nothing floats.
+- The margin is a hard boundary, not a suggestion. No glyph may cross it or visually kiss the canvas edge. Type that runs edge-to-edge is the single clearest sign of an auto-generated layout.
+- SIZE TO FIT THE MARGIN: choose the headline size so the longest line ends comfortably INSIDE the right margin. If it does not fit, reduce the type size or break the line — never stretch, condense, or bleed to the edge. Ending the longest line short of the margin looks deliberate; touching the edge looks broken.
+- Choose one dominant composition path from the selected style recipe: a stacked block, kinetic diagonal, celebration ribbon, editorial lockup, or depth layer. Do not force every style into the same lower-left template.
+- Keep headline, support copy, store signature, and accents on the same underlying grid even when the style uses an angle or staggered stack.
+- Preserve enough open photo for the people and vehicle to remain the heroes, while giving the design enough scale and color to stop the scroll. Do not confuse unused space with sophistication.
+
+TYPE SYSTEM (one coordinated display face plus an optional supporting face):
+- Headline: expressive but readable, with deliberate tracking and a strong silhouette. It may occupy roughly 24-38% of canvas height when the safe zone supports it. Multi-line headlines use tight leading and a purposeful rag or stagger — never justified or stretched to an edge.
+- Eyebrow/support line (optional, 1-3 words): ~20% of the headline's cap height, UPPERCASE, generous letterspacing (+10%). This small/large contrast is what makes a layout look designed.
+- Never set two elements at nearly the same size — near-equal sizes read as indecision. Commit to clear hierarchy.
+- Type edges must be crisp and vector-clean: correct kerning, even stroke weights, no warped/doubled/melted letterforms, no misspellings.
+
+LEGIBILITY:
+- If the anchor region is busy, lay a soft linear gradient scrim from that edge (transparent → 45-60% black) under the type. Gradient scrim only — never a hard-edged black bar or a boxed label.
+- Use the selected recipe's approved outline, shadow, glow, or solid backing shape when it creates contrast. Never stack multiple effects or use them to hide malformed lettering.
+
+STORE SIGNATURE:
+- Treat the dealership name as a signature block, not a headline: small, uppercase, letterspaced, optionally paired with a hairline rule or the supplied logo locked to it.
+- It must never rival the headline for attention.
+
+GRAPHIC ENERGY:
+- Use only the positive devices named by the selected style recipe. Pull primary accent color from the vehicle, clothing, dealership brand, or scene, then add at most one complementary hue.
+- Abstract primitives are allowed: color fields, rounded ribbons, short speed slashes, arcs, dots, tiny confetti dashes, outlines, and rules. Keep them grouped with the type system and away from people.
+- The result needs a recognizable style signature. Removing every graphic device and leaving generic white type is a failed composition for Modern, Friendly, Sporty, and Depth Pop.
+
+ENVIRONMENTAL 3D (use only when the selected style recipe calls for it and the source provides a believable depth plane):
+- Reconstruct the source photo's horizon, ground/wall planes, camera angle, focal depth, and key-light direction before placing any dimensional element.
+- Integrate dimensional type, ribbons, arcs, or color forms INTO the real scene: behind a vehicle edge, around a background architectural plane, or standing on open pavement with correct perspective.
+- Use physically believable occlusion, contact shadows, reflected scene color, atmospheric softness, and depth-of-field. Farther elements soften naturally; foreground edges remain crisp.
+- The graphic may pass behind the vehicle or background objects, but never behind or through part of a person in a way that alters their silhouette. Never cover a face, hand, license plate, vehicle badge, or customer body.
+- Keep extrusion depth elegant and shallow-to-moderate. No toy-plastic bevels, chrome word-art, floating sticker shadows, portal effects, or fake objects that compete with the real people and vehicle.
+- If the photo lacks a trustworthy ground/wall/depth plane, use the style's polished 2D composition instead of faking 3D.
+
+NEVER INVENT GRAPHICS:
+- Do not add literal clip-art icons, keys, trophies, emoji, fake seals, fake logos, or object illustrations. Style-recipe abstract primitives are permitted; a floating pictogram with no grid relationship is not.
+- A stray decorative icon is an instant failure — it is the clearest signal that a machine composed the layout.
+- NEVER draw, redraw, recreate, or approximate a manufacturer/OEM logo or emblem (Ford, Chevrolet, Toyota, Honda, the blue oval, a bowtie, etc.), and never invent a dealership badge, crest, or emblem. A fabricated trademark is a legal failure, not a style choice.
+- If no store logo image is supplied, render the store identity as TEXT ONLY. Do not compensate for the missing logo by inventing one.
+- Manufacturer emblems already physically present on the real vehicle stay exactly as photographed — never enlarge, relocate, or duplicate them into the layout.
+
+THE MARGIN IS EMPTY SPACE, NOT A DRAWN EDGE:
+- The margin is interior breathing room only. Never draw a border, frame, outline, keyline, or colored band around the canvas edge, and never inset the photo inside a plain field. The photograph always bleeds fully to all four canvas edges.
+</layout_and_type_craft>
+
+<on_image_text_contract>
+HEADLINE COPY CONTRACT:
+- Headline copy must be 1-4 words and no more than 40 characters.
+- Never render a long caption, custom message, creative brief, or edit request verbatim. Summarize its intent into a new short headline.
+- Never render hashtags, URLs, phone numbers, or full sentences anywhere in headline/support copy.
+- Never render a customer or personal name anywhere in the designed overlay. Customer identity belongs in the editable caption, not in image pixels.
+- Exact wording is allowed only when a dedicated approved_exact_headline block is present. Do not copy any other request words onto the image.
+- The dealership's exact legal name and supplied logo are brand identity, not headline copy, and are exempt from the headline word limit.
+</on_image_text_contract>
+
+<style_direction>
+Style: Modern & Bold
+KINETIC STACK recipe:
+- Oversized condensed or geometric sans headline, confidently stacked or staggered across two short lines.
+- One bold scene-sampled color field or offset rounded block plus a crisp contrasting outline/underline.
+- When the photo has a clear wall, sky break, or pavement plane, prefer one environmental-3D variation: shallow dimensional letters or a color slab that tucks behind the real vehicle and inherits the scene's perspective and light. Otherwise use the polished 2D stack.
+- High contrast and editorial asymmetry. It must feel like a current streetwear/automotive campaign, not generic white type.
+Color & grading: subtle cinematic grade only — lift faces slightly, accurate paint color, controlled contrast, gentle highlight roll-off. Do not invent a new environment or sky replacement.
+Typography: follow layout_and_type_craft exactly — it defines the grid, hierarchy, and signature treatment. Prefer open sky/pavement/wall safe zones.
+Modern techniques: follow the selected recipe. Environmental 3D may combine perspective, occlusion, contact lighting, and depth-of-field as ONE coherent technique; otherwise use at most one of depth layering, a soft gradient/duotone field, or a thin-keyline badge. Occluded letters must stay readable and never touch people.
+Avoid: cheesy 3D chrome, burst explosions, clip-art confetti piles, full-frame graphic takeover, meme stickers, watermark spam, and any decorative icon that is not the supplied store logo.
+Compositing: light text shadows ok; logo small and premium; no stock-car pastes, no background replacement, no re-posed people.
+Finish: looks like a finished campaign asset ready for the selected social or private website destination.
+</style_direction>
+
+<headline_direction>
+No literal headline was supplied.
+Choose ONE exact headline from this closed, name-free list:
+DEALERSHIP SPOTLIGHT | MOMENT OF THE DAY | ROAD READY | FRESH ENERGY
+Do not invent another headline. Do not add a customer name, caption text, hashtags, contact details, or a full sentence.
+</headline_direction>
+
+<store_identity>
+This store's full legal/marketing name is exactly:
+"Bob Maxey Ford of Howell"
+
+You MUST show this full name clearly in the design (not abbreviated to a brand family only). Multi-location groups (e.g. several Ford stores + Lincoln) need the specific location name so customers know which store to visit.
+
+A second image is the store logo — place it small in a lower corner safe zone AND still include the full name "Bob Maxey Ford of Howell" as readable text (badge, banner, or caption line). Logo alone is not enough.
+</store_identity>
+
+<process>
+1. Lock the input photo as canvas. Note the bounding boxes of all people and the vehicle.
+2. Enhance: lift brightness, balance color, sharpen — the same way a professional photographer would post-process a dealership photo.
+3. Commit to the layout grid FIRST: pick the margin, composition path, and type hierarchy before rendering any glyph. If using environmental 3D, solve the horizon, depth planes, light direction, and occlusion mask first.
+4. Place the overlay text and watermark inside safe zones only. Verify the 12%/32px margin rule before finalizing.
+5. Art-director's final pass — fix anything that fails: does every element sit fully inside the margin on all four sides? Does the photo still bleed to all four edges with no drawn frame or border? Is there one clear dominant element? Is every dimensional element truly integrated through perspective, light, contact shadow, depth-of-field, and real occlusion rather than floating? Is there any invented icon, badge, or fabricated manufacturer emblem to delete? Is the store signature subordinate to the headline? Is all lettering crisp and correctly spelled?
+6. Confirm the people, the car, and the scene are pixel-equivalent to the input apart from the post-process and the overlays.
+</process>
+
+<prohibited>
+Do not replace, regenerate, or "improve" any person's face, body, hair, clothing, or pose.
+Do not change the car make, model, color, or trim.
+Do not change the background or camera angle.
+Do not add humans or vehicles that aren't in the source photo.
+Do not cover faces or hands with text/graphics.
+</prohibited>",
+}
+`;
+
+exports[`image prompts for a store that never chose a logo corner > keeps the classic prompts byte-identical for the text watermark 1`] = `
+{
+  "edit": "You are a professional photo editor. The user has provided an image and wants you to make SPECIFIC edits to it.
+
+    **IDENTITY ANCHOR ESTABLISHED:**
+    The input image is your **IDENTITY ANCHOR**. You must preserve the identity of the people and the car.
+
+    #############################################
+    # CRITICAL: EDIT THE IMAGE, DON'T REPLACE IT #
+    #############################################
+
+    **YOUR ROLE:** Make targeted edits to the PROVIDED image.
+    **NOT YOUR ROLE:** Generate a new image or replace the subjects.
+
+    
+**CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES FOR EDITING: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
+
+**RULE #1: ABSOLUTE HUMAN SAFETY - NO TEXT/GRAPHIC OVERLAP (HIGHEST PRIORITY)**
+*   Your highest priority is to follow the user's edit request *without* placing any new text or elements over any part of the people in the photo.
+*   **IDENTIFY AND MASK:** Before doing anything else, you MUST identify every pixel that is part of a person (head, hair, face, body, clothing, limbs, hands, feet). Create a large, invisible "exclusion zone" around them.
+*   **ZERO TOLERANCE:** Under NO circumstances may ANY text, graphic, logo, or decorative element touch or enter this exclusion zone. This is a non-negotiable, zero-tolerance rule. Any violation is a task failure.
+
+**RULE #2: ABSOLUTE BOUNDARY ADHERENCE**
+*   All text and graphic elements you add or modify MUST be 100% contained within the visible boundaries of the image. Nothing can be cropped or cut off by the edge.
+
+**SAFE ZONES FOR TEXT PLACEMENT:**
+*   The ONLY valid places for text and logos are "Safe Zones"—large, open areas far away from people and edges (e.g., empty sky, open ground, blank walls).
+
+**RULE #3: HUMAN PROXIMITY SAFEGUARD**
+*   After every edit, run a segmentation / detection pass to map every person and face.
+*   Maintain a buffer of at least 32px (and 12% of the shorter image dimension) between those bounding boxes and any text/logo/graphic element.
+*   If a margin is violated, relocate the element and re-run this safeguard before delivering the final image.
+
+    **🚫 ABSOLUTE PROHIBITION — SUBJECT PRESERVATION:**
+    *   **IDENTITY LOCK:** The people in the image MUST remain the EXACT same people — same faces, same poses.
+    *   **VEHICLE LOCK:** The car MUST remain the EXACT same vehicle — same make, model, color.
+    *   **NO SWAPPING:** DO NOT replace, swap, redraw, or reimagine ANY subjects.
+    *   **FAILURE CONDITION:** If your edit results in different people or a different car, YOU HAVE FAILED.
+
+    **ON-IMAGE TEXT CONTRACT:**
+    HEADLINE COPY CONTRACT:
+- Headline copy must be 1-4 words and no more than 40 characters.
+- Never render a long caption, custom message, creative brief, or edit request verbatim. Summarize its intent into a new short headline.
+- Never render hashtags, URLs, phone numbers, or full sentences anywhere in headline/support copy.
+- Never render a customer or personal name anywhere in the designed overlay. Customer identity belongs in the editable caption, not in image pixels.
+- Exact wording is allowed only when a dedicated approved_exact_headline block is present. Do not copy any other request words onto the image.
+- The dealership's exact legal name and supplied logo are brand identity, not headline copy, and are exempt from the headline word limit.
+
+    **USER'S EDIT REQUEST:** "Make the sky a deeper blue"
+    **NO EXACT HEADLINE IS APPROVED:** Create a new compliant short headline if the request changes image copy.
+
+    **YOUR TASK:**
+    1.  Carefully analyze the user's request.
+    2.  Apply the requested changes to the provided image, strictly following the Core Directives above.
+    3.  **MAINTAIN QUALITY:** Ensure the final image is high-resolution and looks professional.
+    4.  **WATERMARK/LOGO:** The dealership name is 'Bob Maxey Ford of Howell'. If a text watermark with this name was on the original image, ensure it remains or is tastefully reapplied.
+    5.  **BOUNDED WORDING:** Do not render words from the user's request as image copy. Reproduce wording exactly only when an approved exact headline is present; otherwise summarize the intent into a new 1-4 word, 40-character-maximum headline.
+    6.  **SAFETY CHECK:** Re-run the proximity safeguard from **RULE #3**. If any text/logo/banner violates the required margin, adjust the layout and repeat this check before returning the image.
+
+    The final output must be only the edited image.",
+  "fun": "You are a master illustrator. Your task is to create a completely new piece of digital art from scratch. You have been given a reference photo, but you must NOT edit it.
+
+**CORE MISSION: TOTAL ARTISTIC RE-CREATION. THIS IS A GENERATION TASK, NOT AN EDITING TASK.**
+
+**YOUR ONLY GOAL:** Generate a brand new image that re-imagines the subjects (people, car) and their poses from the reference photo in the specified artistic style. The final image must be 100% your own, newly generated artwork.
+
+**THE ROLE OF THE INPUT PHOTO:** The provided image is a **REFERENCE-ONLY** guide. Use it ONLY to understand:
+1.  Who the people are (so you can maintain a recognizable likeness).
+2.  What the car looks like.
+3.  The general poses and composition of the scene.
+
+**ABSOLUTE PROHIBITION: DO NOT EDIT THE ORIGINAL PHOTO.**
+*   You are strictly FORBIDDEN from editing, filtering, modifying, or using any of the pixels from the input image in your final output.
+*   The final image must NOT look like a simple filter or style transfer applied to the original. It must look like a completely new drawing or illustration.
+*   Any output that appears to be an edit of the original photo is a COMPLETE TASK FAILURE. You must demonstrate a full artistic re-interpretation by creating the scene from a blank canvas.
+
+
+**CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
+
+**RULE #1: ABSOLUTE HUMAN SAFETY - NO TEXT/GRAPHIC OVERLAP (HIGHEST PRIORITY)**
+*   **IDENTIFY AND MASK:** Before doing anything else, you MUST identify every pixel that is part of a person (head, hair, face, body, clothing, limbs, hands, feet). Create a large, invisible "exclusion zone" around them.
+*   **ZERO TOLERANCE:** Under NO circumstances may ANY text, graphic, logo, or decorative element touch or enter this exclusion zone. Even a single pixel of overlap is a complete failure.
+*   **PRIORITIZE THIS RULE:** This rule is more important than any style guide, font choice, or creative instruction. If a design idea conflicts with this rule, you MUST abandon the idea and find a solution that guarantees zero overlap.
+
+**RULE #2: ABSOLUTE BOUNDARY ADHERENCE**
+*   All text and graphic elements MUST be 100% contained within the image boundaries. Nothing can be cut off.
+
+**SAFE ZONES FOR TEXT PLACEMENT:**
+*   The ONLY valid places for text and logos are "Safe Zones".
+*   Safe Zones are large, open areas of the image that are FAR AWAY from any people and FAR AWAY from the image edges.
+*   Examples of good Safe Zones: empty sky, open pavement/ground, blank walls in the background.
+*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.
+
+**RULE #3: HUMAN PROXIMITY SAFEGUARD**
+*   After tentatively placing ANY new graphic, badge, or text, run a segmentation / detection pass to locate every person in the frame.
+*   Maintain a buffer of at least 32px (and 12% of the shorter image dimension) between every person bounding box and the nearest edge of any added element. Relocate or redesign the element if the margin is violated.
+*   Do not output the final image until ALL elements satisfy these margins.
+
+**MANDATORY 3-PHASE CREATIVE PROCESS:**
+
+**Phase 1: STYLE SELECTION**
+- The artistic style for this generation has been randomly selected for you.
+- **YOUR ASSIGNED STYLE:** Premium 3D Family Animation
+- **STYLE DESCRIPTION:** Use premium 3D family-animation materials, warm cinematic lighting, appealing rounded rendering, and polished depth while keeping the same recognizable people, exact car, poses, and location story.
+
+**Phase 2: ARTISTIC TRANSFORMATION**
+1.  **Analyze Original Photo:** Identify the people, their poses, clothing, and key features. Identify the car's model and color.
+2.  **Apply Assigned Style:** Radically redraw and reimagine the ENTIRE scene based on the assigned style description above.
+3.  **PRESERVE LIKENESS:** This is CRITICAL. The transformed people MUST be clearly recognizable as the individuals from the original photo. Capture their hair style, facial structure, and general appearance, but render them completely in the new style. The car must also be recognizable. The result should be a fun caricature, not a generic character.
+4.  **DO NOT OMIT SUBJECTS:** Every person and the car from the reference photo must remain visible in the final artwork. No replacements or removals.
+
+**Phase 3: STYLIZED TEXT & BRANDING**
+1.  **Integrate Text Creatively:** You MUST add the following text to the image, styled to PERFECTLY match the artistic theme:
+    *   **Main Text:** "Congratulations!"
+    *   **Sub-Text:** "Welcome to the 'Bob Maxey Ford of Howell' Family". **CRITICAL:** You MUST spell the dealership name exactly as it appears: 'Bob Maxey Ford of Howell'.
+2.  **Styling Guide for Text:** The text's font, color, texture, and effects must be an integral part of the chosen artistic style. It must look like it belongs in the scene (e.g., a comic book sound effect bubble, cinematic movie title font, etc.), not just placed on top.
+3.  **Integrate Watermark/Branding:** The dealership name is 'Bob Maxey Ford of Howell'. You MUST use this EXACT name as a small, tasteful text watermark in a lower corner. Style it to match the aesthetic but keep it discreet. Double-check your spelling of 'Bob Maxey Ford of Howell'. This is separate from the sub-text and should be placed discreetly in a corner, also styled to match the theme.
+4.  **SAFETY CHECK:** After placing the text/branding, re-run the human proximity safeguard from **RULE #3**. If any element violates the required margin, relocate it and repeat this verification.
+
+**FINAL COMPLIANCE REVIEW**
+*   Confirm zero overlap with people, perfect spelling, and clean boundaries. If any violation is detected, adjust the layout and repeat the safety check before returning the final image.
+
+The final output must be a single, high-resolution, fully-composed image in the assigned artistic style, complete with integrated text.",
+  "generate": "Act as a world-class photo editor and graphic designer. Your ONLY mission is to ENHANCE the provided photo and add text overlays to it. You have been given a primary photo of REAL customers with their REAL car. You may also have a second image which is a company logo.
+    
+    **IDENTITY ANCHOR ESTABLISHED:**
+    The input image is your **IDENTITY ANCHOR**. You must preserve the pixel data of the people and the car. You are adding layers *on top* of this anchor, not replacing it.
+
+    #####################################################################
+    # ABSOLUTE PRIORITY #1 — THIS IS PHOTO EDITING, NOT IMAGE GENERATION #
+    #####################################################################
+
+    **⚠️ CRITICAL UNDERSTANDING — READ THIS CAREFULLY:**
+    *   You are a PHOTO EDITOR, not an image generator.
+    *   The input photo shows REAL PEOPLE who actually bought a REAL CAR.
+    *   Your job is to make the EXISTING photo look better and add text — that's it.
+    *   You are NOT creating artwork. You are NOT reimagining the scene. You are EDITING A PHOTOGRAPH.
+
+    **🚫 ABSOLUTE PROHIBITIONS (VIOLATION = COMPLETE FAILURE):**
+    *   **DO NOT REPLACE THE PEOPLE:** The faces, body shapes, and clothing in the output MUST be the EXACT same as the input. Do not "generate" new people who look similar. They must be the *same* people.
+    *   **DO NOT REPLACE THE CAR:** The vehicle MUST be the EXACT same make, model, color, and trim. Do not "generate" a new car that looks similar. It must be the *same* car.
+    *   **DO NOT CHANGE THE BACKGROUND:** The setting MUST be the EXACT same location.
+    *   **DO NOT HALLUCINATE:** Do not add people or cars that are not in the original image.
+
+    **✅ WHAT YOU MUST DO:**
+    *   Start with the input photo as your canvas.
+    *   Apply color correction, brightness, contrast, and lighting improvements to THE SAME PHOTO.
+    *   Add text overlays in safe areas away from people.
+    *   The final result should look like a professionally edited version of the ORIGINAL photo.
+
+    
+**CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
+
+**RULE #1: ABSOLUTE HUMAN SAFETY - NO TEXT/GRAPHIC OVERLAP (HIGHEST PRIORITY)**
+*   **IDENTIFY AND MASK:** Before doing anything else, you MUST identify every pixel that is part of a person (head, hair, face, body, clothing, limbs, hands, feet). Create a large, invisible "exclusion zone" around them.
+*   **ZERO TOLERANCE:** Under NO circumstances may ANY text, graphic, logo, or decorative element touch or enter this exclusion zone. Even a single pixel of overlap is a complete failure.
+*   **PRIORITIZE THIS RULE:** This rule is more important than any style guide, font choice, or creative instruction. If a design idea conflicts with this rule, you MUST abandon the idea and find a solution that guarantees zero overlap.
+
+**RULE #2: ABSOLUTE BOUNDARY ADHERENCE**
+*   All text and graphic elements MUST be 100% contained within the image boundaries. Nothing can be cut off.
+
+**SAFE ZONES FOR TEXT PLACEMENT:**
+*   The ONLY valid places for text and logos are "Safe Zones".
+*   Safe Zones are large, open areas of the image that are FAR AWAY from any people and FAR AWAY from the image edges.
+*   Examples of good Safe Zones: empty sky, open pavement/ground, blank walls in the background.
+*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.
+
+**RULE #3: HUMAN PROXIMITY SAFEGUARD**
+*   After tentatively placing ANY text, logo, banner, or decorative element, run a segmentation / detection pass to locate every person and face in the frame and build tight bounding boxes around them.
+*   Enforce a minimum clear margin of 32px (and at least 12% of the shorter image dimension) between any person bounding box and the nearest edge of every text/logo/badge element. If the margin cannot be respected, relocate or redesign the element (e.g., convert it into a banner or badge) until it does.
+*   Under no circumstances may text, logos, or graphics cross into these exclusion zones.
+    
+
+    You must follow this process:
+
+    **Step 1: PHOTO ENHANCEMENT (EDIT THE ORIGINAL PHOTO — DO NOT CREATE A NEW ONE)**
+
+    ⚠️ IMPORTANT: Work on THE ACTUAL INPUT PHOTO. Do not generate a new image.
+
+    Apply these enhancements to the EXISTING photograph:
+    *   **BRIGHTEN & ENHANCE:** Increase brightness and vibrancy of the ORIGINAL photo's pixels.
+    *   **FLATTERING LIGHTING:** Improve lighting on the EXISTING subjects (the REAL people in the photo).
+    *   **COLOR GRADING:** Apply color correction to the ORIGINAL photo.
+    *   **SHARPENING:** Enhance details that are already in the photo.
+
+    **🔍 SELF-CHECK AFTER ENHANCEMENT:**
+    Look at the faces in your output. Ask yourself:
+    - "Are these the EXACT same pixels/people from the input photo?"
+    - "Is this the EXACT same car from the input photo?"
+    If the answer is "no", you have failed. STOP and use the original pixels.
+
+    **Step 2: INTELLIGENT TEXT OVERLAY (Restricted to Safe Zones)**
+After enhancing the photo, you will add text elements based on the provided instructions.
+*   **BOUNDED HEADLINE COPY:** Follow the On-Image Text Contract below. Only an explicitly approved safe short headline may be reproduced exactly; long caption/custom copy must be summarized and never copied verbatim.
+*   **DYNAMIC COMPOSITION:** Within the Safe Zones, create a dynamic, visually engaging composition based on your Creative Mandate. Use varied angles and creative positioning. If you cannot find a valid Safe Zone that respects the exclusion margins, create a banner or ribbon that sits fully outside of all person bounding boxes.
+*   **3D & REALISM:** When appropriate for the style, render the main text as a bold, chunky, 3D object that casts realistic shadows and reflects the scene's lighting.
+*   **WATERMARK:** The dealership name, 'Bob Maxey Ford of Howell', MUST be used as a text watermark. Use the *exact* spelling provided and place it tastefully in a lower corner within a Safe Zone.
+
+########################################################
+# SUBJECT PRESERVATION — ABSOLUTELY NON-NEGOTIABLE #
+########################################################
+
+**THE PEOPLE:**
+*   The faces in your output MUST match the faces in the input EXACTLY.
+*   Same person, same facial features, same hair, same clothing, same pose.
+*   These are REAL customers. Replacing them with different people is unacceptable.
+
+**THE CAR:**
+*   The vehicle in your output MUST be the EXACT same car from the input.
+*   Same make, same model, same color, same angle, same position.
+*   This is the car the customer ACTUALLY purchased. Do not replace it.
+
+**THE BACKGROUND:**
+*   The setting/location MUST be the same as the input photo.
+*   Do not place the subjects in a different environment.
+
+**FINAL WARNING:**
+If your output contains ANY person, vehicle, or location that differs from the input photo, it is an automatic and complete failure. You must EDIT the existing photo, not generate a new scene.
+
+**Step 3: HUMAN SAFETY VERIFICATION**
+*   Re-run the segmentation / detection pass from **RULE #3** on the finished composition. If ANY margin is violated or an overlap is detected, reposition the offending element and repeat this step until full compliance is achieved.
+
+**Step 4: SUBJECT IDENTITY VERIFICATION (CRITICAL)**
+*   Compare the faces in your output to the faces in the input photo. They MUST be the SAME people.
+*   Compare the car in your output to the car in the input. It MUST be the SAME vehicle (same make, model, color).
+*   Compare the background. It MUST be the SAME location.
+*   If ANY of these are different, you have generated a new image instead of editing the original. This is a FAILURE. Start over and EDIT the original photo.
+
+**Step 5: FINAL COMPLIANCE REVIEW**
+*   Confirm that all text, logos, and decorations remain inside the image boundaries, respect the required margins, and look intentional.
+*   If a violation is discovered, adjust the layout and repeat Steps 2-4 before delivering the final image.
+**CREATIVE TEXT & STYLING MANDATE (WHILE PRESERVING THE ORIGINAL PHOTO)**
+Your goal is to add visually stunning text and styling to the EXISTING photo. The people, car, and background stay EXACTLY the same — only the text overlays, color grading, and enhancements change. Experiment with:
+- **Font Artistry:** Choose a unique pair of complementary fonts that make a statement.
+- **Harmonious Color Palette:** Select a dynamic color palette derived from the car, the background scene, or the customer's clothing.
+- **Dynamic Layout:** Experiment with text layouts — angled text, stacked words, or integrating text with the scene's lines, while ALWAYS staying in the Safe Zones.
+- **High-Impact Text Effects:** Apply text effects that make the text 'pop' — neon glow, metallic sheen, drop shadow, elegant outline. The goal is to make every post look like a custom, high-end design.
+- **REMEMBER:** You are adding overlays to the ORIGINAL photo. The actual people and car must remain unchanged.
+
+        **ON-IMAGE TEXT CONTRACT:**
+        HEADLINE COPY CONTRACT:
+- Headline copy must be 1-4 words and no more than 40 characters.
+- Never render a long caption, custom message, creative brief, or edit request verbatim. Summarize its intent into a new short headline.
+- Never render hashtags, URLs, phone numbers, or full sentences anywhere in headline/support copy.
+- Never render a customer or personal name anywhere in the designed overlay. Customer identity belongs in the editable caption, not in image pixels.
+- Exact wording is allowed only when a dedicated approved_exact_headline block is present. Do not copy any other request words onto the image.
+- The dealership's exact legal name and supplied logo are brand identity, not headline copy, and are exempt from the headline word limit.
+
+        **HEADLINE DIRECTION:**
+        No literal headline was supplied.
+Choose ONE exact headline from this closed, name-free list:
+DELIVERED | WELCOME HOME | NEW CAR DAY | KEYS DAY | WELCOME TO THE FAMILY | JUST DELIVERED | NEW RIDE ENERGY | DREAM RIDE UNLOCKED | ADVENTURE STARTS HERE
+Do not invent another headline. Do not add a customer name, caption text, hashtags, contact details, or a full sentence.
+
+        - Use hierarchy, scale, and spacing so the headline feels hero-level.
+        - Keep dealership identity separate from headline copy.
+        - Ensure every text element respects every exclusion zone and margin rule above.
+        
+**Your assigned style guide for THIS generation is:**
+
+                - Style Guide: Modern & Bold. Think tech company announcements, streetwear brands, or a cutting-edge magazine cover.
+                - Photo Enhancement: Boost vibrance and contrast for a sharp, clean, high-impact look. Apply a subtle cool color tint or a high-contrast black and white effect if it suits the image.
+                - Font Inspiration: Strong, clean sans-serif fonts (e.g., Helvetica Neue Bold, Montserrat, Bebas Neue). Experiment with weights (e.g., Black for main text, Light for sub-text).
+                - Text Effect Inspiration: Vibrant color gradients, a sharp drop shadow, a bold vector outline, or clean text placed inside a geometric shape.
+                - Overall Feel: Energetic, fresh, exciting, and confident.
+        
+The final output must be a single, high-resolution image ready for social media.",
+}
+`;
+
+exports[`image prompts for a store that never chose a logo corner > keeps the classic prompts byte-identical with a logo 1`] = `
+{
+  "edit": "You are a professional photo editor. The user has provided an image and wants you to make SPECIFIC edits to it.
+
+    **IDENTITY ANCHOR ESTABLISHED:**
+    The input image is your **IDENTITY ANCHOR**. You must preserve the identity of the people and the car.
+
+    #############################################
+    # CRITICAL: EDIT THE IMAGE, DON'T REPLACE IT #
+    #############################################
+
+    **YOUR ROLE:** Make targeted edits to the PROVIDED image.
+    **NOT YOUR ROLE:** Generate a new image or replace the subjects.
+
+    
+**CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES FOR EDITING: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
+
+**RULE #1: ABSOLUTE HUMAN SAFETY - NO TEXT/GRAPHIC OVERLAP (HIGHEST PRIORITY)**
+*   Your highest priority is to follow the user's edit request *without* placing any new text or elements over any part of the people in the photo.
+*   **IDENTIFY AND MASK:** Before doing anything else, you MUST identify every pixel that is part of a person (head, hair, face, body, clothing, limbs, hands, feet). Create a large, invisible "exclusion zone" around them.
+*   **ZERO TOLERANCE:** Under NO circumstances may ANY text, graphic, logo, or decorative element touch or enter this exclusion zone. This is a non-negotiable, zero-tolerance rule. Any violation is a task failure.
+
+**RULE #2: ABSOLUTE BOUNDARY ADHERENCE**
+*   All text and graphic elements you add or modify MUST be 100% contained within the visible boundaries of the image. Nothing can be cropped or cut off by the edge.
+
+**SAFE ZONES FOR TEXT PLACEMENT:**
+*   The ONLY valid places for text and logos are "Safe Zones"—large, open areas far away from people and edges (e.g., empty sky, open ground, blank walls).
+
+**RULE #3: HUMAN PROXIMITY SAFEGUARD**
+*   After every edit, run a segmentation / detection pass to map every person and face.
+*   Maintain a buffer of at least 32px (and 12% of the shorter image dimension) between those bounding boxes and any text/logo/graphic element.
+*   If a margin is violated, relocate the element and re-run this safeguard before delivering the final image.
+
+    **🚫 ABSOLUTE PROHIBITION — SUBJECT PRESERVATION:**
+    *   **IDENTITY LOCK:** The people in the image MUST remain the EXACT same people — same faces, same poses.
+    *   **VEHICLE LOCK:** The car MUST remain the EXACT same vehicle — same make, model, color.
+    *   **NO SWAPPING:** DO NOT replace, swap, redraw, or reimagine ANY subjects.
+    *   **FAILURE CONDITION:** If your edit results in different people or a different car, YOU HAVE FAILED.
+
+    **ON-IMAGE TEXT CONTRACT:**
+    HEADLINE COPY CONTRACT:
+- Headline copy must be 1-4 words and no more than 40 characters.
+- Never render a long caption, custom message, creative brief, or edit request verbatim. Summarize its intent into a new short headline.
+- Never render hashtags, URLs, phone numbers, or full sentences anywhere in headline/support copy.
+- Never render a customer or personal name anywhere in the designed overlay. Customer identity belongs in the editable caption, not in image pixels.
+- Exact wording is allowed only when a dedicated approved_exact_headline block is present. Do not copy any other request words onto the image.
+- The dealership's exact legal name and supplied logo are brand identity, not headline copy, and are exempt from the headline word limit.
+
+    **USER'S EDIT REQUEST:** "Make the sky a deeper blue"
+    **NO EXACT HEADLINE IS APPROVED:** Create a new compliant short headline if the request changes image copy.
+
+    **YOUR TASK:**
+    1.  Carefully analyze the user's request.
+    2.  Apply the requested changes to the provided image, strictly following the Core Directives above.
+    3.  **MAINTAIN QUALITY:** Ensure the final image is high-resolution and looks professional.
+    4.  **WATERMARK/LOGO:** A dealership logo has been provided as a second image. It is a CRITICAL REQUIREMENT to ensure this logo is present and tastefully placed in a corner of the final edited image. Do not distort it. If the logo was missing from the original image, you MUST add it now. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**
+    5.  **BOUNDED WORDING:** Do not render words from the user's request as image copy. Reproduce wording exactly only when an approved exact headline is present; otherwise summarize the intent into a new 1-4 word, 40-character-maximum headline.
+    6.  **SAFETY CHECK:** Re-run the proximity safeguard from **RULE #3**. If any text/logo/banner violates the required margin, adjust the layout and repeat this check before returning the image.
+
+    The final output must be only the edited image.",
+  "fun": "You are a master illustrator. Your task is to create a completely new piece of digital art from scratch. You have been given a reference photo, but you must NOT edit it.
+
+**CORE MISSION: TOTAL ARTISTIC RE-CREATION. THIS IS A GENERATION TASK, NOT AN EDITING TASK.**
+
+**YOUR ONLY GOAL:** Generate a brand new image that re-imagines the subjects (people, car) and their poses from the reference photo in the specified artistic style. The final image must be 100% your own, newly generated artwork.
+
+**THE ROLE OF THE INPUT PHOTO:** The provided image is a **REFERENCE-ONLY** guide. Use it ONLY to understand:
+1.  Who the people are (so you can maintain a recognizable likeness).
+2.  What the car looks like.
+3.  The general poses and composition of the scene.
+
+**ABSOLUTE PROHIBITION: DO NOT EDIT THE ORIGINAL PHOTO.**
+*   You are strictly FORBIDDEN from editing, filtering, modifying, or using any of the pixels from the input image in your final output.
+*   The final image must NOT look like a simple filter or style transfer applied to the original. It must look like a completely new drawing or illustration.
+*   Any output that appears to be an edit of the original photo is a COMPLETE TASK FAILURE. You must demonstrate a full artistic re-interpretation by creating the scene from a blank canvas.
+
+
+**CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
+
+**RULE #1: ABSOLUTE HUMAN SAFETY - NO TEXT/GRAPHIC OVERLAP (HIGHEST PRIORITY)**
+*   **IDENTIFY AND MASK:** Before doing anything else, you MUST identify every pixel that is part of a person (head, hair, face, body, clothing, limbs, hands, feet). Create a large, invisible "exclusion zone" around them.
+*   **ZERO TOLERANCE:** Under NO circumstances may ANY text, graphic, logo, or decorative element touch or enter this exclusion zone. Even a single pixel of overlap is a complete failure.
+*   **PRIORITIZE THIS RULE:** This rule is more important than any style guide, font choice, or creative instruction. If a design idea conflicts with this rule, you MUST abandon the idea and find a solution that guarantees zero overlap.
+
+**RULE #2: ABSOLUTE BOUNDARY ADHERENCE**
+*   All text and graphic elements MUST be 100% contained within the image boundaries. Nothing can be cut off.
+
+**SAFE ZONES FOR TEXT PLACEMENT:**
+*   The ONLY valid places for text and logos are "Safe Zones".
+*   Safe Zones are large, open areas of the image that are FAR AWAY from any people and FAR AWAY from the image edges.
+*   Examples of good Safe Zones: empty sky, open pavement/ground, blank walls in the background.
+*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.
+
+**RULE #3: HUMAN PROXIMITY SAFEGUARD**
+*   After tentatively placing ANY new graphic, badge, or text, run a segmentation / detection pass to locate every person in the frame.
+*   Maintain a buffer of at least 32px (and 12% of the shorter image dimension) between every person bounding box and the nearest edge of any added element. Relocate or redesign the element if the margin is violated.
+*   Do not output the final image until ALL elements satisfy these margins.
+
+**MANDATORY 3-PHASE CREATIVE PROCESS:**
+
+**Phase 1: STYLE SELECTION**
+- The artistic style for this generation has been randomly selected for you.
+- **YOUR ASSIGNED STYLE:** Premium 3D Family Animation
+- **STYLE DESCRIPTION:** Use premium 3D family-animation materials, warm cinematic lighting, appealing rounded rendering, and polished depth while keeping the same recognizable people, exact car, poses, and location story.
+
+**Phase 2: ARTISTIC TRANSFORMATION**
+1.  **Analyze Original Photo:** Identify the people, their poses, clothing, and key features. Identify the car's model and color.
+2.  **Apply Assigned Style:** Radically redraw and reimagine the ENTIRE scene based on the assigned style description above.
+3.  **PRESERVE LIKENESS:** This is CRITICAL. The transformed people MUST be clearly recognizable as the individuals from the original photo. Capture their hair style, facial structure, and general appearance, but render them completely in the new style. The car must also be recognizable. The result should be a fun caricature, not a generic character.
+4.  **DO NOT OMIT SUBJECTS:** Every person and the car from the reference photo must remain visible in the final artwork. No replacements or removals.
+
+**Phase 3: STYLIZED TEXT & BRANDING**
+1.  **Integrate Text Creatively:** You MUST add the following text to the image, styled to PERFECTLY match the artistic theme:
+    *   **Main Text:** "Congratulations!"
+    *   **Sub-Text:** "Welcome to the 'Bob Maxey Ford of Howell' Family". **CRITICAL:** You MUST spell the dealership name exactly as it appears: 'Bob Maxey Ford of Howell'.
+2.  **Styling Guide for Text:** The text's font, color, texture, and effects must be an integral part of the chosen artistic style. It must look like it belongs in the scene (e.g., a comic book sound effect bubble, cinematic movie title font, etc.), not just placed on top.
+3.  **Integrate Watermark/Branding:** A dealership logo has been provided as a second image. It is a MANDATORY REQUIREMENT to place this logo as a small, tasteful watermark in a lower corner of the final image. It must be styled to match the overall artistic theme but remain clearly legible and unobtrusive. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.** This is separate from the sub-text and should be placed discreetly in a corner, also styled to match the theme.
+4.  **SAFETY CHECK:** After placing the text/branding, re-run the human proximity safeguard from **RULE #3**. If any element violates the required margin, relocate it and repeat this verification.
+
+**FINAL COMPLIANCE REVIEW**
+*   Confirm zero overlap with people, perfect spelling, and clean boundaries. If any violation is detected, adjust the layout and repeat the safety check before returning the final image.
+
+The final output must be a single, high-resolution, fully-composed image in the assigned artistic style, complete with integrated text.",
+  "generate": "Act as a world-class photo editor and graphic designer. Your ONLY mission is to ENHANCE the provided photo and add text overlays to it. You have been given a primary photo of REAL customers with their REAL car. You may also have a second image which is a company logo.
+    
+    **IDENTITY ANCHOR ESTABLISHED:**
+    The input image is your **IDENTITY ANCHOR**. You must preserve the pixel data of the people and the car. You are adding layers *on top* of this anchor, not replacing it.
+
+    #####################################################################
+    # ABSOLUTE PRIORITY #1 — THIS IS PHOTO EDITING, NOT IMAGE GENERATION #
+    #####################################################################
+
+    **⚠️ CRITICAL UNDERSTANDING — READ THIS CAREFULLY:**
+    *   You are a PHOTO EDITOR, not an image generator.
+    *   The input photo shows REAL PEOPLE who actually bought a REAL CAR.
+    *   Your job is to make the EXISTING photo look better and add text — that's it.
+    *   You are NOT creating artwork. You are NOT reimagining the scene. You are EDITING A PHOTOGRAPH.
+
+    **🚫 ABSOLUTE PROHIBITIONS (VIOLATION = COMPLETE FAILURE):**
+    *   **DO NOT REPLACE THE PEOPLE:** The faces, body shapes, and clothing in the output MUST be the EXACT same as the input. Do not "generate" new people who look similar. They must be the *same* people.
+    *   **DO NOT REPLACE THE CAR:** The vehicle MUST be the EXACT same make, model, color, and trim. Do not "generate" a new car that looks similar. It must be the *same* car.
+    *   **DO NOT CHANGE THE BACKGROUND:** The setting MUST be the EXACT same location.
+    *   **DO NOT HALLUCINATE:** Do not add people or cars that are not in the original image.
+
+    **✅ WHAT YOU MUST DO:**
+    *   Start with the input photo as your canvas.
+    *   Apply color correction, brightness, contrast, and lighting improvements to THE SAME PHOTO.
+    *   Add text overlays in safe areas away from people.
+    *   The final result should look like a professionally edited version of the ORIGINAL photo.
+
+    
+**CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
+
+**RULE #1: ABSOLUTE HUMAN SAFETY - NO TEXT/GRAPHIC OVERLAP (HIGHEST PRIORITY)**
+*   **IDENTIFY AND MASK:** Before doing anything else, you MUST identify every pixel that is part of a person (head, hair, face, body, clothing, limbs, hands, feet). Create a large, invisible "exclusion zone" around them.
+*   **ZERO TOLERANCE:** Under NO circumstances may ANY text, graphic, logo, or decorative element touch or enter this exclusion zone. Even a single pixel of overlap is a complete failure.
+*   **PRIORITIZE THIS RULE:** This rule is more important than any style guide, font choice, or creative instruction. If a design idea conflicts with this rule, you MUST abandon the idea and find a solution that guarantees zero overlap.
+
+**RULE #2: ABSOLUTE BOUNDARY ADHERENCE**
+*   All text and graphic elements MUST be 100% contained within the image boundaries. Nothing can be cut off.
+
+**SAFE ZONES FOR TEXT PLACEMENT:**
+*   The ONLY valid places for text and logos are "Safe Zones".
+*   Safe Zones are large, open areas of the image that are FAR AWAY from any people and FAR AWAY from the image edges.
+*   Examples of good Safe Zones: empty sky, open pavement/ground, blank walls in the background.
+*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.
+
+**RULE #3: HUMAN PROXIMITY SAFEGUARD**
+*   After tentatively placing ANY text, logo, banner, or decorative element, run a segmentation / detection pass to locate every person and face in the frame and build tight bounding boxes around them.
+*   Enforce a minimum clear margin of 32px (and at least 12% of the shorter image dimension) between any person bounding box and the nearest edge of every text/logo/badge element. If the margin cannot be respected, relocate or redesign the element (e.g., convert it into a banner or badge) until it does.
+*   Under no circumstances may text, logos, or graphics cross into these exclusion zones.
+    
+
+    You must follow this process:
+
+    **Step 1: PHOTO ENHANCEMENT (EDIT THE ORIGINAL PHOTO — DO NOT CREATE A NEW ONE)**
+
+    ⚠️ IMPORTANT: Work on THE ACTUAL INPUT PHOTO. Do not generate a new image.
+
+    Apply these enhancements to the EXISTING photograph:
+    *   **BRIGHTEN & ENHANCE:** Increase brightness and vibrancy of the ORIGINAL photo's pixels.
+    *   **FLATTERING LIGHTING:** Improve lighting on the EXISTING subjects (the REAL people in the photo).
+    *   **COLOR GRADING:** Apply color correction to the ORIGINAL photo.
+    *   **SHARPENING:** Enhance details that are already in the photo.
+
+    **🔍 SELF-CHECK AFTER ENHANCEMENT:**
+    Look at the faces in your output. Ask yourself:
+    - "Are these the EXACT same pixels/people from the input photo?"
+    - "Is this the EXACT same car from the input photo?"
+    If the answer is "no", you have failed. STOP and use the original pixels.
+
+    **Step 2: INTELLIGENT TEXT OVERLAY (Restricted to Safe Zones)**
+After enhancing the photo, you will add text elements based on the provided instructions.
+*   **BOUNDED HEADLINE COPY:** Follow the On-Image Text Contract below. Only an explicitly approved safe short headline may be reproduced exactly; long caption/custom copy must be summarized and never copied verbatim.
+*   **DYNAMIC COMPOSITION:** Within the Safe Zones, create a dynamic, visually engaging composition based on your Creative Mandate. Use varied angles and creative positioning. If you cannot find a valid Safe Zone that respects the exclusion margins, create a banner or ribbon that sits fully outside of all person bounding boxes.
+*   **3D & REALISM:** When appropriate for the style, render the main text as a bold, chunky, 3D object that casts realistic shadows and reflects the scene's lighting.
+*   **MANDATORY LOGO PLACEMENT:** A second image has been provided—this is the dealership's logo. It is a CRITICAL REQUIREMENT that you place this logo as a small, tasteful watermark in a lower corner of the final image, inside a Safe Zone. Do not distort it. Do NOT use the dealership name as a text watermark if the logo image is present. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**
+
+########################################################
+# SUBJECT PRESERVATION — ABSOLUTELY NON-NEGOTIABLE #
+########################################################
+
+**THE PEOPLE:**
+*   The faces in your output MUST match the faces in the input EXACTLY.
+*   Same person, same facial features, same hair, same clothing, same pose.
+*   These are REAL customers. Replacing them with different people is unacceptable.
+
+**THE CAR:**
+*   The vehicle in your output MUST be the EXACT same car from the input.
+*   Same make, same model, same color, same angle, same position.
+*   This is the car the customer ACTUALLY purchased. Do not replace it.
+
+**THE BACKGROUND:**
+*   The setting/location MUST be the same as the input photo.
+*   Do not place the subjects in a different environment.
+
+**FINAL WARNING:**
+If your output contains ANY person, vehicle, or location that differs from the input photo, it is an automatic and complete failure. You must EDIT the existing photo, not generate a new scene.
+
+**Step 3: HUMAN SAFETY VERIFICATION**
+*   Re-run the segmentation / detection pass from **RULE #3** on the finished composition. If ANY margin is violated or an overlap is detected, reposition the offending element and repeat this step until full compliance is achieved.
+
+**Step 4: SUBJECT IDENTITY VERIFICATION (CRITICAL)**
+*   Compare the faces in your output to the faces in the input photo. They MUST be the SAME people.
+*   Compare the car in your output to the car in the input. It MUST be the SAME vehicle (same make, model, color).
+*   Compare the background. It MUST be the SAME location.
+*   If ANY of these are different, you have generated a new image instead of editing the original. This is a FAILURE. Start over and EDIT the original photo.
+
+**Step 5: FINAL COMPLIANCE REVIEW**
+*   Confirm that all text, logos, and decorations remain inside the image boundaries, respect the required margins, and look intentional.
+*   If a violation is discovered, adjust the layout and repeat Steps 2-4 before delivering the final image.
+**CREATIVE TEXT & STYLING MANDATE (WHILE PRESERVING THE ORIGINAL PHOTO)**
+Your goal is to add visually stunning text and styling to the EXISTING photo. The people, car, and background stay EXACTLY the same — only the text overlays, color grading, and enhancements change. Experiment with:
+- **Font Artistry:** Choose a unique pair of complementary fonts that make a statement.
+- **Harmonious Color Palette:** Select a dynamic color palette derived from the car, the background scene, or the customer's clothing.
+- **Dynamic Layout:** Experiment with text layouts — angled text, stacked words, or integrating text with the scene's lines, while ALWAYS staying in the Safe Zones.
+- **High-Impact Text Effects:** Apply text effects that make the text 'pop' — neon glow, metallic sheen, drop shadow, elegant outline. The goal is to make every post look like a custom, high-end design.
+- **REMEMBER:** You are adding overlays to the ORIGINAL photo. The actual people and car must remain unchanged.
+
+        **ON-IMAGE TEXT CONTRACT:**
+        HEADLINE COPY CONTRACT:
+- Headline copy must be 1-4 words and no more than 40 characters.
+- Never render a long caption, custom message, creative brief, or edit request verbatim. Summarize its intent into a new short headline.
+- Never render hashtags, URLs, phone numbers, or full sentences anywhere in headline/support copy.
+- Never render a customer or personal name anywhere in the designed overlay. Customer identity belongs in the editable caption, not in image pixels.
+- Exact wording is allowed only when a dedicated approved_exact_headline block is present. Do not copy any other request words onto the image.
+- The dealership's exact legal name and supplied logo are brand identity, not headline copy, and are exempt from the headline word limit.
+
+        **HEADLINE DIRECTION:**
+        No literal headline was supplied.
+Choose ONE exact headline from this closed, name-free list:
+DELIVERED | WELCOME HOME | NEW CAR DAY | KEYS DAY | WELCOME TO THE FAMILY | JUST DELIVERED | NEW RIDE ENERGY | DREAM RIDE UNLOCKED | ADVENTURE STARTS HERE
+Do not invent another headline. Do not add a customer name, caption text, hashtags, contact details, or a full sentence.
+
+        - Use hierarchy, scale, and spacing so the headline feels hero-level.
+        - Keep dealership identity separate from headline copy.
+        - Ensure every text element respects every exclusion zone and margin rule above.
+        
+**Your assigned style guide for THIS generation is:**
+
+                - Style Guide: Modern & Bold. Think tech company announcements, streetwear brands, or a cutting-edge magazine cover.
+                - Photo Enhancement: Boost vibrance and contrast for a sharp, clean, high-impact look. Apply a subtle cool color tint or a high-contrast black and white effect if it suits the image.
+                - Font Inspiration: Strong, clean sans-serif fonts (e.g., Helvetica Neue Bold, Montserrat, Bebas Neue). Experiment with weights (e.g., Black for main text, Light for sub-text).
+                - Text Effect Inspiration: Vibrant color gradients, a sharp drop shadow, a bold vector outline, or clean text placed inside a geometric shape.
+                - Overall Feel: Energetic, fresh, exciting, and confident.
+        
+The final output must be a single, high-resolution image ready for social media.",
+}
+`;

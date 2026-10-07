@@ -301,6 +301,9 @@ export const useVideoJobs = ({
         toast.success("Video ready — tap play if it does not start.");
         if (post.postId) {
           try {
+            // The server sets has_video without advancing the post's revision,
+            // so there is no new compare-and-set token to adopt here. Adopting
+            // one would also risk overwriting a newer draft save's token.
             await markPostVideoGenerated(post.postId);
           } catch (_err) {
             // The paid render succeeded, so keep it usable. Be explicit that

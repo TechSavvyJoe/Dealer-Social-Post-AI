@@ -806,9 +806,10 @@
     bottom: max(1rem, var(--sab));
   }
 
-  @media (max-width: 767px) {
+  /* The Post screen's share bar is fixed to the bottom below lg (1024px). */
+  @media (max-width: 1023px) {
     .toast-viewport {
-      /* Keep notifications above the result screen's sticky Copy/Share/Save bar. */
+      /* Keep notifications above the Post screen's fixed share bar. */
       bottom: calc(max(0.75rem, var(--sab)) + 5.5rem);
     }
   }

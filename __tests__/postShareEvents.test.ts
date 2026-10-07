@@ -1127,12 +1127,21 @@ describe("GET /api/app/posts share_summary", () => {
     expect(result.status).toBe(200);
     const items = result.payload.items as AnyRecord[];
     expect(items.map((item) => item.id)).toEqual(["post-1", "post-2"]);
+    // A post reopened from My work must carry its compare-and-set revision,
+    // or its next draft save and share receipt cannot be sent at all.
+    expect(items.map((item) => item.updated)).toEqual([
+      "2026-09-20 10:00:00.000Z",
+      "2026-09-20 10:00:00.000Z",
+    ]);
     expect(items[0].share_summary).toEqual({
       count: 3,
       last_shared_at: "2026-09-22 09:00:00.000Z",
       last_channel: "facebook_feed",
       last_via: "share_sheet",
       channels: ["facebook_feed", "instagram_feed"],
+      sheet_count: 1,
+      last_sheet_channel: "facebook_feed",
+      last_sheet_at: "2026-09-22 09:00:00.000Z",
     });
     expect(items[1].share_summary).toBeNull();
 
@@ -1148,6 +1157,50 @@ describe("GET /api/app/posts share_summary", () => {
       post1: "post-2",
     });
     expect(Object.values(queries[0].params).some(Array.isArray)).toBe(false);
+  });
+
+  it("keeps the share-sheet facts apart from the latest event", () => {
+    const { result } = runList([
+      {
+        dealer: "dealer-1",
+        post: "post-1",
+        channel: "instagram_feed",
+        via: "share_sheet",
+        created: "2026-09-21 09:00:00.000Z",
+      },
+      {
+        dealer: "dealer-1",
+        post: "post-1",
+        channel: "facebook_feed",
+        via: "copy",
+        created: "2026-09-22 09:00:00.000Z",
+      },
+      {
+        dealer: "dealer-1",
+        post: "post-2",
+        channel: "facebook_feed",
+        via: "download",
+        created: "2026-09-22 10:00:00.000Z",
+      },
+    ]);
+    const items = result.payload.items as AnyRecord[];
+    // A later copy must not hide the earlier completed share sheet...
+    expect(items[0].share_summary).toMatchObject({
+      count: 2,
+      last_via: "copy",
+      last_channel: "facebook_feed",
+      sheet_count: 1,
+      last_sheet_channel: "instagram_feed",
+      last_sheet_at: "2026-09-21 09:00:00.000Z",
+    });
+    // ...and a download alone is never a share.
+    expect(items[1].share_summary).toMatchObject({
+      count: 1,
+      last_via: "download",
+      sheet_count: 0,
+      last_sheet_channel: "",
+      last_sheet_at: "",
+    });
   });
 
   it("keeps listing when the share read fails, with every summary null", () => {
@@ -1267,6 +1320,102 @@ describe("share_summary client projection", () => {
     expect(
       projectPostRecordForUi(record({ share_summary: null })).share_summary,
     ).toBeNull();
+  });
+
+  it("keeps the share-sheet fields apart and fails closed on a malformed count", () => {
+    expect(
+      projectShareSummary({
+        count: 2,
+        last_shared_at: "2026-09-22 10:00:00.000Z",
+        last_channel: "instagram_feed",
+        last_via: "copy",
+        channels: ["instagram_feed", "facebook_feed"],
+        sheet_count: 1,
+        last_sheet_channel: "facebook_feed",
+        last_sheet_at: "2026-09-22 09:00:00.000Z",
+      }),
+    ).toEqual({
+      count: 2,
+      last_shared_at: "2026-09-22 10:00:00.000Z",
+      last_channel: "instagram_feed",
+      last_via: "copy",
+      channels: ["instagram_feed", "facebook_feed"],
+      sheet_count: 1,
+      last_sheet_channel: "facebook_feed",
+      last_sheet_at: "2026-09-22 09:00:00.000Z",
+    });
+    // A count the client cannot read never becomes a "Shared" claim.
+    expect(
+      projectShareSummary({
+        count: 1,
+        last_channel: "facebook_feed",
+        last_via: "download",
+        sheet_count: "2",
+        last_sheet_channel: "facebook_feed",
+        last_sheet_at: "2026-09-22 09:00:00.000Z",
+      }),
+    ).toMatchObject({ sheet_count: 0, last_sheet_channel: "", last_sheet_at: "" });
+    // An older backend that never sent the fields keeps them absent.
+    const older = projectShareSummary({
+      count: 1,
+      last_channel: "facebook_feed",
+      last_via: "share_sheet",
+    });
+    expect(older && "sheet_count" in older).toBe(false);
+    expect(older && "last_sheet_channel" in older).toBe(false);
+  });
+
+  it("reads downloads and copies apart from a share once projected from the list", async () => {
+    setActiveAuthEpoch(704);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          items: [
+            record({
+              share_summary: {
+                count: 2,
+                last_shared_at: "2026-09-22 10:00:00.000Z",
+                last_channel: "facebook_feed",
+                last_via: "copy",
+                channels: ["facebook_feed"],
+                sheet_count: 1,
+                last_sheet_channel: "facebook_feed",
+                last_sheet_at: "2026-09-22 09:00:00.000Z",
+              },
+            }),
+            record({
+              id: "post-2",
+              share_summary: {
+                count: 1,
+                last_shared_at: "2026-09-22 10:00:00.000Z",
+                last_channel: "facebook_feed",
+                last_via: "download",
+                channels: ["facebook_feed"],
+                sheet_count: 0,
+                last_sheet_channel: "",
+                last_sheet_at: "",
+              },
+            }),
+            record({
+              id: "post-3",
+              share_summary: {
+                count: 1,
+                last_shared_at: "2026-09-22 10:00:00.000Z",
+                last_channel: "linkedin",
+                last_via: "copy",
+                channels: ["linkedin"],
+                sheet_count: 0,
+                last_sheet_channel: "",
+                last_sheet_at: "",
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    const page = await listPostsPage({ limit: 3 });
+    expect(page.items.map(postStatusFor)).toEqual(["shared", "downloaded", "copied"]);
   });
 
   it("reads as shared in My work once projected from the list", async () => {

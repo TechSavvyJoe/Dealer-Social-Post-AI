@@ -10,6 +10,8 @@ interface CreatingScreenProps {
   onCancel: () => void;
 }
 
+const STEP_LABELS = ["Design", "Caption", "Final check"] as const;
+
 /** Progress follows provider and persistence boundaries, never a timer. */
 export const CreatingScreen: React.FC<CreatingScreenProps> = ({
   imageSrc,
@@ -24,29 +26,33 @@ export const CreatingScreen: React.FC<CreatingScreenProps> = ({
     stage === "signature"
       ? "Saving the customer’s signature…"
       : stage === "saving"
-        ? "Saving your post to My work…"
+        ? "Saving to My work…"
         : stage === "checks"
-          ? "Checking your caption and photo…"
+          ? "Running a final check on the caption and image…"
           : partsReady.image
-            ? "Finishing your caption…"
-            : "Creating the design from your photo…";
+            ? "Writing your caption…"
+            : "Designing from your photo…";
   return (
     <section
-      className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-5 py-8 sm:px-8"
+      className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-start px-5 pb-8 pt-6 sm:px-8 sm:pt-10"
       aria-labelledby="creating-title"
     >
-      <div className="relative overflow-hidden rounded-lg border border-hairline bg-panel">
-        {imageSrc && (
+      {/* The photo lies on the light table at its own aspect and full
+          strength, so it reads as the post being made, not a failed load. */}
+      <div className="table-lit relative overflow-hidden rounded-lg border border-hairline p-3">
+        {imageSrc ? (
           <img
             src={imageSrc}
             alt="Your source photo"
-            className="aspect-[4/3] w-full object-contain opacity-40"
+            className="print mx-auto block max-h-[52svh] w-auto object-contain"
           />
+        ) : (
+          <div className="h-48" aria-hidden="true" />
         )}
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="grid h-16 w-16 place-items-center rounded-full bg-panel text-brand-ink">
+          <span className="grid h-14 w-14 place-items-center rounded-full bg-overlay/90 text-brand-ink">
             <LoaderCircle
-              className="h-8 w-8 motion-safe:animate-spin"
+              className="h-7 w-7 motion-safe:animate-spin"
               aria-hidden="true"
             />
           </span>
@@ -62,7 +68,7 @@ export const CreatingScreen: React.FC<CreatingScreenProps> = ({
         <p className="mt-2 text-ink-2">{detail}</p>
       </div>
       <ol className="mt-6 grid grid-cols-3 gap-3" aria-label="Post generation stages">
-        {["Design", "Caption", "Checks"].map((label, index) => (
+        {STEP_LABELS.map((label, index) => (
           <li
             key={label}
             aria-current={index === active ? "step" : undefined}
@@ -73,9 +79,12 @@ export const CreatingScreen: React.FC<CreatingScreenProps> = ({
           </li>
         ))}
       </ol>
-      <Button variant="secondary" className="mt-8 self-start" onClick={onCancel}>
-        Cancel
-      </Button>
+      <div className="mt-8 flex items-center gap-3">
+        <Button variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+        <p className="text-sm text-ink-2">Cancel keeps your photo and details.</p>
+      </div>
     </section>
   );
 };

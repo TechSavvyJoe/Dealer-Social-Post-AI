@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import React from "react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../stores/appStore";
 import { AppStep, StyleOption, ToneOption } from "../types";
 import { loadSession } from "../utils/persistence";
+import { MainContent, type MainContentProps } from "../components/MainContent";
 
 describe("Details draft persistence", () => {
   beforeEach(() => {
@@ -18,7 +21,10 @@ describe("Details draft persistence", () => {
       generatedPost: null,
     });
   });
-  it("keeps the photo, optional line, vehicle and exact signature object across Creating and Cancel", () => {
+  // Only step changes: setStep leaves the draft alone for every non-Home
+  // target. The real Cancel path (cancelGeneration and its toasts) is covered
+  // by __tests__/AppNavigation.test.tsx and hooks/useGeneration.test.tsx.
+  it("step changes through Creating keep the photo, personal line and the exact signature object", () => {
     const state = useAppStore.getState();
     const release = {
       customerName: "Maria Lopez",
@@ -90,5 +96,40 @@ describe("Details draft persistence", () => {
     expect(useAppStore.getState().step).toBe(AppStep.DETAILS);
     expect(useAppStore.getState().postDraft?.personalLine).toBe("Just arrived");
     expect(useAppStore.getState().generationParams?.platformIds).toEqual(["gbp"]);
+  });
+});
+
+describe("MainContent on Creating", () => {
+  it("drives the Creating screen from the generation stage and wires Cancel to App's handler", () => {
+    const onCancelGeneration = vi.fn();
+    render(
+      <MainContent
+        {...({
+          displayedStep: AppStep.CREATING,
+          step: AppStep.CREATING,
+          currentDealer: { id: "dealer1", name: "Example Motors" },
+          selectedImage: "data:image/jpeg;base64,cGhvdG8=",
+          generatedPost: null,
+          error: null,
+          generationStage: "checks",
+          partsReady: { image: true, caption: true },
+          onCancelGeneration,
+        } as unknown as MainContentProps)}
+      />,
+    );
+    expect(screen.getByRole("img", { name: "Your source photo" })).toHaveAttribute(
+      "src",
+      "data:image/jpeg;base64,cGhvdG8=",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Running a final check on the caption and image…",
+    );
+    const current = within(screen.getByRole("list", { name: "Post generation stages" }))
+      .getAllByRole("listitem")
+      .filter((item) => item.getAttribute("aria-current") === "step");
+    expect(current.map((item) => item.textContent)).toEqual(["Final check"]);
+    expect(onCancelGeneration).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelGeneration).toHaveBeenCalledTimes(1);
   });
 });

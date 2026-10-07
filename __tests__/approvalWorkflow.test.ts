@@ -111,7 +111,13 @@ describe("approval backend invariants", () => {
       'const ownerSessionHash = token ? helpers.hashSessionToken(token) : ""',
     );
     expect(hook).toContain("owner_session_hash: ownerSessionHash");
-    expect(hook).toContain('record.set("has_video", true)');
+    // The video flag is a column-scoped, dealer-scoped write (it must not
+    // rewrite the post or move its revision; see postRevisionReceipts.test.ts).
+    expect(hook).toContain('"UPDATE posts SET has_video = 1 "');
+    expect(hook).toContain(
+      '"WHERE id = {:post} AND dealer = {:dealer} AND COALESCE(has_video, 0) = 0"',
+    );
+    expect(hook).not.toContain('record.set("has_video", true)');
     expect(hook).toContain("has_video: false");
     expect(hook).toContain('error: "Post belongs to another session"');
     expect(hook).toContain("$filesystem.fileFromMultipart(header)");

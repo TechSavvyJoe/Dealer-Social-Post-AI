@@ -17,7 +17,7 @@ export const OfflineBanner: React.FC = () => {
   return (
     <div
       role="status"
-      className="flex items-center justify-center gap-2 border-b border-warning-500/40 bg-warning-500/10 px-4 py-2 text-xs font-medium text-warning-500"
+      className="flex items-center justify-center gap-2 border-b border-warning-ink/30 bg-warning-fill px-4 py-2 text-xs font-medium text-warning-ink"
     >
       <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       You're offline — your work is saved on this device and sharing resumes when you

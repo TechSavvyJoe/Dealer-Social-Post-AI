@@ -43,6 +43,7 @@ export const useAppController = () => {
     reset,
     startRemix,
     restoreSession,
+    refreshStoreImageSettings,
   } = useAppStore(
     useShallow((state) => ({
       step: state.step,
@@ -67,6 +68,7 @@ export const useAppController = () => {
       reset: state.reset,
       startRemix: state.startRemix,
       restoreSession: state.restoreSession,
+      refreshStoreImageSettings: state.refreshStoreImageSettings,
     })),
   );
 
@@ -100,6 +102,25 @@ export const useAppController = () => {
     logEvent("app.boot");
     restoreSession();
   }, [restoreSession]);
+
+  // A manager can change the store's image quality, logo corner and size, or
+  // logo while this app is open, and generation reads them from the session
+  // dealer. Re-read them whenever the app comes back to the screen, so a
+  // teammate's open app does not keep the values from its last sign-in.
+  const signedInDealerId = currentDealer?.id;
+  useEffect(() => {
+    if (!signedInDealerId || isRestoringSession) return;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void refreshStoreImageSettings();
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [signedInDealerId, isRestoringSession, refreshStoreImageSettings]);
 
   // Warm the AI-service chunk (~63 kB gzip) while the user is still picking
   // style and tone, so the first Generate spends its time on the model call
@@ -259,20 +280,13 @@ export const useAppController = () => {
     [generationProps.supersedeGeneration],
   );
 
+  // Back from the reopened post returns to the surface it was opened from
+  // (Home's preview, My work or the dealership dashboard): openSavedPost
+  // records the current step, never a role-derived guess (amendments B13).
   const handleOpenPost = useCallback(
     (post: GeneratedPost) => {
       generationProps.supersedeGeneration();
-      const store = useAppStore.getState();
-      store.setPostReturnStep(
-        store.role === "salesperson" ? AppStep.WORK : AppStep.DEALER_ADMIN,
-      );
-      store.setGeneratedPost(post);
-      store.setSelectedImage(null);
-      store.setGenerationParams(null);
-      store.setPostDraft(null);
-      store.setPendingRelease(null);
-      store.setError(null);
-      store.setStep(AppStep.POST);
+      useAppStore.getState().openSavedPost(post);
     },
     [generationProps.supersedeGeneration],
   );

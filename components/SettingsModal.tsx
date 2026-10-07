@@ -5,6 +5,7 @@ import { Button } from "./ui/Button";
 import { Modal } from "./ui/Modal";
 import type { ImageQualityTier } from "../types";
 import { useAppStore } from "../stores/appStore";
+import { resolveImageQualityTier } from "../utils/imageQualityTier";
 
 // Client bundle identity — same fallback chain the telemetry envelope stamps
 // on every event (utils/telemetry.ts). The SystemHealthPanel shows the
@@ -31,6 +32,8 @@ const themeOptions: Array<{ value: "dark" | "light" | "system"; label: string }>
   { value: "system", label: "Match device" },
 ];
 
+// Descriptions, not advice: when the store sets the tier both choices are
+// locked, so neither may tell this person when to pick it.
 const imageQualityOptions: Array<{
   value: ImageQualityTier;
   label: string;
@@ -44,8 +47,7 @@ const imageQualityOptions: Array<{
   {
     value: "studio",
     label: "Studio",
-    helper:
-      "Studio (4K) takes longer to generate — use it when you need maximum detail.",
+    helper: "Studio (4K) takes longer to generate and shows more detail.",
   },
 ];
 
@@ -63,6 +65,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const hasActualDealer = Boolean(
     dealer && dealer.name?.trim().toUpperCase() !== "SYSTEM ADMIN",
   );
+  // Generation uses the same rule: a store tier wins over this device's choice.
+  const imageQuality = resolveImageQualityTier(
+    dealer?.image_quality_tier,
+    imageQualityTier,
+  );
+  const imageQualityHelperId = React.useId();
   const handleClose = () => {
     triggerHapticFeedback();
     onClose();
@@ -156,48 +164,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         <div>
           <h3 className="text-lg font-semibold text-ink">Image quality</h3>
-          <p className="mt-1 text-sm text-ink-2">
-            Your device preference
-            {dealer?.image_quality_tier
-              ? `; ${dealer.name} currently manages the store default as ${dealer.image_quality_tier}.`
-              : ". The store can set a team-wide default in manager setup."}
+          <p id={imageQualityHelperId} className="mt-1 text-sm text-ink-2">
+            {imageQuality.setByStore
+              ? "Your store sets image quality. A manager can change it in Dealership settings."
+              : "Your device preference."}
           </p>
           <div
             className="mt-3 grid gap-2 sm:grid-cols-2"
             role="group"
             aria-label="Image quality"
+            aria-describedby={imageQualityHelperId}
           >
-            {imageQualityOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={imageQualityTier === option.value}
-                onClick={() => {
-                  triggerHapticFeedback();
-                  onImageQualityTierChange(option.value);
-                }}
-                className={`relative flex min-h-24 w-full flex-col items-start justify-center gap-1 rounded-md border px-4 py-3 text-left transition-colors ${
-                  imageQualityTier === option.value
-                    ? "border-brand-ink bg-brand-tint text-ink"
-                    : "border-hairline bg-panel-raised text-ink hover:border-strong"
-                }`}
-              >
-                <span className="text-sm font-medium">{option.label}</span>
-                <span
-                  className={`text-2xs ${
-                    imageQualityTier === option.value ? "text-ink-2" : "text-ink-hint"
+            {imageQualityOptions.map((option) => {
+              const selected = imageQuality.tier === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={imageQuality.setByStore}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    onImageQualityTierChange(option.value);
+                  }}
+                  className={`relative flex min-h-24 w-full flex-col items-start justify-center gap-1 rounded-md border px-4 py-3 text-left transition-colors disabled:cursor-not-allowed ${
+                    selected
+                      ? "border-brand-ink bg-brand-tint text-ink"
+                      : "border-hairline bg-panel-raised text-ink enabled:hover:border-strong disabled:text-ink-2"
                   }`}
                 >
-                  {option.helper}
-                </span>
-                {imageQualityTier === option.value ? (
-                  <Check
-                    className="absolute right-3 top-3 h-4 w-4 text-brand-ink"
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </button>
-            ))}
+                  <span className="text-sm font-medium">{option.label}</span>
+                  <span
+                    className={`text-2xs ${selected ? "text-ink-2" : "text-ink-hint"}`}
+                  >
+                    {option.helper}
+                  </span>
+                  {selected ? (
+                    <Check
+                      className="absolute right-3 top-3 h-4 w-4 text-brand-ink"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

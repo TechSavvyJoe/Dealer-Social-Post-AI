@@ -308,7 +308,7 @@ const buildRequest = (
         ok: false,
         reason: "identity",
         message: customerName
-          ? `Your personal line appears to name someone other than ${customerName}. Correct it before generating.`
+          ? `Your personal line appears to name someone other than ${customerName}. Fix it before you create the post.`
           : "Your personal line names a customer, but no approved customer name is attached to this post. Remove the name or add the approved customer first name.",
       };
     }

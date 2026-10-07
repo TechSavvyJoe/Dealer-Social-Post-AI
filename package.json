@@ -31,7 +31,7 @@
     "model-policy:check": "node scripts/check-model-policy.mjs",
     "skill:creative-director:check": "python3 skills/dealership-campaign-creative-director/scripts/validate_creative_review.py --suite skills/dealership-campaign-creative-director/evals/fixtures",
     "vercel-config:check": "node --experimental-strip-types scripts/check-vercel-config.mjs",
-    "security:audit": "npm audit --audit-level=low",
+    "security:audit": "node scripts/check-npm-audit.mjs",
     "security:secrets": "node scripts/check-secrets.mjs",
     "backup:create": "node scripts/pocketbase-r2-backup.mjs backup",
     "backup:download": "node scripts/pocketbase-r2-backup.mjs download",
@@ -76,7 +76,8 @@
     },
     "postcss": {
       "nanoid": "^3.3.18"
-    }
+    },
+    "postcss-selector-parser": "^7.1.6"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",

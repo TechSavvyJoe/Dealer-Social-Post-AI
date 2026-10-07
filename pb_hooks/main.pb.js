@@ -1027,6 +1027,9 @@ routerAdd("GET", "/api/app/connections", (c) => {
         configured: websiteConfigured,
         enabled: websiteConfigured,
         verification: "not_tested",
+        // A dealer record id, not a credential: the admin hub names the
+        // dealership the website destination is mapped to.
+        dealerId: configuredWebsiteDealer,
       },
       walkaround: {
         configured: walkaroundConfigured,
@@ -2641,7 +2644,36 @@ routerAdd("POST", "/api/app/posts", (c) => {
       ? context.person.getString("name")
       : "System Admin";
 
-    const approvalStatus = policies.initialApprovalStatus(dealer);
+    // A store's approval policy is applied only from server-resolved facts:
+    // the scenario's brand category, whether the post involves a customer, and
+    // how many of the author's posts a manager has approved. Anything unknown
+    // is reviewed (see policies.initialApprovalStatus).
+    const approvalMapping = websitePublications.resolveWebsiteMapping(
+      scenarioId,
+      dealer.getString("custom_scenarios"),
+    );
+    const approvalStatus = policies.initialApprovalStatus(dealer, {
+      category: approvalMapping ? approvalMapping.category : "",
+      involvesCustomer:
+        releaseRequired ||
+        !approvalMapping ||
+        approvalMapping.kind === "customer_story",
+      countApprovedPosts: function () {
+        if (!salespersonId) return NaN;
+        const row = new DynamicModel({ total: 0 });
+        $app
+          .dao()
+          .db()
+          .newQuery(
+            "SELECT COUNT(*) AS total FROM posts " +
+              "WHERE dealer = {:dealer} AND salesperson_id = {:person} " +
+              "AND approval_status = 'approved'",
+          )
+          .bind({ dealer: dealer.id, person: salespersonId })
+          .one(row);
+        return Number(row.total);
+      },
+    });
     let caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
     let disclosures = helpers.assertString(
       (body.disclosures || "").toString().trim(),
@@ -3329,8 +3361,21 @@ routerAdd("POST", "/api/app/posts/:id/video-generated", (c) => {
       ? record.getBool("has_video")
       : !!record.get("has_video");
     if (!alreadyGenerated) {
-      record.set("has_video", true);
-      $app.dao().saveRecord(record);
+      // Column-scoped on purpose. Saving the record loaded above would write
+      // every column back (undoing a caption saved since it was read) and
+      // advance posts.updated, the editor's compare-and-set revision, so an
+      // autosave already in flight would be rejected as stale. The flag is
+      // not post content: it changes neither the row's other columns nor the
+      // revision, and this route returns no revision for an editor to adopt.
+      $app
+        .dao()
+        .db()
+        .newQuery(
+          "UPDATE posts SET has_video = 1 " +
+            "WHERE id = {:post} AND dealer = {:dealer} AND COALESCE(has_video, 0) = 0",
+        )
+        .bind({ post: record.id, dealer: dealer.id })
+        .execute();
     }
     return c.json(200, { id: record.id, has_video: true });
   } catch (err) {
@@ -3424,6 +3469,10 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
     );
     return c.json(200, {
       id: record.id,
+      // A manager decision advances posts.updated. Once a post has left the
+      // n_a state its content is immutable, so the author's editor can adopt
+      // this revision for share receipts without risking a lost edit.
+      post_revision: record.getString("updated"),
       approval_status: record.getString("approval_status"),
       approved_by: record.getString("approved_by"),
       approved_at: record.getString("approved_at"),
@@ -4304,12 +4353,25 @@ routerAdd("GET", "/api/app/posts", (c) => {
               last_channel: shareChannel,
               last_via: (shareRows[i].via || "").toString(),
               channels: [],
+              // Only a completed share sheet may be labelled "Shared"; a
+              // download or a copied caption is not one. Kept apart from the
+              // latest event so a later copy cannot hide an earlier share.
+              sheet_count: 0,
+              last_sheet_channel: "",
+              last_sheet_at: "",
             };
             shareSummaryByPost[postId] = summary;
           }
           summary.count += 1;
           if (summary.channels.indexOf(shareChannel) === -1) {
             summary.channels.push(shareChannel);
+          }
+          if ((shareRows[i].via || "").toString() === "share_sheet") {
+            if (summary.sheet_count === 0) {
+              summary.last_sheet_channel = shareChannel;
+              summary.last_sheet_at = (shareRows[i].created || "").toString();
+            }
+            summary.sheet_count += 1;
           }
         }
       }
@@ -4475,6 +4537,9 @@ routerAdd("GET", "/api/app/posts", (c) => {
           ? r.getBool("attribution_authoritative")
           : !!r.get("attribution_authoritative"),
         generated_at: r.getString("generated_at"),
+        // The compare-and-set token a reopened post must send with its next
+        // draft save or share receipt; without it the editor is read-only.
+        updated: r.getString("updated"),
         style: r.getString("style"),
         tone: r.getString("tone"),
         customer_name: publicCustomerName,
@@ -5647,6 +5712,12 @@ routerAdd("PATCH", "/api/app/dealers/:id", (c) => {
     if (data.name !== undefined && !data.name) {
       return c.json(400, { error: "Dealer name is required" });
     }
+    // The creative-system rollout flag is the system administrator's switch.
+    // A manager's save never changes it. The field is ignored rather than
+    // rejected, so a settings form that echoes the stored value still saves.
+    if (!isSuperAdmin) delete data.creative_system_v2;
+    // Setup notes are the system administrator's alone; ignored, not rejected.
+    if (!isSuperAdmin) delete data.setup_notes;
 
     const form = new RecordUpsertForm($app, target);
     form.setFullManageAccess(true);
@@ -5756,38 +5827,16 @@ routerAdd("GET", "/api/app/dealers", (c) => {
     }
     const page = records.slice(startIndex, startIndex + pageLimit);
     const hasMore = startIndex + page.length < records.length;
-    const items = page.map((r) => ({
-      id: r.id,
-      name: r.getString("name"),
-      logo: r.getString("logo")
-        ? `/api/files/dealers/${r.id}/${r.getString("logo")}`
-        : "",
-      brand_voice: r.getString("brand_voice"),
-      banned_phrases: r.getString("banned_phrases"),
-      oem_affiliation: r.getString("oem_affiliation"),
-      requires_approval: r.getBool
-        ? r.getBool("requires_approval")
-        : !!r.get("requires_approval"),
-      brand_color: r.getString("brand_color"),
-      website: r.getString("website"),
-      phone: r.getString("phone"),
-      address: r.getString("address"),
-      hours: r.getString("hours"),
-      tagline: r.getString("tagline"),
-      facebook_url: r.getString("facebook_url"),
-      facebook_page_tag: r.getString("facebook_page_tag"),
-      instagram_handle: r.getString("instagram_handle"),
-      tiktok_handle: r.getString("tiktok_handle"),
-      x_handle: r.getString("x_handle"),
-      linkedin_company_tag: r.getString("linkedin_company_tag"),
-      gbp_url: r.getString("gbp_url"),
-      default_hashtags: r.getString("default_hashtags"),
-      default_footer: r.getString("default_footer"),
-      enabled_styles: r.getString("enabled_styles"),
-      default_style: r.getString("default_style"),
-      enabled_fun_styles: r.getString("enabled_fun_styles"),
-      custom_scenarios: r.getString("custom_scenarios"),
-    }));
+    // The shared serializer, so the system administrator sees the same
+    // settings the store's own session does (creative-system switch, look,
+    // approval rule, disclosure). It never includes code or admin_code.
+    // Setup notes are added here and only here: this route is system-admin
+    // only, and serializeDealer (the session payload) must never carry them.
+    const items = page.map((r) =>
+      Object.assign(helpers.serializeDealer(r), {
+        setup_notes: r.getString("setup_notes"),
+      }),
+    );
     const payload = { items: items, total: records.length };
     if (hasMore && page.length) payload.nextCursor = page[page.length - 1].id;
     return c.json(200, payload);

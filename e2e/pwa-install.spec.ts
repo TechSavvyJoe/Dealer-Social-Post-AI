@@ -435,8 +435,9 @@ test.describe("Home Screen PWA contracts", () => {
 
       const mainContent = page.locator("#main-content");
       const deliveryAction = page.getByRole("button", { name: /^Delivery/ });
-      const teamCard = page.locator("article").filter({ hasText: /^Team/ }).first();
-      const chooseFromLibrary = teamCard.getByRole("button", {
+      // Phones get one "Choose from library" row under the tiles, the last
+      // control on Home; it belongs to no tile.
+      const chooseFromLibrary = mainContent.getByRole("button", {
         name: "Choose from library",
       });
       await expect(deliveryAction).toBeVisible();
@@ -462,9 +463,9 @@ test.describe("Home Screen PWA contracts", () => {
         const finalCard = cards.find((card) =>
           card.textContent?.trim().startsWith("Team"),
         );
-        const choose = Array.from(finalCard?.querySelectorAll("button") || []).find(
-          (button) => button.textContent?.trim() === "Choose from library",
-        );
+        const choose = Array.from(
+          document.querySelectorAll<HTMLButtonElement>("#main-content button"),
+        ).find((button) => button.textContent?.trim() === "Choose from library");
         if (!main || !finalCard || !choose) return null;
         const mainBounds = main.getBoundingClientRect();
         const finalCardBounds = finalCard.getBoundingClientRect();

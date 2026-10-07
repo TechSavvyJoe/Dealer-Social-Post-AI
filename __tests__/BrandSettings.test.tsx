@@ -1,5 +1,13 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DealerSettingsCard } from "../components/DealerAdminDashboard";
 import { PersonEditModal } from "../components/PersonEditModal";
@@ -23,6 +31,13 @@ vi.mock("../components/CustomScenarioManager", () => ({
 }));
 vi.mock("../components/HoursPicker", () => ({
   HoursPicker: ({ preview }: { preview: string }) => <div>{preview}</div>,
+}));
+// Channels shows the connected services; they make their own requests.
+vi.mock("../components/YouTubeConnectionCard", () => ({
+  YouTubeConnectionCard: () => null,
+}));
+vi.mock("../services/websitePublishing", () => ({
+  listWebsiteDestinations: vi.fn().mockResolvedValue([]),
 }));
 
 const baseDealer: Dealer = {
@@ -60,6 +75,21 @@ const save = async (onSaved: ReturnType<typeof vi.fn>): Promise<SavedFields> => 
   return onSaved.mock.calls[0][0] as SavedFields;
 };
 
+/** Only the open section renders, so every case opens the one it uses. */
+const openSection = (
+  name: "Store profile" | "Channels" | "Voice" | "Creative" | "Workflow",
+) => fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${name}`) }));
+const openVoice = () => openSection("Voice");
+const openCreative = (advanced = false) => {
+  openSection("Creative");
+  if (advanced)
+    fireEvent.click(screen.getByRole("button", { name: "Video and advanced" }));
+};
+const signatureLooks = () =>
+  within(screen.getByRole("radiogroup", { name: "Signature Look" }));
+const secondLook = () =>
+  within(screen.getByRole("radiogroup", { name: "Second Look" }));
+
 const hashtagLock = () =>
   screen.getByRole("switch", { name: "Always include every hashtag above" });
 
@@ -72,68 +102,194 @@ afterEach(() => {
 });
 
 describe("dealer Brand section", () => {
-  it("uses a clickable setup checklist to reveal one focused section at a time", () => {
+  it("uses the section rail to show one focused section at a time", () => {
     renderSettings();
-    const creative = screen.getByRole("button", { name: /Creative/ });
+    const creative = screen.getByRole("button", { name: /^Creative/ });
     expect(creative).not.toHaveAttribute("aria-current");
+    expect(screen.getByLabelText("Website")).toBeInTheDocument();
     fireEvent.click(creative);
     expect(creative).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("region", { name: "Brand" })).not.toHaveClass("hidden");
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Creative" }),
+    ).toBeInTheDocument();
+    // Only the open section renders; its form state lives above it.
+    expect(screen.queryByLabelText("Website")).toBeNull();
+    // Four setup areas: Workflow has safe defaults, so it is not a task.
     expect(
       screen.getByRole("progressbar", { name: "Store setup progress" }),
-    ).toHaveAttribute("aria-valuemax", "5");
+    ).toHaveAttribute("aria-valuemax", "4");
   });
 
-  it("persists advanced approval and team permission fields through validated server fields", async () => {
+  it("persists team feature access through the validated server field", async () => {
     const { onSaved } = renderSettings();
     fireEvent.click(screen.getByRole("button", { name: /Workflow/ }));
     fireEvent.click(screen.getByRole("button", { name: "Advanced workflow controls" }));
-    fireEvent.change(screen.getByLabelText("Policy"), { target: { value: "always" } });
     fireEvent.click(screen.getByRole("switch", { name: /Playful/ }));
 
     const payload = await save(onSaved);
-    expect(JSON.parse(String(payload.approval_policy))).toEqual({ mode: "always" });
     expect(JSON.parse(String(payload.feature_permissions))).toEqual({
       playful: { team: false, people: {} },
     });
     expect(payload).not.toHaveProperty("category_destinations");
   });
 
-  it("reports the active streamlined resolver when the dealer flag is on", () => {
+  it("drops the free text editing switch but keeps whatever is stored for it", async () => {
+    const { onSaved } = renderSettings({
+      ...baseDealer,
+      feature_permissions: {
+        freeTextEdit: { team: false, people: { "person-1": true } },
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Workflow/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced workflow controls" }));
+    expect(screen.queryByRole("switch", { name: /Free text/ })).toBeNull();
+    expect(screen.getByRole("switch", { name: "Playful style" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Video" })).toBeInTheDocument();
+    // No promise the UI cannot keep: nothing sets per-person overrides.
+    expect(screen.queryByText(/individual override/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("switch", { name: /Video/ }));
+    const payload = await save(onSaved);
+    expect(JSON.parse(String(payload.feature_permissions))).toEqual({
+      freeTextEdit: { team: false, people: { "person-1": true } },
+      video: { team: false, people: {} },
+    });
+  });
+
+  it("explains channels by post type in plain words", () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: /Workflow/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced workflow controls" }));
+    expect(
+      screen.getByText(/^Salespeople only see the channels you leave checked\./),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/creative resolver/)).toBeNull();
+  });
+
+  it("says the store's image quality applies to the whole team and what Studio costs", () => {
+    renderSettings();
+    openCreative(true);
+    expect(
+      screen.getByText(
+        "Your choice applies to every new image your team creates. Studio asks for more detailed 4K images, which cost more per image.",
+      ),
+    ).toBeInTheDocument();
+    // Generation now reads the store's tier, so the old disclaimer is untrue.
+    expect(screen.queryByText(/each device still uses/)).toBeNull();
+  });
+
+  it("says new designed photos ask for the logo in the corner and at the size picked", () => {
+    renderSettings({ ...baseDealer, logo: "/api/files/dealers/dealer-1/logo.png" });
+    openCreative(true);
+    expect(
+      screen.getByText(
+        "No corner picked, so each new designed photo picks one for your logo.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Percent of the photo width. Pick a corner under Placement on photos to use it.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Top left" }));
+    expect(
+      screen.getByText("New designed photos ask for your logo in this corner."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Percent of the photo width. New designed photos ask for your logo at about this size.",
+      ),
+    ).toBeInTheDocument();
+    // Generation now reads the corner and size, so the old disclaimer is untrue.
+    expect(screen.queryByText(/do not use it yet/i)).toBeNull();
+  });
+
+  it("says the corner applies once a logo is uploaded when the store has none", () => {
+    renderSettings();
+    openCreative();
+    expect(
+      screen.getByText(
+        "Once you upload a logo, new designed photos ask for it in the corner you pick.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("never says the size reaches photos while the store has no logo", () => {
+    // With no logo, generation uses the store name as a text watermark and asks
+    // for no size, so neither helper may claim the size is used yet.
+    renderSettings({
+      ...baseDealer,
+      logo_placement: { corner: "top_left", scale: 0.25 },
+    });
+    openCreative(true);
+    expect(
+      screen.getByText(
+        "Once you upload a logo, new designed photos ask for it in the corner you pick.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Percent of the photo width. Once you upload a logo, new designed photos ask for it at about this size.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/ask for your logo at about this size/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(
+      screen.getByText(
+        "Percent of the photo width. Upload a logo and pick a corner under Placement on photos to use it.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says what the creative-system switch changes when it is on", () => {
     renderSettings({ ...baseDealer, creative_system_v2: true });
-    fireEvent.click(screen.getByRole("button", { name: /Creative/ }));
-    expect(screen.getByText(/^Active for your store\./)).toBeInTheDocument();
+    openCreative();
+    expect(
+      screen.getByText(
+        "Your store uses the signature Look: new posts get its photo treatment and caption tone, and the classic image styles no longer apply. Only a system administrator can turn it off.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Every new post starts in this Look. These previews are illustrations; each post is designed around its own photo.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Salespeople can switch a post to this one on the Post screen."),
+    ).toBeInTheDocument();
   });
 
   it("renders every phase-1 brand control with its label", () => {
     renderSettings();
+    openCreative(true);
 
-    const brand = screen.getByRole("region", { name: "Brand" });
-    expect(
-      within(brand).getByRole("radiogroup", { name: "Signature look" }),
-    ).toBeInTheDocument();
     for (const look of ["Showroom", "Hometown", "Turbo"]) {
-      expect(within(brand).getByRole("radio", { name: look })).toHaveAttribute(
+      expect(signatureLooks().getByRole("radio", { name: look })).toHaveAttribute(
         "aria-checked",
         "false",
       );
     }
-    expect(within(brand).getByLabelText("Alternate look")).toHaveValue("");
-    expect(within(brand).getByLabelText("Playful style")).toHaveValue("");
+    expect(secondLook().getByRole("radio", { name: "None" })).toBeChecked();
+    expect(screen.getByLabelText("Playful style")).toHaveValue("");
     expect(
-      within(brand).getByText("Shown to salespeople as a single Playful option"),
+      screen.getByText(
+        "One fun treatment your team can try on a post. Turn it off for the whole team under Workflow.",
+      ),
     ).toBeInTheDocument();
-    expect(within(brand).getByLabelText("Motion style")).toHaveValue("");
-    expect(within(brand).getByLabelText("9:16 Vertical")).toBeDisabled();
-    expect(within(brand).getByLabelText("Audio")).toBeDisabled();
+    expect(screen.getByLabelText("Motion style")).toHaveValue("");
+    expect(screen.getByLabelText("9:16 Vertical")).toBeDisabled();
+    expect(screen.getByLabelText("Audio")).toBeDisabled();
     expect(
-      within(brand).getByRole("radiogroup", { name: "Logo corner" }),
+      screen.getByRole("radiogroup", { name: "Placement on photos" }),
     ).toBeInTheDocument();
-    expect(within(brand).getByLabelText("Logo size")).toBeDisabled();
+    expect(screen.getByLabelText("Logo size")).toBeDisabled();
     expect(
-      within(brand).getByRole("radiogroup", { name: "Image quality" }),
+      screen.getByRole("radiogroup", { name: "Image quality" }),
     ).toBeInTheDocument();
 
+    openVoice();
     expect(screen.getByLabelText("Do phrase")).toBeInTheDocument();
     expect(screen.getByLabelText("Don't phrase")).toBeInTheDocument();
     expect(hashtagLock()).toHaveAttribute("aria-checked", "false");
@@ -142,69 +298,106 @@ describe("dealer Brand section", () => {
     ).toBeInTheDocument();
   });
 
-  it("accurately explains the classic resolver until the creative system is enabled", () => {
+  it("accurately explains the classic styles until the creative system is enabled", () => {
     renderSettings();
-    fireEvent.click(screen.getByRole("button", { name: /Creative/ }));
+    openCreative();
 
-    const brand = screen.getByRole("region", { name: "Brand" });
     expect(
-      within(brand).getByText(
-        /One house style for every post: salespeople never pick image style, tone, or video look themselves\./,
+      screen.getByText(
+        "Your store's posts still use the classic image styles, so the Look you choose here is saved but not used yet. A system administrator turns on the signature Look for your store; a manager cannot.",
       ),
     ).toBeInTheDocument();
-    const note = within(brand).getByText(/^Your store is using the classic/);
-    expect(note).toHaveTextContent(
-      /ask your system administrator to enable the streamlined creative system/,
+    // Nothing on the screen claims the Look reaches posts while it is off.
+    expect(screen.queryByText(/^Every new post starts in this Look\./)).toBeNull();
+    expect(
+      screen.getByText(/^Once the signature Look is on for your store, every new post/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /^Once the signature Look is on for your store, salespeople can/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says which classic style new posts use, now that the customizer is gone", () => {
+    renderSettings(unsavedDealer);
+    openCreative(true);
+
+    expect(
+      screen.getByText(
+        "New posts use the default style when it is on. With no default, or one that is off, they use Modern & Bold if it is on, otherwise the first style in this list that is on. The Post screen offers up to three of the styles that are on.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/customizer/)).toBeNull();
+    const styles = within(screen.getByRole("group", { name: "Styles that are on" }));
+    expect(styles.getAllByRole("checkbox")).toHaveLength(
+      Object.values(StyleOption).length,
     );
+    for (const checkbox of styles.getAllByRole("checkbox"))
+      expect(checkbox).toBeChecked();
+    expect(screen.getByLabelText("Default classic style")).toHaveValue("");
   });
 
-  it("says the legacy overlay styles are the ones in charge today", () => {
-    renderSettings();
-    fireEvent.click(screen.getByRole("button", { name: /Creative/ }));
+  it("marks a saved default classic style that is off, since new posts skip it", () => {
+    // services/storeDefaults.ts legacyRenderedStyle: a default outside the
+    // styles that are on is passed over for Modern & Bold or the first one on.
+    renderSettings({
+      ...unsavedDealer,
+      enabled_styles: [StyleOption.Luxury, StyleOption.Friendly].join(","),
+      default_style: StyleOption.Sporty,
+    });
+    openCreative(true);
 
-    const overlay = screen.getByText(/^Pick which design styles your team can use/);
-    expect(overlay).toHaveTextContent(/Star one to preselect it/);
-    expect(screen.getByText("Image overlay styles")).toBeInTheDocument();
-    expect(screen.getAllByText("available to salespeople").length).toBeGreaterThan(0);
+    const select = screen.getByRole("combobox", { name: "Default classic style" });
+    expect(select).toHaveValue(StyleOption.Sporty);
+    const options = within(select)
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(options).toEqual([
+      "No default",
+      StyleOption.Luxury,
+      StyleOption.Friendly,
+      `${StyleOption.Sporty} (off)`,
+    ]);
   });
 
-  // Sentence case is the single rule for every label in this section: "look"
-  // is no longer title-cased while "style" and "signature" stay lowercase.
-  it("labels every brand control in sentence case", () => {
+  it("names the creative controls as approved, in sentence case apart from the Look names", () => {
     renderSettings();
+    openCreative(true);
 
-    const brand = screen.getByRole("region", { name: "Brand" });
     for (const label of [
-      "Signature look",
-      "Alternate look",
+      "Signature Look",
+      "Second Look",
       "Playful style",
-      "Motion signature",
+      "Store color",
+      "Logo",
+      "Placement on photos",
+      "Video and advanced",
       "Motion style",
-      "Logo placement",
+      "Aspects",
+      "Audio",
       "Logo size",
       "Image quality",
+      "Classic image styles",
+      "Default classic style",
     ]) {
-      expect(within(brand).getByText(label)).toBeInTheDocument();
+      expect(screen.getByText(label)).toBeInTheDocument();
     }
-    for (const titleCased of ["Signature Look", "Alternate Look", "Motion Style"]) {
-      expect(within(brand).queryByText(titleCased)).toBeNull();
+    for (const retired of [
+      "Alternate look",
+      "Logo corner",
+      "Motion signature",
+      "Brand",
+    ]) {
+      expect(screen.queryByText(retired)).toBeNull();
     }
-    expect(
-      within(brand).getByText(
-        "Optional second look a manager may enable for the team.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      within(brand).getByText(
-        "Percent of the image width. The look decides the rest of the layout.",
-      ),
-    ).toBeInTheDocument();
   });
 
   // The two phrase columns sit side by side at desktop width: the placeholder
   // has to fit its own field and both helper lines have to wrap the same way.
   it("keeps the do and don't columns balanced", () => {
     renderSettings();
+    openVoice();
 
     expect(screen.getByLabelText("Do phrase")).toHaveAttribute(
       "placeholder",
@@ -223,19 +416,18 @@ describe("dealer Brand section", () => {
     expect(Math.abs(doHelp.length - dontHelp.length)).toBeLessThanOrEqual(1);
   });
 
-  // The bar is sticky, so the card has to reserve room for it or the last
-  // control sits permanently underneath.
-  it("reserves bottom padding at least as tall as the sticky save bar", () => {
+  // Below lg the action row is the bar stuck to the bottom of the screen; from
+  // lg it rests at the end of the form. Either way it stays in flow as the
+  // form column's last child, so it can never sit on top of the last control.
+  it("keeps the action row in flow: sticky below lg, static from lg", () => {
     renderSettings();
 
     const bar = screen.getByTestId("dealer-settings-save-bar");
     expect(bar.className).toContain("sticky");
-    expect(bar.className).toContain("min-h-14");
-
-    const card = bar.parentElement as HTMLElement;
-    expect(card.className).toContain("pb-20");
-    // sm:p-6 would otherwise win back the bottom padding at desktop width.
-    expect(card.className).toContain("sm:pb-20");
+    expect(bar.className).toContain("bottom-0");
+    expect(bar.className).toContain("lg:static");
+    expect(bar.className).not.toMatch(/\b(?:fixed|absolute)\b/);
+    expect(bar.parentElement?.lastElementChild).toBe(bar);
   });
 
   it("marks the form dirty when a look is chosen and saves signature_look with its tone", async () => {
@@ -243,14 +435,15 @@ describe("dealer Brand section", () => {
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("radio", { name: "Hometown" }));
+    openCreative();
+    fireEvent.click(signatureLooks().getByRole("radio", { name: "Hometown" }));
 
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
-    expect(screen.getByRole("radio", { name: "Hometown" })).toHaveAttribute(
+    expect(signatureLooks().getByRole("radio", { name: "Hometown" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+    expect(screen.getByText("Unsaved changes in Creative")).toBeInTheDocument();
 
     const payload = await save(onSaved);
     expect(payload.signature_look).toBe("hometown");
@@ -263,8 +456,9 @@ describe("dealer Brand section", () => {
     expect(payload.motion_signature).toBe("");
     expect(payload.logo_placement).toBe("");
     expect(payload.image_quality_tier).toBe("");
-    // Phase 2 fields are never sent, so the server leaves them untouched.
-    expect(payload).not.toHaveProperty("approval_policy");
+    // Approval is off, so the policy is always sent cleared; untouched
+    // destinations and permissions are not sent, so the server keeps them.
+    expect(payload.approval_policy).toBe("");
     expect(payload).not.toHaveProperty("category_destinations");
     expect(payload).not.toHaveProperty("feature_permissions");
     // Existing fields still ride along through the same PATCH.
@@ -272,21 +466,21 @@ describe("dealer Brand section", () => {
     expect(payload.brand_color).toBe("#1d4ed8");
   });
 
-  it("keeps the alternate look distinct from the signature look and skips default_tone when the look is unchanged", async () => {
+  it("keeps the second Look distinct from the signature Look and skips default_tone when the look is unchanged", async () => {
     const { onSaved } = renderSettings({
       ...baseDealer,
       signature_look: "showroom",
       default_tone: "Professional",
     });
-    expect(screen.getByRole("radio", { name: "Showroom" })).toHaveAttribute(
+    openCreative();
+    expect(signatureLooks().getByRole("radio", { name: "Showroom" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    const alternate = screen.getByLabelText("Alternate look");
-    expect(within(alternate).queryByRole("option", { name: "Showroom" })).toBeNull();
+    expect(secondLook().queryByRole("radio", { name: "Showroom" })).toBeNull();
 
-    fireEvent.change(alternate, { target: { value: "turbo" } });
-    expect(alternate).toHaveValue("turbo");
+    fireEvent.click(secondLook().getByRole("radio", { name: "Turbo" }));
+    expect(secondLook().getByRole("radio", { name: "Turbo" })).toBeChecked();
 
     const payload = await save(onSaved);
     expect(payload.signature_look).toBe("showroom");
@@ -294,26 +488,25 @@ describe("dealer Brand section", () => {
     expect(payload).not.toHaveProperty("default_tone");
   });
 
-  it("clears the alternate look when the house look moves onto it", () => {
+  it("clears the second Look when the house look moves onto it", () => {
     renderSettings({
       ...baseDealer,
       signature_look: "showroom",
       alternate_look: "turbo",
     });
-    expect(screen.getByLabelText("Alternate look")).toHaveValue("turbo");
+    openCreative();
+    expect(secondLook().getByRole("radio", { name: "Turbo" })).toBeChecked();
 
-    fireEvent.click(screen.getByRole("radio", { name: "Turbo" }));
+    fireEvent.click(signatureLooks().getByRole("radio", { name: "Turbo" }));
 
-    expect(screen.getByLabelText("Alternate look")).toHaveValue("");
-    expect(
-      within(screen.getByLabelText("Alternate look")).getByRole("option", {
-        name: "Showroom",
-      }),
-    ).toBeInTheDocument();
+    expect(secondLook().getByRole("radio", { name: "None" })).toBeChecked();
+    expect(secondLook().queryByRole("radio", { name: "Turbo" })).toBeNull();
+    expect(secondLook().getByRole("radio", { name: "Showroom" })).toBeInTheDocument();
   });
 
   it("round-trips the required hashtags lock in both directions", async () => {
     const locked = renderSettings({ ...baseDealer, required_hashtags_locked: true });
+    openVoice();
     expect(hashtagLock()).toHaveAttribute("aria-checked", "true");
     expect(locked.onDirtyChange).toHaveBeenLastCalledWith(false);
 
@@ -329,6 +522,7 @@ describe("dealer Brand section", () => {
 
   it("locks hashtags from an unlocked dealer and sends true", async () => {
     const { onSaved } = renderSettings();
+    openVoice();
     fireEvent.click(hashtagLock());
     expect((await save(onSaved)).required_hashtags_locked).toBe(true);
   });
@@ -338,6 +532,7 @@ describe("dealer Brand section", () => {
       ...baseDealer,
       brand_voice_dont: ["Never shout"],
     });
+    openVoice();
     const doInput = screen.getByLabelText("Do phrase");
     const addDo = screen.getByRole("button", { name: "Add do phrase" });
 
@@ -381,6 +576,7 @@ describe("dealer Brand section", () => {
 
   it("saves the playful style, motion signature, logo placement, and image quality as structured fields", async () => {
     const { onSaved } = renderSettings({ ...baseDealer, signature_look: "turbo" });
+    openCreative(true);
 
     fireEvent.change(screen.getByLabelText("Playful style"), {
       target: { value: "lego" },
@@ -425,6 +621,7 @@ describe("dealer Brand section", () => {
       ...baseDealer,
       motion_signature: { style: "Golden Radiance", aspects: ["9:16"], audio: "none" },
     });
+    openCreative(true);
     expect(screen.getByLabelText("Motion style")).toHaveValue("Golden Radiance");
     expect(screen.getByLabelText("Audio")).toHaveValue("none");
 
@@ -452,14 +649,226 @@ describe("dealer Brand section", () => {
     });
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    openCreative(true);
     expect(screen.getByRole("radio", { name: "Bottom right" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    expect(screen.getByRole("radio", { name: "Standard" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: "Standard" })).toBeChecked();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+const openWorkflow = () =>
+  fireEvent.click(screen.getByRole("button", { name: /^Workflow/ }));
+const requireApproval = () =>
+  fireEvent.click(screen.getByRole("radio", { name: "Require manager approval" }));
+const reviewScope = (name: string) => screen.getByRole("radio", { name });
+const policyOf = (payload: SavedFields) =>
+  payload.approval_policy === "" ? null : JSON.parse(String(payload.approval_policy));
+
+// The server (pb_hooks/requestPolicies.js initialApprovalStatus) treats
+// requires_approval as the switch and approval_policy as a narrowing that only
+// applies while it is on. Every option below has to save exactly that pair.
+// Each case renders the full settings card; give it room on a loaded machine.
+describe("manager approval", { timeout: 90_000 }, () => {
+  it("shows the review choice only while approval is required, directly under the switch", () => {
+    renderSettings();
+    openWorkflow();
+    expect(screen.queryByRole("radio", { name: "Every post" })).toBeNull();
+    // Nothing about approval hides behind the advanced disclosure any more.
+    expect(screen.queryByLabelText("Policy")).toBeNull();
+
+    requireApproval();
+    for (const name of [
+      "Every post",
+      "Each person's first posts",
+      "Selected post types",
+    ]) {
+      expect(reviewScope(name)).toBeInTheDocument();
+    }
+    expect(reviewScope("Every post")).toBeChecked();
+    expect(screen.queryByText(/simple (?:choice|setting) above/)).toBeNull();
+  });
+
+  it("saves no approval with the policy cleared", async () => {
+    const { onSaved } = renderSettings({
+      ...baseDealer,
+      requires_approval: true,
+      approval_policy: { mode: "first_n", firstN: 4 },
+    });
+    openWorkflow();
+    fireEvent.click(screen.getByRole("radio", { name: "No approval required" }));
+
+    const payload = await save(onSaved);
+    expect(payload.requires_approval).toBe(false);
+    expect(payload.approval_policy).toBe("");
+  });
+
+  it("saves every post as approval on with the policy cleared", async () => {
+    const { onSaved } = renderSettings();
+    openWorkflow();
+    requireApproval();
+
+    const payload = await save(onSaved);
+    expect(payload.requires_approval).toBe(true);
+    expect(policyOf(payload)).toBeNull();
+  });
+
+  it("saves each person's first posts with the number to approve", async () => {
+    const { onSaved } = renderSettings();
+    openWorkflow();
+    requireApproval();
+    fireEvent.click(reviewScope("Each person's first posts"));
+    const count = screen.getByLabelText("Posts to approve first");
+    expect(count).toHaveValue(3);
+    expect(
+      screen.getByText(
+        "Each person's posts are reviewed until you have approved this many.",
+      ),
+    ).toBeInTheDocument();
+    // An out-of-range entry is clamped when the field is left, not mid-typing.
+    fireEvent.change(count, { target: { value: "500" } });
+    expect(count).toHaveValue(500);
+    fireEvent.blur(count);
+    expect(count).toHaveValue(100);
+    // Backspace can empty the field, so typing a new number replaces the old
+    // one instead of being appended to it ("3" then "10" is 10, not 310).
+    fireEvent.change(count, { target: { value: "" } });
+    expect(count).toHaveValue(null);
+    fireEvent.change(count, { target: { value: "1" } });
+    fireEvent.change(count, { target: { value: "10" } });
+    expect(count).toHaveValue(10);
+    fireEvent.change(count, { target: { value: "" } });
+    fireEvent.blur(count);
+    expect(count).toHaveValue(10);
+    fireEvent.change(count, { target: { value: "5" } });
+
+    const payload = await save(onSaved);
+    expect(payload.requires_approval).toBe(true);
+    expect(policyOf(payload)).toEqual({ mode: "first_n", firstN: 5 });
+  });
+
+  it("saves selected post types and never lets the last one be cleared", async () => {
+    const { onSaved } = renderSettings();
+    openWorkflow();
+    requireApproval();
+    fireEvent.click(reviewScope("Selected post types"));
+    expect(
+      screen.getByText(
+        "Posts that involve a customer are always reviewed when Deliveries is checked. Review follows the post type the salesperson picks.",
+      ),
+    ).toBeInTheDocument();
+    const types = screen.getByRole("group", { name: "Post types to review" });
+    const deliveries = within(types).getByRole("checkbox", { name: "Deliveries" });
+    expect(deliveries).toBeChecked();
+    // The only checked type cannot be cleared; an empty list would mean every post.
+    expect(deliveries).toBeDisabled();
+    fireEvent.click(within(types).getByRole("checkbox", { name: "Service" }));
+    expect(deliveries).toBeEnabled();
+    fireEvent.click(deliveries);
+    fireEvent.click(within(types).getByRole("checkbox", { name: "Team" }));
+
+    const payload = await save(onSaved);
+    expect(payload.requires_approval).toBe(true);
+    expect(policyOf(payload)).toEqual({
+      mode: "per_category",
+      categories: ["service", "team"],
+    });
+  });
+
+  it("never sends the none or always modes", async () => {
+    for (const choice of [
+      "Every post",
+      "Each person's first posts",
+      "Selected post types",
+    ]) {
+      const { onSaved } = renderSettings();
+      openWorkflow();
+      requireApproval();
+      fireEvent.click(reviewScope(choice));
+      const payload = await save(onSaved);
+      expect(String(payload.approval_policy)).not.toMatch(/"(?:none|always)"/);
+      cleanup();
+    }
+  });
+
+  it("reads a saved narrowing back and starts clean", () => {
+    const { onDirtyChange } = renderSettings({
+      ...baseDealer,
+      requires_approval: true,
+      approval_policy: { mode: "per_category", categories: ["team", "deliveries"] },
+    });
+    openWorkflow();
+    expect(reviewScope("Selected post types")).toBeChecked();
+    const types = screen.getByRole("group", { name: "Post types to review" });
+    expect(within(types).getByRole("checkbox", { name: "Deliveries" })).toBeChecked();
+    expect(within(types).getByRole("checkbox", { name: "Team" })).toBeChecked();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("shows stored policies the server treats as every post as every post, without a phantom edit", () => {
+    for (const approval_policy of [
+      { mode: "always" as const },
+      { mode: "none" as const },
+      { mode: "per_category" as const, categories: [] },
+    ]) {
+      const { onDirtyChange } = renderSettings({
+        ...baseDealer,
+        requires_approval: true,
+        approval_policy,
+      });
+      openWorkflow();
+      expect(reviewScope("Every post")).toBeChecked();
+      expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+      cleanup();
+    }
+  });
+});
+
+describe("store setup progress", () => {
+  const readyArea = (name: RegExp) =>
+    within(
+      screen.getByRole("navigation", { name: "Dealership settings sections" }),
+    ).getByRole("button", { name });
+
+  it("counts areas from the saved record, not from unsaved typing", () => {
+    renderSettings(unsavedDealer);
+    expect(screen.getByText("0 of 4 areas ready")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Website"), {
+      target: { value: "https://southside.example" },
+    });
+    fireEvent.change(screen.getByLabelText("Phone"), { target: { value: "555-0100" } });
+    fireEvent.change(screen.getByLabelText("Address"), {
+      target: { value: "1 Main St" },
+    });
+    expect(screen.getByText("0 of 4 areas ready")).toBeInTheDocument();
+    expect(readyArea(/^Store profile/)).not.toHaveAccessibleName(/ready/);
+  });
+
+  it("marks saved areas ready, never counts Workflow, and does not count the website as a channel", () => {
+    renderSettings({
+      ...unsavedDealer,
+      website: "https://southside.example",
+      phone: "555-0100",
+      address: "1 Main St",
+      brand_voice: "Plain and friendly.",
+      requires_approval: false,
+      employee_disclosure_text: "I work at {dealer}.",
+    });
+    expect(screen.getByText("2 of 4 areas ready")).toBeInTheDocument();
+    expect(readyArea(/^Store profile/)).toHaveAccessibleName(/^Store profile, ready/);
+    expect(readyArea(/^Voice/)).toHaveAccessibleName(/^Voice, ready/);
+    expect(readyArea(/^Channels/)).not.toHaveAccessibleName(/ready/);
+    expect(readyArea(/^Workflow/)).not.toHaveAccessibleName(/ready/);
+  });
+
+  it("shows the per-area check at every width", () => {
+    renderSettings({ ...unsavedDealer, brand_voice: "Plain and friendly." });
+    const voice = readyArea(/^Voice/);
+    const check = voice.querySelector("svg");
+    expect(check).not.toBeNull();
+    expect(check?.getAttribute("class") || "").not.toMatch(/\bhidden\b/);
   });
 });
 
@@ -492,11 +901,50 @@ describe("dealer settings dirty tracking", () => {
   it("still persists the derived hours and overlay styles on the next real save", async () => {
     const { onSaved } = renderSettings(unsavedDealer);
 
+    openVoice();
     fireEvent.click(hashtagLock());
     const fields = await save(onSaved);
 
     expect(fields.hours).toBe(serializeHours(defaultWeekHours()));
     expect(fields.enabled_styles).toBe(Object.values(StyleOption).join(","));
+  });
+
+  it("keeps what was typed while a save was in flight", async () => {
+    let finishSave: () => void = () => undefined;
+    const onSaved = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    render(
+      <DealerSettingsCard
+        dealer={baseDealer}
+        onSaved={onSaved}
+        onDirtyChange={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Website"), {
+      target: { value: "  https://northside.example  " },
+    });
+    fireEvent.change(screen.getByLabelText("Phone"), {
+      target: { value: "517-555-0100" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+
+    // Typed after the request left: not part of this save.
+    fireEvent.change(screen.getByLabelText("Phone"), {
+      target: { value: "517-555-0177" },
+    });
+    await act(async () => {
+      finishSave();
+    });
+
+    // A submitted field re-bases onto its stored (trimmed) form ...
+    expect(screen.getByLabelText("Website")).toHaveValue("https://northside.example");
+    // ... but the later typing survives instead of snapping back.
+    expect(screen.getByLabelText("Phone")).toHaveValue("517-555-0177");
   });
 });
 
@@ -594,12 +1042,17 @@ describe("person profile fields", () => {
   });
 });
 
+const disclosureSwitch = () =>
+  screen.getByRole("switch", { name: "Add the disclosure to every post" });
+
 describe("FTC team-member disclosure setting", () => {
   it("defaults to ON for a dealership that has never touched the setting", () => {
     renderSettings();
-    expect(screen.getByRole("radio", { name: /add the disclosure/i })).toHaveAttribute(
-      "aria-checked",
-      "true",
+    openWorkflow();
+    expect(disclosureSwitch()).toHaveAttribute("aria-checked", "true");
+    // The FTC explanation is the switch's description, word for word.
+    expect(disclosureSwitch()).toHaveAccessibleDescription(
+      "The FTC requires a salesperson posting about your inventory to say they work here. This line is added to the top of every post, where it stays visible above the \u201csee more\u201d fold.",
     );
     // The live preview proves the wording a salesperson's post will carry.
     expect(screen.getByText(/Preview: Posted by a .* team member\./)).toBeTruthy();
@@ -610,23 +1063,24 @@ describe("FTC team-member disclosure setting", () => {
     // opt-OUT. If this ever flips to `..._enabled`, every existing dealership
     // silently loses its disclosure and this test fails.
     renderSettings({ ...baseDealer, employee_disclosure_disabled: true });
-    expect(screen.getByRole("radio", { name: /turn it off/i })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    openWorkflow();
+    expect(disclosureSwitch()).toHaveAttribute("aria-checked", "false");
     expect(screen.getByText(/Preview: No disclosure will be added\./)).toBeTruthy();
+    expect(screen.getByLabelText(/wording/i)).toBeDisabled();
   });
 
   it("warns before a manager saves an opt-out", () => {
     renderSettings();
-    fireEvent.click(screen.getByRole("radio", { name: /turn it off/i }));
-    expect(screen.getByRole("alert").textContent).toMatch(
-      /no material-connection disclosure/i,
+    openWorkflow();
+    fireEvent.click(disclosureSwitch());
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Your team\u2019s posts will carry no material-connection disclosure. Confirm this with your compliance officer before saving.",
     );
   });
 
   it("saves the opt-out and custom wording", async () => {
     const { onSaved } = renderSettings();
+    openWorkflow();
     fireEvent.change(screen.getByLabelText(/wording/i), {
       target: { value: "I work at {dealer}. #ad" },
     });
@@ -635,18 +1089,32 @@ describe("FTC team-member disclosure setting", () => {
     expect(saved.employee_disclosure_text).toBe("I work at {dealer}. #ad");
   });
 
-  it("keeps selected-state pills readable in Sunlight (light) theme", () => {
-    // success-100 / warning-100 ink on a pale tinted fill measures about 1.5:1
-    // in light theme, which made the selected pill render as an empty capsule.
+  it("saves the disclosure switched off", async () => {
+    const { onSaved } = renderSettings();
+    openWorkflow();
+    fireEvent.click(disclosureSwitch());
+    const saved = await save(onSaved);
+    expect(saved.employee_disclosure_disabled).toBe(true);
+  });
+
+  it("marks the selected choice neutrally: no brand tint, no per-theme override", () => {
+    // The brand colour belongs to the primary action alone; a selected row
+    // reads by its weight and its radio, on tokens that resolve per theme.
     renderSettings();
-    for (const name of [/add the disclosure/i, /no approval required/i]) {
-      expect(screen.getByRole("radio", { name }).className).toContain(
-        "[.theme-light_&]:text-success-900",
-      );
-    }
-    fireEvent.click(screen.getByRole("radio", { name: /turn it off/i }));
-    expect(screen.getByRole("radio", { name: /turn it off/i }).className).toContain(
-      "[.theme-light_&]:text-warning-900",
+    openWorkflow();
+    requireApproval();
+    const label = screen.getByText("Require manager approval");
+    expect(label.className).toContain("font-semibold");
+    expect(screen.getByText("No approval required").className).not.toContain(
+      "font-semibold",
     );
+    const card = document.body;
+    for (const element of Array.from(card.querySelectorAll("[class]"))) {
+      const className = element.getAttribute("class") || "";
+      expect(className).not.toContain("theme-light");
+      expect(className).not.toContain("bg-brand-tint");
+      expect(className).not.toMatch(/text-(?:success|warning|error|info|primary)-\d/);
+      expect(className).not.toMatch(/\btext-white\b/);
+    }
   });
 });

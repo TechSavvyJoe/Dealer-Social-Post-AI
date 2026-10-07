@@ -5,7 +5,14 @@ import { CLAUDE_MODELS } from "../services/modelConfig";
 
 type Policies = {
   serializeProxyBody: (requestInfo: unknown) => string;
-  initialApprovalStatus: (dealer: unknown) => "pending" | "n_a";
+  initialApprovalStatus: (
+    dealer: unknown,
+    context?: {
+      category?: string;
+      involvesCustomer?: boolean;
+      countApprovedPosts?: () => number;
+    },
+  ) => "pending" | "n_a";
 
   isAllowedProxyPath: (path: string) => boolean;
   isAllowedProxyRequest: (path: string, method: string) => boolean;
@@ -412,6 +419,138 @@ describe("PocketBase request policies", () => {
 
     expect(policies.initialApprovalStatus(requiresApproval)).toBe("pending");
     expect(policies.initialApprovalStatus(noApproval)).toBe("n_a");
+  });
+
+  describe("approval policy", () => {
+    const store = (requiresApproval: boolean, policy: unknown) => ({
+      getBool: (field: string) => field === "requires_approval" && requiresApproval,
+      getString: (field: string) =>
+        field === "approval_policy"
+          ? typeof policy === "string"
+            ? policy
+            : JSON.stringify(policy)
+          : "",
+    });
+    const never = () => {
+      throw new Error("the approved-post count must not be read for this policy");
+    };
+
+    it("never turns review on for a store that has it off", () => {
+      for (const policy of [
+        { mode: "always" },
+        { mode: "per_category", categories: ["deliveries"] },
+        { mode: "first_n", firstN: 3 },
+      ]) {
+        expect(
+          policies.initialApprovalStatus(store(false, policy), {
+            category: "deliveries",
+            involvesCustomer: true,
+            countApprovedPosts: () => 0,
+          }),
+        ).toBe("n_a");
+      }
+    });
+
+    it("reviews every post without a policy, or with one it cannot read", () => {
+      for (const policy of [
+        null,
+        "",
+        "not json",
+        "[]",
+        { mode: "always" },
+        { mode: "none" },
+        { mode: "something_new" },
+        {},
+      ]) {
+        expect(
+          policies.initialApprovalStatus(store(true, policy), {
+            category: "service",
+            involvesCustomer: false,
+            countApprovedPosts: never,
+          }),
+        ).toBe("pending");
+      }
+    });
+
+    it("reviews only the selected categories, and anything it cannot classify", () => {
+      const dealer = store(true, {
+        mode: "per_category",
+        categories: ["promotions", "community"],
+      });
+      const status = (category?: string) =>
+        policies.initialApprovalStatus(dealer, {
+          category,
+          involvesCustomer: false,
+          countApprovedPosts: never,
+        });
+      expect(status("promotions")).toBe("pending");
+      expect(status("community")).toBe("pending");
+      expect(status("service")).toBe("n_a");
+      expect(status("team")).toBe("n_a");
+      expect(status("")).toBe("pending");
+      expect(status(undefined)).toBe("pending");
+      expect(policies.initialApprovalStatus(dealer)).toBe("pending");
+      // An empty or malformed list narrows nothing.
+      for (const categories of [[], undefined, "deliveries"]) {
+        expect(
+          policies.initialApprovalStatus(
+            store(true, { mode: "per_category", categories }),
+            { category: "service", involvesCustomer: false },
+          ),
+        ).toBe("pending");
+      }
+    });
+
+    it("reviews a customer post with deliveries, whatever type the author picked", () => {
+      const dealer = store(true, { mode: "per_category", categories: ["deliveries"] });
+      const status = (category: string, involvesCustomer?: boolean) =>
+        policies.initialApprovalStatus(dealer, { category, involvesCustomer });
+      // A sold-by post maps to "team" and a recall to "service", but both carry
+      // a customer; so does any post filed under another type with a name.
+      expect(status("team", true)).toBe("pending");
+      expect(status("service", true)).toBe("pending");
+      expect(status("inventory", true)).toBe("pending");
+      // Unknown is treated as involving a customer.
+      expect(status("inventory", undefined)).toBe("pending");
+      expect(status("inventory", false)).toBe("n_a");
+      // Deliveries not selected: the customer signal adds nothing.
+      expect(
+        policies.initialApprovalStatus(
+          store(true, { mode: "per_category", categories: ["promotions"] }),
+          { category: "team", involvesCustomer: true },
+        ),
+      ).toBe("n_a");
+    });
+
+    it("reviews a person until enough of their posts were approved", () => {
+      const dealer = store(true, { mode: "first_n", firstN: 3 });
+      const status = (countApprovedPosts?: () => number) =>
+        policies.initialApprovalStatus(dealer, {
+          category: "service",
+          involvesCustomer: false,
+          countApprovedPosts,
+        });
+      expect(status(() => 0)).toBe("pending");
+      expect(status(() => 2)).toBe("pending");
+      expect(status(() => 3)).toBe("n_a");
+      expect(status(() => 40)).toBe("n_a");
+      expect(status(() => NaN)).toBe("pending");
+      expect(status(() => -1)).toBe("pending");
+      expect(status(() => 2.5)).toBe("pending");
+      expect(
+        status(() => {
+          throw new Error("database is locked");
+        }),
+      ).toBe("pending");
+      expect(status(undefined)).toBe("pending");
+      for (const firstN of [0, -2, 1.5, "abc", undefined]) {
+        expect(
+          policies.initialApprovalStatus(store(true, { mode: "first_n", firstN }), {
+            countApprovedPosts: () => 99,
+          }),
+        ).toBe("pending");
+      }
+    });
   });
 
   it("applies tighter budgets only to expensive generation starts", () => {
@@ -1225,7 +1364,25 @@ You are a strict visual quality-control inspector for an automotive dealership i
     );
     expect(hook).toContain("policies.buildOpenAIImageRequest(requestInfo.data)");
     expect(hook).toContain("policies.buildAnthropicMessageRequest(");
-    expect(hook).toContain("policies.initialApprovalStatus(dealer)");
+    // The narrowing inputs are server-resolved: the scenario's own category,
+    // the release/customer-story signal, and a count of posts a MANAGER
+    // approved for the session's own person — never a field from the body,
+    // and never a count the author can raise by posting.
+    const approvalCall = hook.slice(
+      hook.indexOf("policies.initialApprovalStatus(dealer, {"),
+      hook.indexOf("let caption = helpers.assertString("),
+    );
+    expect(approvalCall).toContain(
+      'category: approvalMapping ? approvalMapping.category : ""',
+    );
+    expect(approvalCall).toContain("releaseRequired ||");
+    expect(approvalCall).toContain('approvalMapping.kind === "customer_story"');
+    expect(approvalCall).toContain("{:dealer} AND salesperson_id = {:person} ");
+    expect(approvalCall).toContain("AND approval_status = 'approved'");
+    expect(approvalCall).toContain(
+      "bind({ dealer: dealer.id, person: salespersonId })",
+    );
+    expect(approvalCall).not.toContain("body.");
     expect(hook).toContain("helpers.ensureAdminAccountProvisioned(");
     expect(hook).not.toContain("vertex_credentials_set");
     expect(hook).not.toContain("requestInfo.body");

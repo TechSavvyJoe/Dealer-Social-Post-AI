@@ -147,9 +147,44 @@ export interface PostShareSummary {
   last_via: PostShareVia;
   /** Distinct destinations, most recent first. */
   channels: string[];
+  /**
+   * Completed share-sheet events, counted apart from the latest event so a
+   * later download or copy cannot hide an earlier share. Only these may be
+   * labelled "Shared". Absent from an older backend.
+   */
+  sheet_count?: number;
+  /** Destination of the latest share-sheet event; "" when there is none. */
+  last_sheet_channel?: string;
+  /** Server-written time of the latest share-sheet event; "" when there is none. */
+  last_sheet_at?: string;
 }
 
 const POST_SHARE_VIAS: readonly PostShareVia[] = ["share_sheet", "download", "copy"];
+
+/**
+ * The share-sheet fields, only when the server sent them. A malformed count
+ * reads as no share sheet, so the UI never claims a share it cannot prove.
+ */
+const projectShareSheetFields = (
+  value: Record<string, unknown>,
+): Pick<PostShareSummary, "sheet_count" | "last_sheet_channel" | "last_sheet_at"> => {
+  if (value.sheet_count === undefined) return {};
+  const sheetCount =
+    typeof value.sheet_count === "number" && Number.isFinite(value.sheet_count)
+      ? Math.max(0, Math.floor(value.sheet_count))
+      : 0;
+  return {
+    sheet_count: sheetCount,
+    last_sheet_channel:
+      sheetCount > 0 && typeof value.last_sheet_channel === "string"
+        ? value.last_sheet_channel
+        : "",
+    last_sheet_at:
+      sheetCount > 0 && typeof value.last_sheet_at === "string"
+        ? value.last_sheet_at
+        : "",
+  };
+};
 
 /**
  * Client projection of the server's share summary. A missing field (older
@@ -183,11 +218,14 @@ export const projectShareSummary = (
     last_channel: lastChannel,
     last_via: lastVia,
     channels: channels.length > 0 ? channels : [lastChannel],
+    ...projectShareSheetFields(value),
   };
 };
 
 export interface PostApprovalStatus {
   id: string;
+  /** Revision after the latest server-side write (absent from an older backend). */
+  post_revision?: string;
   approval_status: ApprovalStatus;
   approved_by?: string;
   rejection_reason?: string;
@@ -195,6 +233,10 @@ export interface PostApprovalStatus {
   image_review_required?: boolean;
 }
 
+/**
+ * Marking a finished render sets `has_video` without advancing the post's
+ * revision, so the response carries no compare-and-set token to adopt.
+ */
 export interface PostVideoStatus {
   id: string;
   has_video: true;
