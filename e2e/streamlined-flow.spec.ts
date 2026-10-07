@@ -32,8 +32,7 @@ const dataUrl = `data:image/jpeg;base64,${photo.toString("base64")}`;
 type Json = Record<string, unknown>;
 /** What a test answers for one request; undefined falls through to the shared stubs. */
 type Reply =
-  | { status?: number; json?: unknown; body?: Buffer; contentType?: string }
-  | "hold";
+  { status?: number; json?: unknown; body?: Buffer; contentType?: string } | "hold";
 type Override = (request: Request, path: string) => Reply | undefined;
 
 interface Api {
@@ -125,10 +124,14 @@ function defaultReply(
       json: {
         role,
         dealer,
-        person: { ...person, role: role === "dealer_admin" ? "manager" : "salesperson" },
+        person: {
+          ...person,
+          role: role === "dealer_admin" ? "manager" : "salesperson",
+        },
       },
     };
-  if (method === "POST" && path === "/api/telemetry") return { json: { success: true } };
+  if (method === "POST" && path === "/api/telemetry")
+    return { json: { success: true } };
   if (method === "GET" && path === "/api/app/health")
     return {
       json: { ok: true, capabilities: { veoNegativePrompt: true }, releaseSha: "test" },
@@ -425,13 +428,17 @@ test("Create post stores the signature first, Cancel keeps the draft, and the re
   await expect.poll(() => state.held.length).toBeGreaterThan(0);
   const firstProxy = state.calls.findIndex((call) => call.includes(" /api/proxy/"));
   const releasePost = state.calls.indexOf("POST /api/app/photo_releases");
-  expect(releasePost, "the signature is stored before any provider call").toBeGreaterThanOrEqual(0);
+  expect(
+    releasePost,
+    "the signature is stored before any provider call",
+  ).toBeGreaterThanOrEqual(0);
   expect(releasePost).toBeLessThan(firstProxy);
 
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Creating your post…" }),
-  ).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "Creating your post…" })).toHaveCount(
+    0,
+    { timeout: 15_000 },
+  );
   // Back on Details with everything kept: the signature and the note.
   await expect(signatureRow.getByText("Signed", { exact: true })).toBeVisible();
   await expect(signatureRow.getByText("Alex Johnson", { exact: true })).toBeVisible();
@@ -452,7 +459,9 @@ test("Create post stores the signature first, Cancel keeps the draft, and the re
     state.calls.filter((call) => call === "POST /api/app/photo_releases"),
   ).toHaveLength(1);
   const savedAt = state.calls.indexOf("POST /api/app/posts");
-  expect(savedAt).toBeGreaterThan(state.calls.lastIndexOf("POST /api/app/photo_releases"));
+  expect(savedAt).toBeGreaterThan(
+    state.calls.lastIndexOf("POST /api/app/photo_releases"),
+  );
   expect(
     state.calls.indexOf("POST /api/app/photo_releases/qa-release-1/link-post"),
   ).toBeGreaterThan(savedAt);
@@ -612,9 +621,9 @@ test("restored Post prepares direct sharing and follows Sunlight preference", as
     await expect
       .poll(() => clipboardWrites(page).then((writes) => writes.length))
       .toBeGreaterThan(0);
-    expect((await clipboardWrites(page))[0].startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`)).toBe(
-      true,
-    );
+    expect(
+      (await clipboardWrites(page))[0].startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`),
+    ).toBe(true);
     // The receipt carries the channel, the method and the saved revision.
     await expect.poll(() => state.shares.length).toBe(1);
     expect(state.shares[0]).toEqual({
@@ -638,9 +647,9 @@ test("restored Post prepares direct sharing and follows Sunlight preference", as
     await expect
       .poll(() => clipboardWrites(page).then((writes) => writes.length))
       .toBe(1);
-    expect((await clipboardWrites(page))[0].startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`)).toBe(
-      true,
-    );
+    expect(
+      (await clipboardWrites(page))[0].startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`),
+    ).toBe(true);
     await expect.poll(() => state.shares.length).toBe(1);
     expect(state.shares[0]).toEqual({
       channel: "facebook_feed",
@@ -660,7 +669,8 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
     salesperson_id: person.id,
     salesperson_name: person.name,
     scenario_id: "team_anniversary",
-    caption: "Five great years on the Northline Motors team. Thank you for every handshake!",
+    caption:
+      "Five great years on the Northline Motors team. Thank you for every handshake!",
     disclosures: "",
     platform_ids: ["facebook_feed", "linkedin"],
     platform_captions: {},
@@ -775,7 +785,8 @@ test("dealership setup exposes store instructions and advanced workflow, without
   // The setup progress bar sits under the section rail from lg; below lg the
   // sections are a chip row with no bar.
   const progress = page.getByRole("progressbar", { name: "Store setup progress" });
-  if ((page.viewportSize()?.width ?? 1440) >= 1024) await expect(progress).toBeVisible();
+  if ((page.viewportSize()?.width ?? 1440) >= 1024)
+    await expect(progress).toBeVisible();
   else await expect(progress).toBeHidden();
   await quality(page);
   await shot(page, "manager-profile", info.project.name);
