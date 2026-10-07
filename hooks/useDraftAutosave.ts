@@ -152,6 +152,15 @@ export const useDraftAutosave = ({
       try {
         const updated = await updatePostDraft(postId, {
           ...draft,
+          // Website handoff stages the exact visible image even when it was
+          // already saved. Compare inside the serialized write so a prior
+          // queued save can establish that image before this one runs. A
+          // duplicate file upload would replace the server image and clear
+          // otherwise valid current-creative share receipts.
+          imageDataUrl:
+            draft.imageDataUrl !== lastSyncedDraftRef.current.image
+              ? draft.imageDataUrl
+              : undefined,
           expectedPostRevision,
           grounding,
         });

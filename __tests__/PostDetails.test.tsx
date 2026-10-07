@@ -476,4 +476,32 @@ describe("PostDetails", () => {
     fireEvent.click(create);
     expect(onGenerate).toHaveBeenCalledOnce();
   });
+
+  it.each([false, true])(
+    "uses the destination's enabled flag for website generation (%s)",
+    async (enabled) => {
+      const { listWebsiteDestinations } = await import("../services/websitePublishing");
+      vi.mocked(listWebsiteDestinations).mockResolvedValueOnce([
+        {
+          id: "customer-hub",
+          label: "Customer Hub",
+          siteUrl: "https://example.com",
+          enabled,
+          mode: "private_draft",
+        },
+      ]);
+      useAppStore.setState({
+        postDraft: { categoryId: "inventory", scenarioId: "new_arrival" },
+      });
+      const onGenerate = vi.fn();
+      renderDetails({ onGenerate });
+      const create = screen.getByRole("button", { name: "Create post" });
+      await waitFor(() => expect(create).toBeEnabled());
+      fireEvent.click(create);
+      expect(onGenerate).toHaveBeenCalledOnce();
+      expect(onGenerate.mock.lastCall?.[5]).toEqual(
+        expect.objectContaining({ websiteEnabled: enabled }),
+      );
+    },
+  );
 });

@@ -138,7 +138,7 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
     void listWebsiteDestinations(controller.signal)
       .then((items) => {
         if (!active) return;
-        setWebsiteReady(items.length > 0);
+        setWebsiteReady(items.some((item) => item.enabled));
         setWebsiteDiscovery("ready");
       })
       .catch(() => {
