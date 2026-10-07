@@ -716,15 +716,26 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
     const revisionAtShare = state.drafts.length ? DRAFT_REVISION : saved.updated;
     await share.click();
     await expect.poll(() => shareCalls(page).then((calls) => calls.length)).toBe(1);
-    // LinkedIn takes text with the file: it leads with the employee disclosure.
     const [sheet] = await shareCalls(page);
     expect(sheet.files).toBe(1);
-    expect(sheet.text?.startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`)).toBe(true);
-    expect(sheet.text).toContain("Five great years on the Northline Motors team.");
+    // The caption is copied before the sheet opens, and it leads with the
+    // employee disclosure.
     await expect
       .poll(() => clipboardWrites(page).then((writes) => writes.length))
       .toBeGreaterThan(0);
-    expect((await clipboardWrites(page))[0]).toBe(sheet.text);
+    const [copied] = await clipboardWrites(page);
+    expect(copied.startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`)).toBe(true);
+    expect(copied).toContain("Five great years on the Northline Motors team.");
+    // LinkedIn takes that text with the file, except on Apple touch devices:
+    // Safari can accept file + text and then drop it, so iOS gets a file-only
+    // sheet and the copied caption is the paste path (services/publishTargets.ts).
+    const appleTouch = await page.evaluate(
+      () =>
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1),
+    );
+    if (appleTouch) expect(sheet.text).toBeUndefined();
+    else expect(sheet.text).toBe(copied);
     await expect.poll(() => state.shares.length).toBe(1);
     expect(state.shares[0]).toEqual({
       channel: "linkedin",
