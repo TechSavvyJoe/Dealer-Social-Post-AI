@@ -297,7 +297,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
             type="button"
             variant="ghost"
             size="sm"
-            className="-mr-3 min-h-11 px-3 text-brand-ink"
+            className="-mr-3 min-h-11 px-3"
             onClick={() =>
               setSignatureMethod((method) => (method === "draw" ? "type" : "draw"))
             }
