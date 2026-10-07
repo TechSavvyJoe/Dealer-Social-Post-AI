@@ -4,7 +4,6 @@ import {
   type APIResponse,
   type BrowserContext,
   type Page,
-  type Request,
   type Response,
 } from "@playwright/test";
 
@@ -75,7 +74,11 @@ const handOffSessionSwapsToLoopbackShim = async (
 ) => {
   // A fulfilled response does not expose Set-Cookie to the page, so the
   // bearer each swap minted is kept here, read from the server's response.
-  const mintedBy = new WeakMap<Request, string>();
+  // Keyed by path, not by Request: WebKit hands waitForResponse a different
+  // Request object for a fulfilled route than the one this handler saw. Swaps
+  // run one at a time, and each read consumes its entry, so a stale bearer
+  // from an earlier swap can never answer for a later one.
+  const mintedByPath = new Map<string, string>();
   await page.route(
     /\/api\/app\/session\/(?:impersonate|exit-impersonate)$/,
     async (route) => {
@@ -86,7 +89,7 @@ const handOffSessionSwapsToLoopbackShim = async (
         .map(({ value }) => value.match(/^dealer_session=([^;,\s]+)/)?.[1])
         .find(Boolean);
       if (response.ok() && minted) {
-        mintedBy.set(route.request(), minted);
+        mintedByPath.set(new URL(route.request().url()).pathname, minted);
         await installLoopbackSessionCookie(context, page, `dealer_session=${minted}`);
       }
       await route.fulfill({ response });
@@ -95,7 +98,9 @@ const handOffSessionSwapsToLoopbackShim = async (
   return {
     /** The dealer_session cookie the server minted for this swap's response. */
     mintedCookie: (response: Response): string => {
-      const minted = mintedBy.get(response.request());
+      const path = new URL(response.url()).pathname;
+      const minted = mintedByPath.get(path);
+      mintedByPath.delete(path);
       expect(
         minted,
         "the session swap should mint a dealer_session cookie",
