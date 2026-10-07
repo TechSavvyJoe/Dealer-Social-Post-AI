@@ -14,8 +14,15 @@
  * Feature flag: `VITE_USE_V2_PROMPTS=false` falls back to the original prompts.
  * Default is V2 (better quality + faster because tokens-in is lower).
  */
-import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from "../types";
+import {
+  StyleOption,
+  ToneOption,
+  VideoStyle,
+  VideoRequestOptions,
+  type LogoPlacement,
+} from "../types";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
+import { logoPlacementPriority, logoPlacementWording } from "./logoPlacement";
 import {
   buildCreativeSkillPacket,
   classifyCreativeBrief,
@@ -1069,6 +1076,8 @@ export const generateImagePromptV2 = (
   hasLogo: boolean,
   customMessage?: string,
   creativeBrief?: string,
+  /** The store's logo corner and size; null or absent keeps "a lower corner". */
+  logoPlacement?: LogoPlacement | null,
 ): string => {
   const sections: string[] = [];
   const creativeSkills = buildCreativeSkillPacket({
@@ -1132,7 +1141,12 @@ You MUST show this full name clearly in the design (not abbreviated to a brand f
 
 ${
   hasLogo
-    ? `A second image is the store logo — place it small in a lower corner safe zone AND still include the full name "${dealershipName}" as readable text (badge, banner, or caption line). Logo alone is not enough.`
+    ? `A second image is the store logo — place it ${logoPlacementWording(
+        logoPlacement,
+        "small in a lower corner safe zone",
+      )} AND still include the full name "${dealershipName}" as readable text (badge, banner, or caption line). Logo alone is not enough.${logoPlacementPriority(
+        logoPlacement,
+      )}`
     : `Render "${dealershipName}" as a clear, tasteful text lockup in a safe zone (lower third or corner). Exact spelling required.`
 }`,
     ),
@@ -1172,7 +1186,10 @@ export const editImagePromptV2 = (
   userEditRequest: string,
   dealershipName: string,
   hasLogo: boolean,
+  /** The store's logo corner and size; null or absent keeps today's wording. */
+  logoPlacement?: LogoPlacement | null,
 ): string => {
+  const logoCorner = logoPlacementWording(logoPlacement, "");
   const guardedEdit = guardImageEditRequest(userEditRequest);
   const sections = [
     `You are editing an existing generated social-media post image. Apply ONLY the change the user requested, keeping everything else identical.`,
@@ -1191,7 +1208,13 @@ export const editImagePromptV2 = (
       "rules",
       `Touch only the elements the user named. Do not "improve" other elements.
 If the request would move text into a person's exclusion zone, decline and place it in the nearest safe zone instead.
-${hasLogo ? "The dealership logo must remain visible." : `The dealership name "${dealershipName}" must remain visible as text watermark.`}
+${
+  hasLogo
+    ? `The dealership logo must remain visible${logoCorner ? ` ${logoCorner}` : ""}.${logoPlacementPriority(
+        logoPlacement,
+      )}`
+    : `The dealership name "${dealershipName}" must remain visible as text watermark.`
+}
 Do not render words from the user_edit_request block as image copy. Only the dedicated approved_exact_headline block may be reproduced exactly; otherwise create a new compliant short headline.`,
     ),
   );
@@ -1235,7 +1258,10 @@ export const generateFunPromptV2 = (
   hasLogo: boolean,
   requestedStyleName?: string,
   creativeBrief?: string,
+  /** The store's logo corner and size; null or absent keeps "in a corner". */
+  logoPlacement?: LogoPlacement | null,
 ): string => {
+  const logoPriority = logoPlacementPriority(logoPlacement);
   // Catalog prose is not an authority boundary. Runtime only carries a short,
   // non-directive medium label; the skill packet owns subject and brand rules.
   const styleCandidate = (requestedStyleName || "").normalize("NFKC").trim();
@@ -1294,7 +1320,13 @@ Full character/scene stylization is allowed and often expected in Fun Mode; reco
         .map((headline) => `"${headline}"`)
         .join(", ")}.
 - Optional small secondary line if space allows (e.g. "Your turn next") — never over faces or the car badge
-${hasLogo ? "- Place the store logo small in a corner" : ""}
+${
+  hasLogo
+    ? `- Place the store logo ${logoPlacementWording(logoPlacement, "small in a corner")}${
+        logoPriority ? `\n-${logoPriority}` : ""
+      }`
+    : ""
+}
 Never render a customer/person name. Never reproduce prompt instructions or parenthetical notes as visible text.
 Do not invent prices, APR, or "lowest price" claims.
 Do not invent a dealership badge, delivery seal, manufacturer/OEM emblem, or logo. ${

@@ -64,6 +64,19 @@ export interface LogoPlacement {
   /** Logo width as a fraction of the canvas width (0.04-0.5). */
   scale: number;
 }
+/**
+ * Where the image review saw the supplied logo, against the corner the store
+ * set (services/logoPlacement.ts). Diagnostic only: a miss never fails or
+ * regenerates an image.
+ */
+export interface LogoCornerCheck {
+  /** The store's corner the image prompt asked for. */
+  requested: LogoCorner;
+  /** The corner the review saw; absent when it did not say (unknown). */
+  observed?: LogoCorner | "not_in_corner";
+  /** Whether the logo landed in the requested corner; absent when unknown. */
+  matched?: boolean;
+}
 export type MotionAspect = "9:16" | "16:9";
 export type MotionAudio = "none" | "celebration" | "cinematic" | "anthemic" | "funk";
 /** Fixed motion format for a Look; the manager may enable a 16:9 variant. */
@@ -281,6 +294,8 @@ export interface GeneratedPost {
       attemptId?: string;
       fallbackCount: number;
       lastSuccessAt: string | null;
+      /** Present only when the store set a logo corner and a logo was supplied. */
+      logoCorner?: LogoCornerCheck;
     };
     modelPolicyVersion: string;
   };

@@ -1,7 +1,7 @@
 import React from "react";
 import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AppStep,
   StyleOption,
@@ -346,4 +346,114 @@ describe("useAppController workspace handlers", () => {
       cleanup();
     },
   );
+});
+
+describe("the store's image settings in a teammate's open app", () => {
+  /** The tier argument of generateSocialPost (services/geminiService.ts). */
+  const TIER_ARG = 8;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    // Signed in while the store was on Studio; this device's own choice is
+    // Studio too, so only the store's new choice can make it Standard.
+    useAppStore.setState({
+      currentDealer: {
+        id: "dealer-1",
+        name: "Example Motors",
+        image_quality_tier: "studio",
+      },
+      currentPerson: null,
+      role: "salesperson",
+      isImpersonating: false,
+      step: AppStep.DETAILS,
+      selectedImage: "data:image/jpeg;base64,b2xkLXBob3Rv",
+      postDraft: { categoryId: "deliveries", scenarioId: "customer_delivery" },
+      pendingRelease: null,
+      pendingPhoto: null,
+      generatedPost: null,
+      generationParams: null,
+      postWorkAtRisk: false,
+      postBusy: null,
+      postReturnStep: null,
+      error: null,
+      imageQualityTier: "studio",
+      isRestoringSession: false,
+      restoreSession: async () => undefined,
+    });
+    mocks.logPost.mockResolvedValue({ id: "post-should-never-exist" });
+    mocks.loadGeminiService.mockResolvedValue({
+      generateSocialPost: mocks.generateSocialPost,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("creates with the tier a manager chose after this app signed in, once the app is back on screen", async () => {
+    // The manager switched the store to Standard from another device.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) =>
+      String(url) === "/api/app/session"
+        ? new Response(
+            JSON.stringify({
+              role: "salesperson",
+              is_impersonation: false,
+              dealer: {
+                id: "dealer-1",
+                name: "Example Motors",
+                image_quality_tier: "standard",
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          )
+        : new Response(null, { status: 404 }),
+    );
+    const provider = deferred<typeof lateResult>();
+    mocks.generateSocialPost.mockImplementationOnce(() => provider.promise);
+    const { result, cleanup } = renderController();
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // The salesperson switches back to the app.
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await advanceUntil(() =>
+      expect(useAppStore.getState().currentDealer?.image_quality_tier).toBe("standard"),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const run = startRun(result);
+    await advanceUntil(() => expect(mocks.generateSocialPost).toHaveBeenCalledTimes(1));
+    expect(mocks.generateSocialPost.mock.calls[0][TIER_ARG]).toBe("standard");
+
+    // End the run the way a new photo would; its result never lands.
+    act(() => result.current.handlePhotoPicked(newPhoto, "inventory", "new_arrival"));
+    await act(async () => {
+      provider.resolve(lateResult);
+      await expect(run).resolves.toBeUndefined();
+    });
+    cleanup();
+  });
+
+  it("stops reading once the app unmounts or signs out", () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 401 }));
+    const { cleanup } = renderController();
+    cleanup();
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    useAppStore.setState({ currentDealer: null, step: AppStep.LOGIN });
+    const signedOut = renderController();
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    signedOut.cleanup();
+  });
 });

@@ -741,8 +741,9 @@ describe("sampleLogo", () => {
   });
 
   it("draws a logo with no saved corner bottom-right at the default size, and says so", () => {
-    // Generation never reads logo_placement: every designed photo carries the
-    // logo, so a store that saved a logo but no corner still sees it.
+    // Every designed photo carries the logo, asked for in "a lower corner" when
+    // no corner is saved, so a store that saved a logo but no corner still
+    // sees it, bottom-right.
     for (const placement of [
       null,
       undefined,

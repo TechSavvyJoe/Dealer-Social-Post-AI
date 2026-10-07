@@ -310,11 +310,13 @@ const LOGO_SCALE_DEFAULT = 0.18;
 
 /**
  * Where the sample draws a logo whose corner was never saved (the form saves
- * `logo_placement: null` until a corner is picked). Generation never reads
- * logo_placement: every designed photo is given the logo whatever corner is
- * saved (services/geminiService.ts), so a sample without it would understate
- * the post. The Showroom Look's own description puts it bottom-right
- * (LOOK_DEFINITIONS in services/creativeSystem.ts).
+ * `logo_placement: null` until a corner is picked). With a saved corner, new
+ * designed photos ask for the logo there at the saved size
+ * (services/logoPlacement.ts); without one the image model picks the corner
+ * (a new post asks for "a lower corner"), so the sample shows one:
+ * bottom-right. Every designed photo is given the logo
+ * (services/geminiService.ts), so a sample without it would understate the
+ * post.
  */
 const LOGO_CORNER_DEFAULT: LogoCorner = "bottom_right";
 
@@ -379,8 +381,10 @@ const lookNotes = (dealer: Dealer): SampleNote[] => {
     });
   }
   // The logo reaches every designed photo (services/creativeSkills.ts, and the
-  // image review in services/geminiService.ts fails a design without it). The
-  // saved corner is not sent to the designer, so no note claims a placement.
+  // image review in services/geminiService.ts fails a design without it). New
+  // designed photos ask for the saved corner and size (services/logoPlacement.ts),
+  // but the image model can still put the logo elsewhere, so no note promises
+  // a placement.
   if (sampleShowsLogo(dealer)) {
     notes.push({ glyph: "dash", text: "Your logo. Designed photos carry it." });
   } else {

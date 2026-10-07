@@ -11,6 +11,8 @@ import {
   VideoStyle,
   VideoRequestOptions,
   type ImageAspectRatio,
+  type LogoCornerCheck,
+  type LogoPlacement,
 } from "../types";
 import {
   generateImagePrompt,
@@ -23,6 +25,12 @@ import {
 } from "./promptConfig";
 import { generateVideoNegativePrompt } from "./promptsV2";
 import { classifyCreativeBrief } from "./creativeSkills";
+import {
+  logoCornerCheck,
+  logoPlacementWording,
+  readObservedLogoCorner,
+  storeLogoPlacement,
+} from "./logoPlacement";
 import {
   createBlockedContentError,
   isBlockedContentError,
@@ -189,7 +197,9 @@ const isAbortError = (error: unknown): boolean =>
  * (`GEMINI_RESPONSE_SCHEMAS` in pb_hooks/requestPolicies.js, listed as
  * `responseSchemaIds` in config/gemini-model-policy.json). The browser sends
  * only the id; the proxy swaps it for the real `responseJsonSchema`, so no
- * schema body ever travels from an untrusted client.
+ * schema body ever travels from an untrusted client. This app no longer sends
+ * `captionPack` (one caption ships to every channel); the server keeps that
+ * schema for installed copies of older builds.
  */
 export const RESPONSE_SCHEMA_IDS = {
   visionReview: "vision_review_v1",
@@ -679,6 +689,9 @@ const GeneratedImageTextReviewSchema = z
     hasDistinctStyleSignature: z.boolean().optional(),
     hasEnvironmentalDepthIntegration: z.boolean().optional(),
     hasCleanTypography: z.boolean().optional(),
+    // Read leniently (readObservedLogoCorner): an odd answer here is unknown,
+    // never a reason to reject the whole review.
+    logoCorner: z.unknown().optional(),
   })
   .strict();
 
@@ -716,6 +729,11 @@ export interface GeneratedImageTextReview {
   /** Dimensional graphics match the photographed perspective, light, and occlusion. */
   hasEnvironmentalDepthIntegration?: boolean;
   hasCleanTypography?: boolean;
+  /**
+   * Where the designed logo sits, asked only when the store set a corner.
+   * Absent = unknown. Diagnostic only: it never adds a violation.
+   */
+  logoCorner?: LogoCornerCheck["observed"];
   /** Derived locally; false means the reviewer omitted a required safety field. */
   safetyReviewComplete?: boolean;
 }
@@ -731,7 +749,16 @@ interface GeneratedImageReviewContext {
   };
   /** Original input used for source-vs-output identity and scene comparison. */
   sourceImageBase64Url?: string;
+  /**
+   * The store's logo corner. With a supplied logo, the reviewer also reports
+   * the corner it sees; without a placement the prompt is unchanged.
+   */
+  logoPlacement?: LogoPlacement | null;
 }
+
+/** True when the reviewer is asked where the supplied logo landed. */
+const asksLogoCorner = (context: GeneratedImageReviewContext): boolean =>
+  Boolean(context.logoSupplied) && storeLogoPlacement(context.logoPlacement) !== null;
 
 /**
  * Strict parse first, brace-scan second.
@@ -817,7 +844,12 @@ Marketing overlay policy (this matches the design brief the image was created fr
 }
 - Exclude text naturally photographed in the scene, such as vehicle badges, building signs, clothing, documents, and license plates. Count only designed promotional overlay copy.
 - If text is unreadable, ambiguous, or you cannot confidently distinguish promotional overlay from scene text, set uncertain=true. Only set compliant=false when you can identify a concrete violation.
-- Set logoPresent=true only when a DESIGNED dealership logo graphic (an added overlay/watermark, not signage photographed in the scene) is visible, otherwise false.
+- Set logoPresent=true only when a DESIGNED dealership logo graphic (an added overlay/watermark, not signage photographed in the scene) is visible, otherwise false.${
+  asksLogoCorner(context)
+    ? `\n- Set logoCorner to the corner of the image where that designed logo sits: top_left, top_right, bottom_left, or bottom_right. Use not_in_corner when it is visible but not in a corner, and omit logoCorner when no designed logo is visible. This is a placement note only: never add a violation or change compliant because of it.
+- The store asked for its logo ${logoPlacementWording(context.logoPlacement, "")}. That position and size are the store's choice: they must never lower visualQualityScore, set isPlatformAppropriate=false, or add a violation.`
+    : ""
+}
 
 Visual craft target${context.requestedStyle ? ` (${context.requestedStyle})` : ""}:
 - Score the finished social creative from 1 to 5. One means broken/unstyled, three means usable but still needs another creative pass, four means high-end and campaign-ready, and five means exceptional campaign craft. Scores below four must use below_campaign_quality.
@@ -828,7 +860,9 @@ Visual craft target${context.requestedStyle ? ` (${context.requestedStyle})` : "
 - Set hasEnvironmentalDepthIntegration=true only when visible dimensional graphics actually inherit the photographed scene's perspective, light direction, occlusion, contact shadow, reflected color, and depth-of-field. Floating sticker shadows or flat pasted-on 3D text are false.${context.requestedStyle === StyleOption.DepthPop ? " For 3D Depth Pop this field is required and false must use unintegrated_3d_graphics." : " For styles without dimensional graphics, omit this field."}
 - Set hasCleanTypography=false and use malformed_or_misspelled_text for warped, doubled, melted, clipped, or misspelled designed lettering.
 
-detectedMarketingText must contain each overlay text block as its own array entry, exactly as rendered. detectedPersonalNames contains only designed personal/customer names, never words that are part of the exact dealership business name. marketingWordCount and marketingCharacterCount are totals across all blocks. violations must use only the allowed enum values. Return only the JSON object with keys: compliant, uncertain, detectedMarketingText, marketingWordCount, marketingCharacterCount, hasFullSentence, hasHashtag, hasUrlOrPhone, violations, logoPresent, logoMatchesSuppliedAsset, hasUnexpectedPersonalName, detectedPersonalNames, dealershipNamePresent, dealershipNameCorrect, hasFabricatedBrandMark, hasInstructionText, hasSocialUiChrome, isIllustrationOrCharacterRender, preservesSourceSubjects, preservesVehicleIdentity, preservesSourceComposition, isRespectfulAndFlattering, isPlatformAppropriate, visualQualityScore, hasDistinctStyleSignature, hasEnvironmentalDepthIntegration, hasCleanTypography. Never include explanations or image details outside the JSON.`;
+detectedMarketingText must contain each overlay text block as its own array entry, exactly as rendered. detectedPersonalNames contains only designed personal/customer names, never words that are part of the exact dealership business name. marketingWordCount and marketingCharacterCount are totals across all blocks. violations must use only the allowed enum values. Return only the JSON object with keys: compliant, uncertain, detectedMarketingText, marketingWordCount, marketingCharacterCount, hasFullSentence, hasHashtag, hasUrlOrPhone, violations, logoPresent, logoMatchesSuppliedAsset, hasUnexpectedPersonalName, detectedPersonalNames, dealershipNamePresent, dealershipNameCorrect, hasFabricatedBrandMark, hasInstructionText, hasSocialUiChrome, isIllustrationOrCharacterRender, preservesSourceSubjects, preservesVehicleIdentity, preservesSourceComposition, isRespectfulAndFlattering, isPlatformAppropriate, visualQualityScore, hasDistinctStyleSignature, hasEnvironmentalDepthIntegration, hasCleanTypography${
+  asksLogoCorner(context) ? ", logoCorner" : ""
+}. Never include explanations or image details outside the JSON.`;
 
 /**
  * Studio output can be 4K. The publishable result stays untouched, but sending
@@ -1142,8 +1176,14 @@ export const reviewGeneratedImageText = async (
     violations.add("malformed_or_misspelled_text");
   }
 
+  // Diagnostic only: read after every pass/fail decision above and never
+  // part of one, so a logo in another corner costs no extra generation.
+  const { logoCorner: rawLogoCorner, ...reviewFields } = review;
+  const observedLogoCorner = readObservedLogoCorner(rawLogoCorner);
+
   return {
-    ...review,
+    ...reviewFields,
+    ...(observedLogoCorner ? { logoCorner: observedLogoCorner } : {}),
     safetyReviewComplete,
     hasUnexpectedPersonalName,
     detectedPersonalNames,
@@ -1212,9 +1252,14 @@ A prior render exceeded the on-image text budget. Re-render the same creative di
 ${requestedStyle === StyleOption.DepthPop ? "- Rebuild the dimensional graphics as environmental 3D: match the real horizon/perspective, light direction, contact shadow, reflected scene color, depth-of-field, and vehicle-edge occlusion; no flat sticker shadow" : ""}
 </text_compliance_retry>`;
 
-const LOGO_RESTORE_PROMPT = `This is a corrective photo edit of the attached generated image.
+const logoRestorePrompt = (
+  logoPlacement?: LogoPlacement | null,
+): string => `This is a corrective photo edit of the attached generated image.
 
-Use the supplied dealership logo (second attached image) as a small, tasteful watermark in a lower-corner safe zone away from people. If an invented, misspelled, distorted, recolored, or altered imitation is present, remove it and replace it with the exact supplied asset. Do not distort it.
+Use the supplied dealership logo (second attached image) ${logoPlacementWording(
+  logoPlacement,
+  "as a small, tasteful watermark in a lower-corner safe zone away from people",
+)}. If an invented, misspelled, distorted, recolored, or altered imitation is present, remove it and replace it with the exact supplied asset. Do not distort it.
 Change nothing else: preserve all existing text, people, faces, vehicle, background, crop, lighting, and colors.
 Return only the corrected image.`;
 
@@ -1232,6 +1277,8 @@ interface ImageTextComplianceInput {
   requestedStyle?: string;
   allowArtisticTransformation?: boolean;
   sourceImageBase64Url?: string;
+  /** The store's logo corner and size; asked for, never enforced. */
+  logoPlacement?: LogoPlacement | null;
 }
 
 const concreteViolations = (
@@ -1373,6 +1420,7 @@ const enforceGeneratedImageTextCompliance = async ({
   requestedStyle,
   allowArtisticTransformation,
   sourceImageBase64Url,
+  logoPlacement,
   signal,
 }: ImageTextComplianceInput): Promise<ModelRun<string>> => {
   const reviewOrNull = async (
@@ -1389,6 +1437,7 @@ const enforceGeneratedImageTextCompliance = async ({
           logoSupplied: Boolean(logoImagePart),
           logoReferenceImagePart: logoImagePart || undefined,
           sourceImageBase64Url,
+          logoPlacement,
         },
         requestAuthEpoch,
         signal,
@@ -1415,13 +1464,33 @@ const enforceGeneratedImageTextCompliance = async ({
     });
   };
 
+  // Every shipped render leaves through restoreLogoIfMissing, which returns
+  // the render with the review that judged it. With a store corner and a
+  // supplied logo, that review's corner is recorded on the image provenance.
+  // Recording only: no branch above or below reads it.
+  type ReviewedRun = {
+    run: ModelRun<string>;
+    review: GeneratedImageTextReview | null;
+  };
+  const withLogoCornerCheck = ({ run, review }: ReviewedRun): ModelRun<string> => {
+    if (!logoImagePart) return run;
+    const check = logoCornerCheck(logoPlacement, review?.logoCorner);
+    return check ? { ...run, aiMeta: { ...run.aiMeta, logoCorner: check } } : run;
+  };
+
   const restoreLogoIfMissing = async (
     result: ModelRun<string>,
     review: GeneratedImageTextReview | null,
-  ): Promise<ModelRun<string>> => {
-    if (!logoImagePart) return result;
+  ): Promise<ModelRun<string>> =>
+    withLogoCornerCheck(await restoreLogoIfMissingReviewed(result, review));
+
+  const restoreLogoIfMissingReviewed = async (
+    result: ModelRun<string>,
+    review: GeneratedImageTextReview | null,
+  ): Promise<ReviewedRun> => {
+    if (!logoImagePart) return { run: result, review };
     if (review?.logoPresent === true && review.logoMatchesSuppliedAsset === true) {
-      return result;
+      return { run: result, review };
     }
     logTelemetry("image.text_compliance.logo_restore", {});
     let restored: ModelRun<string>;
@@ -1429,7 +1498,7 @@ const enforceGeneratedImageTextCompliance = async ({
       const sourcePart = await imagePartFromDataUrl(result.value, requestAuthEpoch);
       restored = await generateImageWithFallback(
         imageTaskForTier(imageTier),
-        [sourcePart, { text: LOGO_RESTORE_PROMPT }, logoImagePart],
+        [sourcePart, { text: logoRestorePrompt(logoPlacement) }, logoImagePart],
         undefined,
         imageAspectRatio,
         requestAuthEpoch,
@@ -1448,14 +1517,14 @@ const enforceGeneratedImageTextCompliance = async ({
       });
       if (reviewedSafe) {
         reportDegradedShip("logo_restore_failed");
-        return result;
+        return { run: result, review };
       }
       throw new Error("The supplied dealership logo could not be restored safely.");
     }
 
     const restoredReview = await reviewOrNull(restored.value, "logo_restored");
     if (restoredReview?.compliant && !hasUnsafeOverlayContent(restoredReview)) {
-      return restored;
+      return { run: restored, review: restoredReview };
     }
     // The restore pass gets one try. Whatever it produced, the render that
     // reached this point already passed identity/brand review apart from the
@@ -1474,7 +1543,9 @@ const enforceGeneratedImageTextCompliance = async ({
       shipped: keepRestored ? "restored" : "original_render",
     });
     reportDegradedShip("logo_unverified");
-    return keepRestored ? restored : result;
+    return keepRestored
+      ? { run: restored, review: restoredReview }
+      : { run: result, review };
   };
 
   const firstReview = await reviewOrNull(candidate.value, "initial");
@@ -1771,6 +1842,8 @@ export const generateFunSocialPostImage = async (
   imageAspectRatio?: ImageAspectRatio,
   creativeBrief?: string,
   signal?: AbortSignal,
+  /** The store's logo corner and size (`dealer.logo_placement`). */
+  logoPlacement?: LogoPlacement | null,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
   const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url, signal);
@@ -1786,6 +1859,7 @@ export const generateFunSocialPostImage = async (
     logoBase64Url,
     requestedStyle,
     creativeBrief,
+    logoPlacement,
   );
   const reviewedStyleName =
     funStyleCatalog.find(
@@ -1818,6 +1892,7 @@ export const generateFunSocialPostImage = async (
       requestedStyle: reviewedStyleName,
       allowArtisticTransformation: true,
       sourceImageBase64Url: normalisedOriginal,
+      logoPlacement,
       signal,
     })
   ).value;
@@ -1831,6 +1906,8 @@ export const editSocialPostImage = async (
   imageTier: ImageGenerationTier = "standard",
   imageAspectRatio?: ImageAspectRatio,
   signal?: AbortSignal,
+  /** The store's logo corner and size (`dealer.logo_placement`). */
+  logoPlacement?: LogoPlacement | null,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
   const normalisedPrevious = await normaliseDataUrl(previousImageBase64Url, signal);
@@ -1845,6 +1922,7 @@ export const editSocialPostImage = async (
     editPromptString,
     dealershipName,
     logoBase64Url,
+    logoPlacement,
   );
 
   const imageParts: any[] = [{ text: editInstruction }, previousImagePart];
@@ -1871,6 +1949,7 @@ export const editSocialPostImage = async (
       regenerationParts: imageParts,
       regenerationPrompt: editInstruction,
       sourceImageBase64Url: normalisedPrevious,
+      logoPlacement,
       signal,
     })
   ).value;
@@ -2181,34 +2260,6 @@ const generateRawStructuredImageText = async (
   return generated.value;
 };
 
-/**
- * Generate raw structured platform copy without running JSON through the
- * single-caption quality filter. The caller parses the object against the
- * selected platform allowlist and validates every caption independently.
- */
-export const generatePlatformCaptionPack = async (
-  imageBase64Url: string,
-  prompt: string,
-  customerName?: string,
-  customerIdentityRequired = true,
-  signal?: AbortSignal,
-): Promise<string> => {
-  const publicCustomer = toPublicCustomerLabel(customerName);
-  const identityRule = publicCustomer
-    ? `Customer identity rule: the only customer label allowed in any value is exactly "${publicCustomer}". Never add, infer, or substitute another customer's name.`
-    : customerIdentityRequired
-      ? "Customer identity rule: no public customer label is authorized. Do not include or invent any customer name in any value."
-      : "Customer identity rule: do not invent a customer identity. Preserve only names already grounded in the supplied base caption.";
-  return generateRawStructuredImageText(
-    imageBase64Url,
-    `${prompt}\n\n${identityRule}`,
-    "Caption-pack AI returned no structured copy.",
-    "caption_pack",
-    RESPONSE_SCHEMA_IDS.captionPack,
-    signal,
-  );
-};
-
 export const generateWebsiteDraftMetadata = async (
   imageBase64Url: string,
   prompt: string,
@@ -2355,6 +2406,12 @@ export const generateSocialPost = async (
    * rejects is never reported as ready.
    */
   onPartReady?: (part: SocialPostPart) => void,
+  /**
+   * The store's logo corner and size (`dealer.logo_placement`). Asked for in
+   * the image prompt and noted from the image review on `aiMeta.image`;
+   * null or absent keeps the prompts exactly as they were.
+   */
+  logoPlacement?: LogoPlacement | null,
 ): Promise<SocialPostGenerationResult> => {
   // A progress listener must never be able to fail or alter the generation.
   const notifyPartReady = (part: SocialPostPart) => {
@@ -2416,6 +2473,7 @@ export const generateSocialPost = async (
     !!logoImagePart,
     initialText,
     creativeBrief,
+    logoPlacement,
   );
   // Text first: the shared style prompt precedes the per-post image bytes so
   // Gemini's implicit cache can match across requests.
@@ -2453,6 +2511,7 @@ export const generateSocialPost = async (
         requestedStyle: style,
         allowArtisticTransformation: false,
         sourceImageBase64Url: normalisedImage,
+        logoPlacement,
         signal,
       });
     } catch (err) {
