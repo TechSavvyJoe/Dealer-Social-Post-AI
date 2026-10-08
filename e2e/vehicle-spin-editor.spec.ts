@@ -1,6 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
+// Recording six minutes of canvas/worker activity on a retry can exhaust a
+// hosted runner. Keep failure screenshots and visible progress instead.
+test.use({ trace: "off", screenshot: "only-on-failure" });
+
 test("vehicle background controls preserve originals and refine the selected angle", async ({
   page,
 }, info) => {
@@ -8,7 +12,7 @@ test("vehicle background controls preserve originals and refine the selected ang
     info.project.name !== "chromium-desktop-1440",
     "Full 48-frame model sequence runs once; WebKit model and editor have separate coverage.",
   );
-  test.setTimeout(480000);
+  test.setTimeout(720000);
   page.setDefaultTimeout(15000);
   await page.route("**/api/**", (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -76,9 +80,24 @@ test("vehicle background controls preserve originals and refine the selected ang
   const box = await picture.boundingBox();
   // The source is 12:5, centered within the 8:5 viewer. x=60%, y=50% hits the door.
   await picture.click({ position: { x: box!.width * 0.6, y: box!.height * 0.5 } });
-  await expect(
-    page.getByRole("button", { name: "Restore missing detail", exact: true }),
-  ).toBeEnabled({ timeout: 360000 });
+  const progressLog = setInterval(() => {
+    void page
+      .getByRole("status")
+      .allTextContents()
+      .then(
+        (status) => console.log("Background editor progress:", status.join(" ")),
+        () => undefined,
+      );
+  }, 30000);
+  try {
+    // The application permits ten minutes of processing. A slower CPU runner
+    // must be allowed to reach that real limit instead of failing at six.
+    await expect(
+      page.getByRole("button", { name: "Restore missing detail", exact: true }),
+    ).toBeEnabled({ timeout: 630000 });
+  } finally {
+    clearInterval(progressLog);
+  }
   await expect(
     page.getByRole("button", { name: "Pearl studio", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
