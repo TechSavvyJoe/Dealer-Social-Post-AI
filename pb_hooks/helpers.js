@@ -2595,6 +2595,23 @@ function loginFailureStateWithDao(dao, ip, threshold, windowSeconds, excludeReco
     };
   }
 
+  // In-flight comparisons count toward the same hard limit, but a burst of
+  // valid users on dealership Wi-Fi should recheck promptly, not wait fifteen
+  // minutes for reservations that are about to become successes. A reservation
+  // older than 30 seconds is still treated as a failure (crashes fail closed).
+  const recentReservations = records.filter(function (record) {
+    const created = Date.parse(record.getString("created").replace(" ", "T"));
+    return (
+      record.getString("detail") === "credential comparison reserved" &&
+      Number.isFinite(created) &&
+      now - created >= 0 &&
+      now - created < 30000
+    );
+  }).length;
+  if (recentReservations > 0 && count - recentReservations < threshold) {
+    return { count: count, locked: true, retryAfterSeconds: 2, unavailable: false };
+  }
+
   const boundary = records[Math.max(0, threshold - 1)];
   const rawCreated = boundary ? boundary.getString("created") : "";
   const normalizedCreated =
@@ -2881,7 +2898,6 @@ const PROXY_RATE_EVICTION_BATCH = 128;
  * for.
  */
 const MAX_PROXY_IP_RATE_BUCKETS = 512;
-const MAX_PROXY_CONCURRENCY_BUCKETS = 512;
 /**
  * PocketBase 0.22 serves each hook callback from a pooled JSVM runtime
  * (`--hooksPool`, default 25) and every runtime gets its own `require()`
@@ -2889,11 +2905,12 @@ const MAX_PROXY_CONCURRENCY_BUCKETS = 512;
  * "global" provider concurrency cap of 12 was really up to 12 x 25, and the
  * per-minute buckets were as many times too permissive. pb_hooks/walkarounds.js
  * already documents this for replay nonces and keeps them in `$app.store()`,
- * which is shared across the pool; these counters now do the same.
+ * which is shared across the pool; rate counters do the same; provider concurrency uses atomic database leases.
  *
  * Check-then-set through the store is not atomic, so two perfectly simultaneous
- * requests can both pass a boundary. That is acceptable here: these are
- * throttles, not authorization. Being off by one beats being off by 25x.
+ * requests can both pass a rate boundary. These remain a best-effort first
+ * guard; durable login/write policies and atomic provider leases enforce the
+ * security and resource boundaries.
  *
  * The module-level maps remain as the fallback when `$app.store()` is
  * unavailable (the unit-test harness, or a future runtime change). Falling back
@@ -2901,31 +2918,6 @@ const MAX_PROXY_CONCURRENCY_BUCKETS = 512;
  */
 const PROXY_RATE_STORE_PREFIX = "proxyRate:";
 const PROXY_IP_RATE_STORE_PREFIX = "proxyIpRate:";
-const PROXY_CONCURRENCY_STORE_PREFIX = "proxyConc:";
-/**
- * Concurrency slots expire. Rate buckets always carried a `resetAt`; slots were
- * a bare count, and a count that is never decremented is a count that never
- * recovers. That was survivable while the counter was per-VM — a leaked slot
- * poisoned one of 25 runtimes and the other 24 kept serving. Now that the count
- * is shared across the whole pool, one leak is a leak for every dealership
- * until the process restarts: `provider:global` is capped at 12
- * (pb_hooks/main.pb.js), so twelve leaks turn every generation into a 503
- * "Provider capacity is temporarily busy" with nothing in the logs to explain
- * it and no way back except a redeploy.
- *
- * `release()` runs from a `finally`, so the ordinary path was never the worry.
- * The paths that are: a pool runtime torn down between acquire and release, a
- * host-side panic inside $http.send, or a store write that lands in the shared
- * store while the matching read falls back to the per-VM map. A slot held
- * longer than any request could legitimately run is a leak, so it is reclaimed.
- *
- * Six minutes is deliberately generous. The upstream call is allowed 300s for
- * Veo (pb_hooks/main.pb.js), and a TTL that expires a slot a live request is
- * still using would quietly raise the cap it exists to enforce. Erring long
- * costs a slower recovery from a rare leak; erring short breaks the limit.
- */
-const PROXY_CONCURRENCY_TTL_MS = 6 * 60 * 1000;
-
 /**
  * One rate-limit table. `map` is the per-VM fallback used when $app.store() is
  * unavailable; `ops` paces the periodic sweep so it does not run on every
@@ -2949,11 +2941,6 @@ const IP_RATE_NS = makeRateNamespace(
   MAX_PROXY_IP_RATE_BUCKETS,
 );
 const RATE_NAMESPACES = [TENANT_RATE_NS, IP_RATE_NS];
-var _proxyConcurrency = Object.create(null);
-// Distinguishes this VM's holders from another pool runtime's, so a release
-// drops exactly the slot it took and never someone else's.
-var _proxyConcurrencyHolderSeq = 0;
-
 function sharedStore() {
   try {
     if (typeof $app === "undefined" || !$app || typeof $app.store !== "function") {
@@ -3102,105 +3089,13 @@ function proxyRateLimitStateSize() {
   }, 0);
 }
 
-/**
- * The holders of one slot key that are still inside their expiry.
- *
- * Anything past its expiry belonged to a request that never released, so it is
- * dropped here instead of counted. A bucket written by an older build has no
- * `holders` array at all; treating that as empty is the self-healing reading,
- * and it costs nothing in practice because the store lives in process memory
- * and any deploy that changes this shape restarts the process anyway.
- */
-function liveConcurrencyHolders(bucket, now) {
-  if (!bucket || !Array.isArray(bucket.holders)) return [];
-  return bucket.holders.filter(function (holder) {
-    return holder && Number(holder.expiresAt) > now;
-  });
-}
-
-/**
- * Acquire a bounded provider slot shared across the JSVM pool. Every successful
- * acquisition returns an idempotent release callback so handlers can use
- * try/finally, and every slot carries an expiry so a release that never happens
- * cannot ratchet the cap down permanently.
- */
+/** Provider leases are atomic across JSVMs and expire after an interrupted call. */
 function acquireProxyConcurrency(key, maxConcurrent) {
-  const normalizedKey = (key || "").toString().slice(0, 256);
-  const limit = Math.max(1, Math.min(100, Number(maxConcurrent) || 1));
-  if (!normalizedKey) return { ok: false, retryAfterMs: 1000 };
-  const now = Date.now();
-  const readSlot = (candidate) =>
-    readSharedBucket(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency, candidate);
-
-  let keys = sharedBucketKeys(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency);
-  if (!readSlot(normalizedKey) && keys.length >= MAX_PROXY_CONCURRENCY_BUCKETS) {
-    keys
-      .filter(function (candidate) {
-        return liveConcurrencyHolders(readSlot(candidate), now).length === 0;
-      })
-      .forEach(function (candidate) {
-        deleteSharedBucket(
-          PROXY_CONCURRENCY_STORE_PREFIX,
-          _proxyConcurrency,
-          candidate,
-        );
-      });
-    if (
-      sharedBucketKeys(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency).length >=
-      MAX_PROXY_CONCURRENCY_BUCKETS
-    ) {
-      return { ok: false, retryAfterMs: 1000 };
-    }
+  try {
+    return require(__hooks + "/providerCapacity.js").acquire(key, maxConcurrent);
+  } catch (_e) {
+    return { ok: false, retryAfterMs: 1000 };
   }
-
-  const holders = liveConcurrencyHolders(readSlot(normalizedKey), now);
-  if (holders.length >= limit) {
-    return { ok: false, retryAfterMs: 1000, count: holders.length };
-  }
-  _proxyConcurrencyHolderSeq += 1;
-  const token =
-    _proxyConcurrencyHolderSeq.toString(36) +
-    ":" +
-    now.toString(36) +
-    ":" +
-    Math.random().toString(36).slice(2, 10);
-  holders.push({ token: token, expiresAt: now + PROXY_CONCURRENCY_TTL_MS });
-  writeSharedBucket(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency, normalizedKey, {
-    holders: holders,
-  });
-  let released = false;
-  return {
-    ok: true,
-    count: holders.length,
-    release: function () {
-      if (released) return;
-      released = true;
-      // Re-read rather than closing over the array above: another pool VM may
-      // have acquired or released against this key in between. Dropping this
-      // one token, rather than decrementing a shared number, is what makes two
-      // simultaneous releases safe.
-      const remaining = liveConcurrencyHolders(
-        readSlot(normalizedKey),
-        Date.now(),
-      ).filter(function (holder) {
-        return holder.token !== token;
-      });
-      if (remaining.length === 0) {
-        deleteSharedBucket(
-          PROXY_CONCURRENCY_STORE_PREFIX,
-          _proxyConcurrency,
-          normalizedKey,
-        );
-      } else {
-        writeSharedBucket(
-          PROXY_CONCURRENCY_STORE_PREFIX,
-          _proxyConcurrency,
-          normalizedKey,
-          { holders: remaining },
-        );
-      }
-    },
-  };
 }
 
 function upstreamContentLength(response) {

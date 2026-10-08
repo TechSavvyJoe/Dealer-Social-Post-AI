@@ -39,7 +39,7 @@ remain separate acceptance evidence.
 ## Operational limits
 
 The first save uploads immutable JPEG angles (at most 500 KB each). Libraries are
-bounded to 10 spins per person, 30 per dealership and 150 total. These limits
+bounded to 10 spins per person, 30 per dealership and 750 total (25 stores at the dealership limit). The studio shows personal and dealership usage, and System Health reports the fleet allowance and available backup headroom. These limits
 protect the existing storage volume. Each create/upload also reserves disk room
 for a full backup archive and a 256 MB buffer; delete an older spin when the library is
 full. An incomplete upload can resume in the current editor. After a refresh,

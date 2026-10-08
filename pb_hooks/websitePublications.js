@@ -5737,88 +5737,13 @@ function identityVehicleSlotPattern(patternIndex, matchText) {
   );
 }
 
-/**
- * Mirror of unauthorizedCustomerNames() in utils/captionQuality.ts — same
- * patterns, same word lists, same walks, same order. Returns true when the
- * text names someone who is not the authorized customer.
- */
-function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhrases) {
-  const expected = publicCustomerLabel(expectedCustomer);
-  // Every whitespace run collapses to one character, but a line break stays
-  // a line break so a new sentence on the next line is a hard boundary.
-  const allowed = normalizeAllowedIdentityPhrases(allowedPhrases);
-  const grounding = buildIdentityGrounding(allowed);
-  const preSplit = (text || "")
-    .toString()
-    .normalize("NFKC")
-    .replace(/\u0001/g, "")
-    // Smart punctuation is the same punctuation.
-    .replace(/[’‘ʼ]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[‒―−]/g, "—")
-    // "Mr. Miller", "Dr. Nguyen": the title's period is not a sentence end.
-    .replace(IDENTITY_TITLE_ABBREVIATIONS, "$1")
-    .trim()
-    .replace(/\s+/g, function (ws) {
-      return ws.indexOf("\n") >= 0 ? "\n" : " ";
-    });
-  // "#CongratsMichelle" addresses a person as plainly as prose does; split a
-  // camel-case hashtag into its words so the same openers see it. A tag is
-  // its own clause: a period is emitted before every tag that follows text
-  // on the same line. Mirrors unauthorizedCustomerNames on the client.
-  const rawScan = preSplit
-    .replace(
-      new RegExp("([^\\s#])[^\\S\\n]+(?=#[" + IDENTITY_LETTER + "0-9_])", "g"),
-      "$1. ",
-    )
-    .replace(new RegExp("#([" + IDENTITY_LETTER + "0-9_]+)", "g"), function (_m, tag) {
-      return identitySplitHashtag(tag, grounding);
-    })
-    // "@SarahJohnson" is a name written without spaces; "@BobMaxeyFord" is
-    // the store's. Split the mention and keep its case.
-    .replace(new RegExp("@([" + IDENTITY_LETTER + "0-9_]+)", "g"), function (_m, tag) {
-      return tag.replace(/_/g, " ").replace(IDENTITY_CAMEL_BOUNDARY, "$1 $2").trim();
-    })
-    .trim()
-    .replace(/\s+/g, function (ws) {
-      return ws.indexOf("\n") >= 0 ? "\n" : " ";
-    });
-  if (
-    expected &&
-    (new RegExp(
-      "(^|[^" +
-        IDENTITY_LETTER +
-        "0-9])" +
-        escapeRegExp(expected) +
-        "(?:[" +
-        IDENTITY_LETTER +
-        "]+|-[" +
-        IDENTITY_LETTER +
-        "]+)(?=$|[^" +
-        IDENTITY_LETTER +
-        "0-9])",
-      "i",
-    ).test(preSplit) ||
-      // Inside a camel-case tag ("#CongratsMichelleSmith") the label keeps
-      // its own capital so "Ann" never matches "Planned" — whatever case
-      // the release spelled it in.
-      new RegExp(
-        "[" +
-          IDENTITY_LOWER +
-          "]" +
-          escapeRegExp(expected.charAt(0).toUpperCase()) +
-          identityCi(escapeRegExp(expected.slice(1))) +
-          "[" +
-          IDENTITY_UPPER +
-          "][" +
-          IDENTITY_LETTER +
-          "]*(?=$|[^" +
-          IDENTITY_LETTER +
-          "0-9])",
-      ).test(preSplit))
-  ) {
-    return true;
-  }
+// Cache only fixed grammar, never customer text or dealership state. Goja's
+// Unicode/lookaround compilation dominated History under concurrent use when
+// these 18 identical patterns were rebuilt for every caption and disclosure.
+// A JSVM executes synchronously; hasIdentityMatch resets each global lastIndex.
+let cachedIdentityMatchers = null;
+function identityMatchers() {
+  if (cachedIdentityMatchers) return cachedIdentityMatchers;
   const name = IDENTITY_NAME_TOKEN;
   const separator = "(?:\\s+[Aa][Nn][Dd]\\s+|\\s*(?:&|\\+|/)\\s*)";
   const names = name + "(?:" + separator + name + ")*";
@@ -6374,6 +6299,97 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
     ),
   ];
 
+  cachedIdentityMatchers = { patterns: patterns, actionWords: actionWords };
+  return cachedIdentityMatchers;
+}
+
+/**
+ * Mirror of unauthorizedCustomerNames() in utils/captionQuality.ts — same
+ * patterns, same word lists, same walks, same order. Returns true when the
+ * text names someone who is not the authorized customer.
+ */
+function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhrases) {
+  if (!(text || "").toString().trim()) return false;
+  const expected = publicCustomerLabel(expectedCustomer);
+  // Every whitespace run collapses to one character, but a line break stays
+  // a line break so a new sentence on the next line is a hard boundary.
+  const allowed = normalizeAllowedIdentityPhrases(allowedPhrases);
+  const grounding = buildIdentityGrounding(allowed);
+  const preSplit = (text || "")
+    .toString()
+    .normalize("NFKC")
+    .replace(/\u0001/g, "")
+    // Smart punctuation is the same punctuation.
+    .replace(/[’‘ʼ]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[‒―−]/g, "—")
+    // "Mr. Miller", "Dr. Nguyen": the title's period is not a sentence end.
+    .replace(IDENTITY_TITLE_ABBREVIATIONS, "$1")
+    .trim()
+    .replace(/\s+/g, function (ws) {
+      return ws.indexOf("\n") >= 0 ? "\n" : " ";
+    });
+  // "#CongratsMichelle" addresses a person as plainly as prose does; split a
+  // camel-case hashtag into its words so the same openers see it. A tag is
+  // its own clause: a period is emitted before every tag that follows text
+  // on the same line. Mirrors unauthorizedCustomerNames on the client.
+  const rawScan = preSplit
+    .replace(
+      new RegExp("([^\\s#])[^\\S\\n]+(?=#[" + IDENTITY_LETTER + "0-9_])", "g"),
+      "$1. ",
+    )
+    .replace(new RegExp("#([" + IDENTITY_LETTER + "0-9_]+)", "g"), function (_m, tag) {
+      return identitySplitHashtag(tag, grounding);
+    })
+    // "@SarahJohnson" is a name written without spaces; "@BobMaxeyFord" is
+    // the store's. Split the mention and keep its case.
+    .replace(new RegExp("@([" + IDENTITY_LETTER + "0-9_]+)", "g"), function (_m, tag) {
+      return tag.replace(/_/g, " ").replace(IDENTITY_CAMEL_BOUNDARY, "$1 $2").trim();
+    })
+    .trim()
+    .replace(/\s+/g, function (ws) {
+      return ws.indexOf("\n") >= 0 ? "\n" : " ";
+    });
+  if (
+    expected &&
+    (new RegExp(
+      "(^|[^" +
+        IDENTITY_LETTER +
+        "0-9])" +
+        escapeRegExp(expected) +
+        "(?:[" +
+        IDENTITY_LETTER +
+        "]+|-[" +
+        IDENTITY_LETTER +
+        "]+)(?=$|[^" +
+        IDENTITY_LETTER +
+        "0-9])",
+      "i",
+    ).test(preSplit) ||
+      // Inside a camel-case tag ("#CongratsMichelleSmith") the label keeps
+      // its own capital so "Ann" never matches "Planned" — whatever case
+      // the release spelled it in.
+      new RegExp(
+        "[" +
+          IDENTITY_LOWER +
+          "]" +
+          escapeRegExp(expected.charAt(0).toUpperCase()) +
+          identityCi(escapeRegExp(expected.slice(1))) +
+          "[" +
+          IDENTITY_UPPER +
+          "][" +
+          IDENTITY_LETTER +
+          "]*(?=$|[^" +
+          IDENTITY_LETTER +
+          "0-9])",
+      ).test(preSplit))
+  ) {
+    return true;
+  }
+  const matchers = identityMatchers();
+  const patterns = matchers.patterns;
+  const actionWords = matchers.actionWords;
+
   // Mirror of hopToPerson(): walk forward over the closed lead-in vocabulary
   // from `cursor` to the next capitalized word and examine it as the person
   // the phrase was really addressing.
@@ -6849,6 +6865,12 @@ function projectProtectedCustomerNamePreservingAllowed(
   allowedPhrases,
 ) {
   let protectedValue = (value || "").toString();
+  // Nothing can be redacted without a protected name or source text. In the
+  // PocketBase JSVM, compiling the Unicode lookaround expressions below is
+  // expensive even when they cannot match. Keep the separate unexpected-name
+  // review in reviewPostCustomerIdentity; this skips only no-op projection.
+  if (!protectedValue || !(protectedName || "").toString().trim())
+    return protectedValue;
   const restorations = [];
   const allowed = normalizeAllowedIdentityPhrases(allowedPhrases);
   for (let i = 0; i < allowed.length; i++) {

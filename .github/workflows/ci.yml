@@ -55,6 +55,34 @@ jobs:
           VITE_RELEASE_SHA: ${{ github.sha }}
       - run: npm run security:audit
 
+  launch-capacity:
+    name: 25 dealerships / 250 users
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: Verify pinned PocketBase executable
+        run: |
+          curl --fail --location --retry 3 --max-time 180 \
+            https://github.com/pocketbase/pocketbase/releases/download/v0.22.55/pocketbase_0.22.55_linux_amd64.zip \
+            --output /tmp/launch-pocketbase.zip
+          echo '2e404f98bc693cfa7c8160bc9f1903fc7dc448c4f6fe78128c0cd1561a2db46e  /tmp/launch-pocketbase.zip' | sha256sum -c -
+          unzip -q /tmp/launch-pocketbase.zip -d /tmp/launch-pocketbase
+      - name: Exercise tenant isolation and concurrent saves
+        run: node scripts/launch-capacity-canary.mjs
+        env:
+          POCKETBASE_TEST_BINARY: /tmp/launch-pocketbase/pocketbase
+      - name: Retain redacted capacity evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: launch-capacity
+          path: .release-evidence/launch-capacity.json
+          retention-days: 30
+
   # The automation/ package is a self-contained Output.ai + Temporal worker that
   # requires Node >= 24 while the repo root pins Node 22. It is deliberately
   # excluded from the root tsconfig/vitest runs (adding it there breaks root

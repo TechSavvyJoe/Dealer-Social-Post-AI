@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCapacityHarness } from "../test/providerCapacityHarness";
+let capacity: ReturnType<typeof createCapacityHarness>;
+beforeEach(() => {
+  capacity = createCapacityHarness();
+});
+afterEach(() => capacity.close());
 
 /**
  * PocketBase 0.22 serves hook callbacks from a pool of JSVM runtimes
@@ -49,7 +55,12 @@ const makeSharedStore = () => {
 const loadVm = (): Helpers => {
   const source = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
   const module = { exports: {} as Helpers };
-  new Function("module", "exports", source)(module, module.exports);
+  new Function("module", "exports", "require", "__hooks", source)(
+    module,
+    module.exports,
+    () => capacity,
+    "pb_hooks",
+  );
   return module.exports;
 };
 
@@ -98,7 +109,7 @@ describe("throttles are enforced across the whole JSVM pool", () => {
     expect(vmB.checkProxyRateLimit("ip:203.0.113.9", 3, 60_000).ok).toBe(false);
   });
 
-  it("still limits per-VM when the shared store is unavailable, never fails open", () => {
+  it("keeps rate fallback and database leases when the shared store is unavailable", () => {
     // No $app at all: the fallback must keep counting, not stop enforcing.
     runtime.$app = undefined;
     const vm = loadVm();
@@ -214,7 +225,7 @@ describe("leaked provider slots expire instead of poisoning the pool", () => {
     expect(vm.acquireProxyConcurrency("provider:dealer-e", 1).ok).toBe(false);
   });
 
-  it("expires leaked slots in the per-VM fallback too, where there is no store", () => {
+  it("expires database leases even when the shared memory store is unavailable", () => {
     vi.useFakeTimers();
     atSecondsIn(0);
     runtime.$app = undefined;

@@ -229,6 +229,53 @@ function ensureStorageRoom(incomingBytes) {
   }
   throw new Error("STORAGE");
 }
+// 25-dealership launch envelope: each store retains its own 30-spin ceiling.
+// The filesystem guard still reserves backup room before every upload.
+const SPIN_LIMITS = { person: 10, dealer: 30, total: 750 };
+function capacity(dao, dealerId, personId) {
+  const row = new DynamicModel({ total: 0, dealer: 0, person: 0 });
+  dao
+    .db()
+    .newQuery(
+      "SELECT COUNT(*) AS total, COALESCE(SUM(dealer = {:dealer}), 0) AS dealer, " +
+        "COALESCE(SUM(dealer = {:dealer} AND person = {:person}), 0) AS person FROM vehicle_spins",
+    )
+    .bind({ dealer: dealerId, person: personId })
+    .one(row);
+  const reason =
+    row.person >= SPIN_LIMITS.person
+      ? "PERSON_QUOTA"
+      : row.dealer >= SPIN_LIMITS.dealer
+        ? "DEALER_QUOTA"
+        : row.total >= SPIN_LIMITS.total
+          ? "FLEET_QUOTA"
+          : "";
+  return {
+    personalUsed: Number(row.person),
+    personalLimit: SPIN_LIMITS.person,
+    dealershipUsed: Number(row.dealer),
+    dealershipLimit: SPIN_LIMITS.dealer,
+    canCreate: !reason,
+    reason: reason,
+  };
+}
+function adminCapacity() {
+  const row = new DynamicModel({ total: 0 });
+  $app.dao().db().newQuery("SELECT COUNT(*) AS total FROM vehicle_spins").one(row);
+  let storage = "available";
+  try {
+    ensureStorageRoom(72 * 500000);
+  } catch (_e) {
+    storage = "limited_or_unavailable";
+  }
+  return {
+    savedSpins: Number(row.total),
+    totalLimit: SPIN_LIMITS.total,
+    dealershipLimit: SPIN_LIMITS.dealer,
+    personalLimit: SPIN_LIMITS.person,
+    storage: storage,
+  };
+}
 function handle(c, action) {
   const helpers = require(__hooks + "/helpers.js");
   const context = auth(c, helpers);
@@ -251,6 +298,7 @@ function handle(c, action) {
           return serialize(r, context.dealer, true);
         }),
         canReview: manager(context),
+        capacity: capacity(dao, context.dealer.id, context.person.id),
       });
     }
     if (action === "create") {
@@ -307,15 +355,8 @@ function handle(c, action) {
           .newQuery("UPDATE dealers SET updated = updated WHERE id = {:id}")
           .bind({ id: context.dealer.id })
           .execute();
-        const all = tx.findRecordsByFilter("vehicle_spins", "id != ''", "", 150, 0);
-        let dealerCount = 0,
-          personCount = 0;
-        all.forEach(function (r) {
-          if (r.getString("dealer") === context.dealer.id) dealerCount++;
-          if (r.getString("person") === context.person.id) personCount++;
-        });
-        if (all.length >= 150 || dealerCount >= 30 || personCount >= 10)
-          throw new Error("QUOTA");
+        const space = capacity(tx, context.dealer.id, context.person.id);
+        if (!space.canCreate) throw new Error(space.reason);
         record = new Record(tx.findCollectionByNameOrId("vehicle_spins"), {
           dealer: context.dealer.id,
           person: context.person.id,
@@ -414,7 +455,12 @@ function handle(c, action) {
     const messages = {
       STORAGE:
         "Storage is nearly full. Delete an older spin or ask your administrator to add space before retrying.",
-      QUOTA: "The spin library is full. Delete an older spin before saving another.",
+      PERSON_QUOTA:
+        "You have 10 saved spins. Delete an older spin before saving another.",
+      DEALER_QUOTA:
+        "Your dealership has 30 saved spins. Ask a manager to remove an older vehicle view.",
+      FLEET_QUOTA:
+        "The vehicle-view service has reached its storage allowance. Contact your administrator before saving another.",
       IMMUTABLE:
         "This spin is already submitted. Create a new spin to change its frames or facts.",
       INCOMPLETE: "Some angles are missing. Finish uploading before submitting.",
@@ -476,4 +522,6 @@ module.exports = {
   stateAllowsDelivery,
   owner,
   storageHasRoom,
+  capacity,
+  adminCapacity,
 };

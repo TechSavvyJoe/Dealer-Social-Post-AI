@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
+import { supportDetails } from "../utils/supportDetails";
 import { logError } from "../utils/telemetry";
 import { clearAllCreatives } from "../utils/creativeStorage";
 
@@ -130,20 +131,7 @@ export class ErrorBoundary extends Component<Props, State> {
       import.meta.env.VITE_RELEASE_SHA ||
       import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA ||
       "development";
-    const text = [
-      `Error: ${this.state.error.message}`,
-      "",
-      "Stack:",
-      this.state.error.stack || "(no stack)",
-      "",
-      "Component stack:",
-      this.state.errorInfo?.componentStack || "(no component stack)",
-      "",
-      `URL: ${window.location.href}`,
-      `User-Agent: ${navigator.userAgent}`,
-      `Release: ${releaseSha}`,
-      `When: ${new Date().toISOString()}`,
-    ].join("\n");
+    const text = supportDetails(this.state.error, releaseSha, window.location.hash);
     try {
       await navigator.clipboard.writeText(text);
       this.setState({ copied: true });
