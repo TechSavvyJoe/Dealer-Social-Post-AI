@@ -20,13 +20,13 @@ type InstallManifest = {
 };
 
 const installPngs = [
-  { src: "/dealer-social-dsp-v4-180.png", size: 180 },
-  { src: "/dealer-social-dsp-v4-192.png", size: 192 },
-  { src: "/dealer-social-dsp-v4-512.png", size: 512 },
-  { src: "/dealer-social-dsp-v4-1024.png", size: 1024 },
-  { src: "/dealer-social-dsp-v4-maskable-192.png", size: 192 },
-  { src: "/dealer-social-dsp-v4-maskable-512.png", size: 512 },
-  { src: "/dealer-social-dsp-v4-maskable-1024.png", size: 1024 },
+  { src: "/dealer-social-dsp-v5-180.png", size: 180 },
+  { src: "/dealer-social-dsp-v5-192.png", size: 192 },
+  { src: "/dealer-social-dsp-v5-512.png", size: 512 },
+  { src: "/dealer-social-dsp-v5-1024.png", size: 1024 },
+  { src: "/dealer-social-dsp-v5-maskable-192.png", size: 192 },
+  { src: "/dealer-social-dsp-v5-maskable-512.png", size: 512 },
+  { src: "/dealer-social-dsp-v5-maskable-1024.png", size: 1024 },
 ] as const;
 
 async function expectPng(
@@ -127,9 +127,8 @@ async function expectMaskableSafeZone(page: Page, sources: string[]) {
     );
   }, sources);
 
-  // Adaptive launchers guarantee only the central circle with radius 40% of
-  // the canvas. Both the ivory D/P and coral S are essential, so every glyph
-  // pixel must remain inside that circle while the navy field stays full bleed.
+  // Adaptive launchers guarantee the central circle with radius 40%.
+  // Keep the bright car and frame inside it on the full-bleed dark tile.
   for (const result of results) {
     expect(result.maximumLightPixelDistanceRatio).toBeLessThanOrEqual(0.4);
   }
@@ -191,7 +190,7 @@ test.describe("Home Screen PWA contracts", () => {
     await expect(manifestLink).toHaveAttribute("href", "/manifest.webmanifest");
     await expect(appleTouchIcon).toHaveAttribute(
       "href",
-      "/dealer-social-dsp-v4-180.png",
+      "/dealer-social-dsp-v5-180.png",
     );
     await expect(appleTouchIcon).toHaveAttribute("sizes", "180x180");
     await expect(
@@ -221,37 +220,37 @@ test.describe("Home Screen PWA contracts", () => {
 
     const requiredManifestIcons: ManifestIcon[] = [
       {
-        src: "/dealer-social-dsp-v4-192.png",
+        src: "/dealer-social-dsp-v5-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-dsp-v4-512.png",
+        src: "/dealer-social-dsp-v5-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-dsp-v4-1024.png",
+        src: "/dealer-social-dsp-v5-1024.png",
         sizes: "1024x1024",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-dsp-v4-maskable-192.png",
+        src: "/dealer-social-dsp-v5-maskable-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "maskable",
       },
       {
-        src: "/dealer-social-dsp-v4-maskable-512.png",
+        src: "/dealer-social-dsp-v5-maskable-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",
       },
       {
-        src: "/dealer-social-dsp-v4-maskable-1024.png",
+        src: "/dealer-social-dsp-v5-maskable-1024.png",
         sizes: "1024x1024",
         type: "image/png",
         purpose: "maskable",
@@ -273,20 +272,20 @@ test.describe("Home Screen PWA contracts", () => {
       installPngs.map(({ src, size }) => expectPng(request, src, size)),
     );
     await expectFullBleedArtwork(page, [
-      "/dealer-social-dsp-v4-180.png",
-      "/dealer-social-dsp-v4-maskable-192.png",
-      "/dealer-social-dsp-v4-maskable-512.png",
-      "/dealer-social-dsp-v4-maskable-1024.png",
+      "/dealer-social-dsp-v5-180.png",
+      "/dealer-social-dsp-v5-maskable-192.png",
+      "/dealer-social-dsp-v5-maskable-512.png",
+      "/dealer-social-dsp-v5-maskable-1024.png",
     ]);
     await expectMaskableSafeZone(page, [
-      "/dealer-social-dsp-v4-maskable-192.png",
-      "/dealer-social-dsp-v4-maskable-512.png",
-      "/dealer-social-dsp-v4-maskable-1024.png",
+      "/dealer-social-dsp-v5-maskable-192.png",
+      "/dealer-social-dsp-v5-maskable-512.png",
+      "/dealer-social-dsp-v5-maskable-1024.png",
     ]);
     for (const size of [192, 512, 1024]) {
       const [regular, maskable] = await Promise.all([
-        request.get(`/dealer-social-dsp-v4-${size}.png`),
-        request.get(`/dealer-social-dsp-v4-maskable-${size}.png`),
+        request.get(`/dealer-social-dsp-v5-${size}.png`),
+        request.get(`/dealer-social-dsp-v5-maskable-${size}.png`),
       ]);
       expect((await regular.body()).equals(await maskable.body())).toBe(false);
     }
@@ -342,7 +341,7 @@ test.describe("Home Screen PWA contracts", () => {
     try {
       await page.goto("/");
       await expect(
-        page.getByRole("heading", { name: "What are you posting?" }),
+        page.getByRole("heading", { name: "Your next great post." }),
       ).toBeVisible();
       expect(
         await page.evaluate(
@@ -435,8 +434,7 @@ test.describe("Home Screen PWA contracts", () => {
 
       const mainContent = page.locator("#main-content");
       const deliveryAction = page.getByRole("button", { name: /^Delivery/ });
-      // Phones get one "Choose from library" row under the tiles, the last
-      // control on Home; it belongs to no tile.
+      // The library is immediately reachable above the camera categories.
       const chooseFromLibrary = mainContent.getByRole("button", {
         name: "Choose from library",
       });
@@ -444,6 +442,10 @@ test.describe("Home Screen PWA contracts", () => {
       await expect(page.getByLabel("Take a photo for Delivery")).toBeAttached();
       await expect(page.getByLabel("Choose a photo for Delivery")).toBeAttached();
 
+      const libraryBounds = await chooseFromLibrary.boundingBox();
+      const deliveryBounds = await deliveryAction.boundingBox();
+      expect(libraryBounds!.height).toBeGreaterThanOrEqual(52);
+      expect(libraryBounds!.y + libraryBounds!.height).toBeLessThan(deliveryBounds!.y);
       await mainContent.evaluate((element) => {
         element.style.scrollBehavior = "auto";
         element.scrollTop = element.scrollHeight;
@@ -465,7 +467,7 @@ test.describe("Home Screen PWA contracts", () => {
         );
         const choose = Array.from(
           document.querySelectorAll<HTMLButtonElement>("#main-content button"),
-        ).find((button) => button.textContent?.trim() === "Choose from library");
+        ).find((button) => button.textContent?.trim() === "See all");
         if (!main || !finalCard || !choose) return null;
         const mainBounds = main.getBoundingClientRect();
         const finalCardBounds = finalCard.getBoundingClientRect();
@@ -487,7 +489,31 @@ test.describe("Home Screen PWA contracts", () => {
       expect(bottomReach!.chooseBottom).toBeLessThanOrEqual(
         bottomReach!.mainBottom + 1,
       );
-      await expect(chooseFromLibrary).toBeVisible();
+      await expect(page.getByRole("button", { name: "See all" })).toBeInViewport();
+      // Installed app geometry follows the visible viewport after rotation
+      // and after returning upright, without a document scroll surface.
+      for (const size of [
+        { width: 844, height: 390 },
+        { width: 390, height: 700 },
+      ]) {
+        await page.setViewportSize(size);
+        await expect
+          .poll(() =>
+            page
+              .locator("#root")
+              .evaluate((root) => Math.round(root.getBoundingClientRect().bottom)),
+          )
+          .toBe(size.height);
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                document.documentElement.scrollHeight -
+                document.documentElement.clientHeight,
+            ),
+          )
+          .toBe(0);
+      }
     } finally {
       await cdp.send("Emulation.setSafeAreaInsetsOverride", {
         insets: {

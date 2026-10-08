@@ -35,13 +35,13 @@ const renderHeader = (props: Partial<React.ComponentProps<typeof Header>> = {}) 
   );
 
 describe("Header", () => {
-  it("is 56 px tall and drops its account menu from that edge", () => {
+  it("keeps a compact phone header and drops its account menu below it", () => {
     renderHeader();
-    expect(screen.getByRole("banner")).toHaveClass("h-14");
+    expect(screen.getByRole("banner")).toHaveClass("h-14", "md:h-16");
     expect(screen.getByRole("banner")).not.toHaveClass("h-16");
     fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
     expect(screen.getByRole("navigation", { name: "Account menu" })).toHaveClass(
-      "top-14",
+      "top-full",
     );
   });
 
@@ -52,7 +52,9 @@ describe("Header", () => {
     const title = screen.getByText("Delivery");
     expect(title).toHaveClass("font-display", "text-[17px]", "md:hidden");
     expect(screen.getByText(dealer.name)).toHaveClass("max-md:hidden");
-    expect(screen.getByText("B")).toHaveClass("max-md:hidden");
+    expect(screen.getByRole("img", { name: "Dealer Social" })).toHaveClass(
+      "max-md:hidden",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Go back" }));
     expect(onBack).toHaveBeenCalledTimes(1);
@@ -61,7 +63,9 @@ describe("Header", () => {
   it("keeps the store identity on Home, where there is no Back", () => {
     renderHeader();
     expect(screen.getByText(dealer.name)).not.toHaveClass("max-md:hidden");
-    expect(screen.getByText("B")).not.toHaveClass("max-md:hidden");
+    expect(screen.getByRole("img", { name: "Dealer Social" })).not.toHaveClass(
+      "max-md:hidden",
+    );
     expect(screen.queryByRole("button", { name: "Go back" })).not.toBeInTheDocument();
   });
 

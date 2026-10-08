@@ -226,20 +226,16 @@ describe("CategoryTiles", () => {
     expect(container.querySelectorAll("img")).toHaveLength(TILES.length - 1);
   });
 
-  it("uses the flat Light Table tile: no stripe, icon chip, lift, zoom or eyebrow", () => {
+  it("keeps photo labels on a legible scrim with an explicit action", () => {
     installViewport(true);
-    const { container } = renderTiles();
-    const markup = container.innerHTML;
-
-    expect(markup).not.toMatch(/translate-y|scale-\[|group-hover:scale/);
-    expect(markup).not.toMatch(/bg-brand-fill|bg-brand-tint/);
-    expect(markup).not.toMatch(/uppercase|tracking-/);
-    expect(markup).not.toMatch(/duration-320/);
-    // Photos only until one fails: no decorative icon beside each title.
-    expect(container.querySelectorAll("svg")).toHaveLength(0);
-    for (const button of screen.getAllByRole("button")) {
-      expect(button.className).toMatch(/\brounded-md\b/);
-      expect(button.className).toMatch(/\bhover:border-strong\b/);
-    }
+    renderTiles();
+    const delivery = screen.getByRole("button", { name: "Delivery: take a photo" });
+    expect(delivery).toHaveClass("text-photo-ink");
+    const scrim = Array.from(delivery.querySelectorAll("span")).find((node) =>
+      node.classList.contains("from-photo-shade/95"),
+    );
+    expect(scrim).toBeDefined();
+    expect(screen.getByText("Customer + their new car")).toBeVisible();
+    expect(delivery.querySelector("img")).toHaveAttribute("alt", "");
   });
 });

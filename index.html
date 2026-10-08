@@ -70,7 +70,7 @@
       href="/dealer-social-favicon-v4-32.png"
     />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/dealer-social-dsp-v4-180.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/dealer-social-dsp-v5-180.png" />
     <title>Dealer Social Post AI</title>
     <style>
       /* Critical above-the-fold styles */
@@ -212,6 +212,15 @@
           padding-bottom: 0;
           padding-left: 0;
           padding-right: 0;
+        }
+      }
+      /* iOS can retain the browser-sized fixed containing block on a Home
+         Screen launch. Measure standalone's visual viewport and update it on
+         rotation/keyboard resize; #root still owns each safe inset once. */
+      @media (max-width: 768px), (max-height: 599px) {
+        html[data-app-display="standalone"] body {
+          height: var(--app-viewport-height, 100dvh);
+          bottom: auto;
         }
       }
     </style>

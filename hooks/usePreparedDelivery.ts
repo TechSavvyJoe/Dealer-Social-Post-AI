@@ -28,6 +28,8 @@ export interface UsePreparedDeliveryOptions {
    * for no platform files instead of the fallback platform.
    */
   websiteEnabled: boolean | undefined;
+  /** Keep the original image available beside a generated clip. */
+  includeSourceImage?: boolean;
   /** The video state this plan reads (useVideoJobs owns it). */
   video: Pick<
     UseVideoJobsResult,
@@ -53,6 +55,7 @@ export const usePreparedDelivery = ({
   post,
   resultIdentity,
   websiteEnabled,
+  includeSourceImage = false,
   video,
 }: UsePreparedDeliveryOptions) => {
   const {
@@ -83,7 +86,7 @@ export const usePreparedDelivery = ({
   }, [post.platformIds, post.primaryFormatId]);
   const deliveryPlan = useMemo(() => {
     const requestedMode =
-      videoJobs.length > 0 && post.mediaOutputMode !== "video"
+      videoJobs.length > 0 && (includeSourceImage || post.mediaOutputMode !== "video")
         ? "both"
         : (post.mediaOutputMode ?? "photo");
     const fallbackPlatform =
@@ -110,6 +113,7 @@ export const usePreparedDelivery = ({
     post.postId,
     primarySaveFormat?.id,
     videoJobs.length,
+    includeSourceImage,
     websiteEnabled,
   ]);
   const deliveriesById = useMemo(

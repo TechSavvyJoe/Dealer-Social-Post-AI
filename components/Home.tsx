@@ -106,14 +106,14 @@ export const Home: React.FC<HomeProps> = ({
   const photoWaiting = Boolean(droppedPhoto);
 
   return (
-    <div className="mx-auto w-full max-w-[1240px] px-4 pb-12 pt-5 sm:px-6 lg:grid lg:grid-cols-[minmax(0,1.65fr)_minmax(330px,.75fr)] lg:gap-10 lg:px-8 lg:pt-10 xl:gap-14">
+    <div className="mx-auto w-full max-w-[1240px] px-4 pb-8 pt-4 sm:px-6 lg:grid lg:grid-cols-[minmax(0,1.65fr)_minmax(330px,.75fr)] lg:gap-10 lg:px-8 lg:pt-10 xl:gap-14">
       <section>
         <h1
           ref={pageHeadingRef}
           tabIndex={-1}
-          className="font-display text-3xl font-semibold text-ink sm:text-4xl"
+          className="font-display text-[28px] font-semibold leading-tight tracking-tight text-ink sm:text-4xl"
         >
-          What are you posting?
+          Your next great post.
         </h1>
         {/* Always mounted so the change is announced, not just shown. */}
         <div role="status">
@@ -128,15 +128,35 @@ export const Home: React.FC<HomeProps> = ({
           ) : null}
         </div>
         {intake.isProcessing || photoWaiting ? null : (
-          <>
-            <p className="mt-2 text-base text-ink-2 md:hidden">
-              Pick one and the camera opens.
-            </p>
-            <p className="mt-2 hidden text-base text-ink-2 md:block">
-              Pick one, then take or choose the photo.
-            </p>
-          </>
+          <p className="mt-1 text-sm leading-5 text-ink-2">
+            A photo. A story. Ready to share.
+          </p>
         )}
+
+        {/* Keep existing-photo intake at the top on every device. */}
+        <div className="mt-3">
+          <input
+            ref={libraryInputRef}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
+            aria-label="Choose a photo from your library"
+            onChange={handleLibraryFile}
+          />
+          <Button
+            variant="secondary"
+            size="lg"
+            fullWidth
+            leftIcon={<Images />}
+            disabled={intake.isProcessing}
+            onClick={() => libraryInputRef.current?.click()}
+            className="min-h-[52px] justify-start border-brand-ink bg-gradient-to-r from-brand-fill/60 to-brand-fill/35 px-4 text-base text-ink"
+          >
+            Choose from library
+          </Button>
+        </div>
 
         {intake.error ? (
           <ErrorBanner
@@ -177,7 +197,7 @@ export const Home: React.FC<HomeProps> = ({
           </div>
         ) : null}
 
-        <div className="mt-6">
+        <div className="mt-3">
           <CategoryTiles
             tiles={tiles}
             usualCategory={person?.defaultCategory}
@@ -192,32 +212,6 @@ export const Home: React.FC<HomeProps> = ({
               return true;
             }}
           />
-        </div>
-
-        {/* Phones: the tiles open the camera, so the library is one row here
-            instead of a button on every tile. Wider screens' tiles already
-            open the file picker. */}
-        <div className="mt-4 md:hidden">
-          <input
-            ref={libraryInputRef}
-            type="file"
-            accept="image/*"
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden="true"
-            aria-label="Choose a photo from your library"
-            onChange={handleLibraryFile}
-          />
-          <Button
-            variant="ghost"
-            size="sm"
-            leftIcon={<Images />}
-            disabled={intake.isProcessing}
-            onClick={() => libraryInputRef.current?.click()}
-            className="-ml-2 min-h-11 px-2 text-brand-ink"
-          >
-            Choose from library
-          </Button>
         </div>
 
         <p
@@ -235,7 +229,7 @@ export const Home: React.FC<HomeProps> = ({
         </p>
       </section>
 
-      <div className="mt-12 lg:mt-1">
+      <div className="mt-3 border-t border-hairline pt-1 lg:mt-1 lg:border-0 lg:pt-0">
         <MyWorkPreview
           posts={posts}
           loading={loading}

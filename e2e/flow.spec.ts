@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { readFileSync } from "node:fs";
 
 // These restored-post fixtures represent creatives generated under the current
 // reviewed image policy. Keep this in sync with config/gemini-model-policy.json;
@@ -550,7 +551,7 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "What are you posting?" }),
+      page.getByRole("heading", { name: "Your next great post." }),
     ).toBeVisible();
 
     const mainContent = page.locator("#main-content");
@@ -558,12 +559,13 @@ test.describe("Dealer Social Post AI Flow", () => {
     const deliveryCard = categoryCards.filter({ hasText: /^Delivery/ }).first();
     const finalCategoryCard = categoryCards.filter({ hasText: /^Team/ }).first();
     const deliveryAction = deliveryCard.getByRole("button", { name: /^Delivery/ });
-    // Phones get one "Choose from library" row under the tiles, the last
-    // control on Home; it belongs to no tile.
+    // Existing photos start at the top; My work remains reachable at the end.
     const chooseFromLibrary = mainContent.getByRole("button", {
       name: "Choose from library",
     });
 
+    const seeAll = mainContent.getByRole("button", { name: "See all" });
+    await expectControlsInsideViewport(page, chooseFromLibrary);
     await expect(categoryCards).toHaveCount(6);
     await expect(deliveryAction).toBeVisible();
     await expect(page.getByLabel("Take a photo for Delivery")).toBeAttached();
@@ -612,7 +614,7 @@ test.describe("Dealer Social Post AI Flow", () => {
       const [mainBounds, finalCardBounds, chooseBounds] = await Promise.all([
         mainContent.boundingBox(),
         finalCategoryCard.boundingBox(),
-        chooseFromLibrary.boundingBox(),
+        seeAll.boundingBox(),
       ]);
       expect(mainBounds).not.toBeNull();
       expect(finalCardBounds).not.toBeNull();
@@ -624,8 +626,8 @@ test.describe("Dealer Social Post AI Flow", () => {
       expect((chooseBounds?.y || 0) + (chooseBounds?.height || 0)).toBeLessThanOrEqual(
         mainBottom + 1,
       );
-      await expect(chooseFromLibrary).toBeVisible();
-      await expectControlsInsideViewport(page, chooseFromLibrary);
+      await expect(seeAll).toBeVisible();
+      await expectControlsInsideViewport(page, seeAll);
     };
 
     await expectDocumentLockedToViewport();
@@ -752,7 +754,7 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "What are you posting?" }),
+      page.getByRole("heading", { name: "Your next great post." }),
     ).toBeVisible();
     await page.evaluate(async (modelPolicyVersion) => {
       const image =
@@ -781,6 +783,12 @@ test.describe("Dealer Social Post AI Flow", () => {
         const transaction = database.transaction("creative-assets", "readwrite");
         transaction.objectStore("creative-assets").put({
           key: "qa-dealer:generated",
+          value: image,
+          updatedAt: Date.now(),
+          mediaEpoch: 0,
+        });
+        transaction.objectStore("creative-assets").put({
+          key: "qa-dealer:selected",
           value: image,
           updatedAt: Date.now(),
           mediaEpoch: 0,
@@ -985,6 +993,113 @@ test.describe("Dealer Social Post AI Flow", () => {
       expect(clipboard[0].startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`)).toBe(true);
     }
 
+    // Exercise the actual generation -> preview -> preparation -> share path
+    // with a decodable six-second house clip. No provider requests escape.
+    if (testInfo.project.name.endsWith("phone-390")) {
+      const encodedVideo = readFileSync(
+        new URL("./fixtures/studio-preview-6s.mp4", import.meta.url),
+      ).toString("base64");
+      await page.route("**/api/proxy/**", async (route) => {
+        const isStart = route.request().url().includes(":predictLongRunning");
+        await route.fulfill({
+          json: isStart
+            ? { name: "operations/studio-preview" }
+            : {
+                name: "operations/studio-preview",
+                done: true,
+                response: {
+                  generateVideoResponse: {
+                    generatedSamples: [{ video: { encodedVideo } }],
+                  },
+                },
+              },
+        });
+      });
+      await page.route("**/api/app/posts/qa-post-1/video-generated", (route) =>
+        route.fulfill({ json: { id: "qa-post-1" } }),
+      );
+      await page.getByRole("button", { name: "Add video", exact: true }).click();
+      const versions = page.getByRole("group", {
+        name: "Preview version",
+        exact: true,
+      });
+      await expect(
+        versions.getByRole("button", { name: "Video", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      const player = page.getByLabel("Post video", { exact: true });
+      await expect(player).toBeInViewport();
+      await expect
+        .poll(() =>
+          player.evaluate((node: HTMLVideoElement) => ({
+            width: node.videoWidth,
+            height: node.videoHeight,
+            duration: node.duration,
+          })),
+        )
+        .toEqual({ width: 720, height: 1280, duration: 6 });
+      await versions.getByRole("button", { name: "Image", exact: true }).click();
+      await expect(
+        page.getByRole("img", { name: "Post image", exact: true }),
+      ).toBeInViewport();
+      await expect(player).not.toBeInViewport();
+      // Simulate the browser's native horizontal swipe settling on video.
+      await page
+        .getByRole("group", { name: "Image and video previews" })
+        .evaluate((rail) => rail.scrollTo({ left: 0 }));
+      await expect(
+        versions.getByRole("button", { name: "Video", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await channelGroup
+        .getByRole("button", { name: "Instagram", exact: true })
+        .click();
+      await expect(
+        versions.getByRole("button", { name: "Video", exact: true }),
+      ).toHaveAttribute("aria-pressed", "true");
+      const beforeVideoShare = await page.evaluate(
+        () => (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.length,
+      );
+      const videoShare = page.getByRole("button", {
+        name: "Share to Instagram",
+        exact: true,
+      });
+      await expect(videoShare).toBeEnabled();
+      await videoShare.click();
+      expect(
+        await page.evaluate(
+          () =>
+            (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.at(-1)
+              ?.files?.[0]?.type,
+        ),
+      ).toBe("video/mp4");
+      expect(
+        await page.evaluate(
+          () =>
+            (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.length,
+        ),
+      ).toBe(beforeVideoShare + 1);
+      await page.evaluate(() =>
+        (window as unknown as { __resolveShare?: () => void }).__resolveShare?.(),
+      );
+      await versions.getByRole("button", { name: "Image", exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "Share to Instagram", exact: true }),
+      ).toBeEnabled();
+      await page
+        .getByRole("button", { name: "Share to Instagram", exact: true })
+        .click();
+      expect(
+        await page.evaluate(
+          () =>
+            (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.at(-1)
+              ?.files?.[0]?.type,
+        ),
+      ).toBe("image/jpeg");
+      await page.evaluate(() =>
+        (window as unknown as { __resolveShare?: () => void }).__resolveShare?.(),
+      );
+      await expectNoSeriousAxeViolations(page);
+    }
+
     await page.screenshot({
       path: testInfo.outputPath("post-streamlined.png"),
       fullPage: true,
@@ -1086,7 +1201,7 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "What are you posting?" }),
+      page.getByRole("heading", { name: "Your next great post." }),
     ).toBeVisible();
     await page.evaluate(async (modelPolicyVersion) => {
       const image = `data:image/svg+xml;base64,${btoa(
@@ -1336,7 +1451,7 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "What are you posting?" }),
+      page.getByRole("heading", { name: "Your next great post." }),
     ).toBeVisible();
     await page.evaluate(async (modelPolicyVersion) => {
       const image = `data:image/svg+xml;base64,${btoa(

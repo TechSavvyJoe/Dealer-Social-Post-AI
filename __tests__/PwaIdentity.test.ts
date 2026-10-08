@@ -52,17 +52,17 @@ describe("installable product identity", () => {
     expect(manifest.icons).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          src: "/dealer-social-dsp-v4-512.png",
+          src: "/dealer-social-dsp-v5-512.png",
           sizes: "512x512",
           purpose: "any",
         }),
         expect.objectContaining({
-          src: "/dealer-social-dsp-v4-maskable-512.png",
+          src: "/dealer-social-dsp-v5-maskable-512.png",
           sizes: "512x512",
           purpose: "maskable",
         }),
         expect.objectContaining({
-          src: "/dealer-social-dsp-v4-maskable-1024.png",
+          src: "/dealer-social-dsp-v5-maskable-1024.png",
           sizes: "1024x1024",
           purpose: "maskable",
         }),
@@ -94,32 +94,32 @@ describe("installable product identity", () => {
   it("ships correctly sized browser, Apple, and desktop app artwork", () => {
     for (const [path, size] of [
       ["public/dealer-social-favicon-v4-32.png", 32],
-      ["public/dealer-social-dsp-v4-180.png", 180],
-      ["public/dealer-social-dsp-v4-192.png", 192],
-      ["public/dealer-social-dsp-v4-512.png", 512],
-      ["public/dealer-social-dsp-v4-1024.png", 1024],
-      ["public/dealer-social-dsp-v4-maskable-192.png", 192],
-      ["public/dealer-social-dsp-v4-maskable-512.png", 512],
-      ["public/dealer-social-dsp-v4-maskable-1024.png", 1024],
+      ["public/dealer-social-dsp-v5-180.png", 180],
+      ["public/dealer-social-dsp-v5-192.png", 192],
+      ["public/dealer-social-dsp-v5-512.png", 512],
+      ["public/dealer-social-dsp-v5-1024.png", 1024],
+      ["public/dealer-social-dsp-v5-maskable-192.png", 192],
+      ["public/dealer-social-dsp-v5-maskable-512.png", 512],
+      ["public/dealer-social-dsp-v5-maskable-1024.png", 1024],
     ] as const) {
       expect(existsSync(resolve(process.cwd(), path))).toBe(true);
       expect(pngSize(path)).toEqual({ width: size, height: size });
     }
     for (const path of [
-      "public/dealer-social-dsp-v4-180.png",
-      "public/dealer-social-dsp-v4-192.png",
-      "public/dealer-social-dsp-v4-512.png",
-      "public/dealer-social-dsp-v4-1024.png",
-      "public/dealer-social-dsp-v4-maskable-192.png",
-      "public/dealer-social-dsp-v4-maskable-512.png",
-      "public/dealer-social-dsp-v4-maskable-1024.png",
+      "public/dealer-social-dsp-v5-180.png",
+      "public/dealer-social-dsp-v5-192.png",
+      "public/dealer-social-dsp-v5-512.png",
+      "public/dealer-social-dsp-v5-1024.png",
+      "public/dealer-social-dsp-v5-maskable-192.png",
+      "public/dealer-social-dsp-v5-maskable-512.png",
+      "public/dealer-social-dsp-v5-maskable-1024.png",
     ]) {
       expect(pngIsOpaque(path)).toBe(true);
     }
     for (const size of [192, 512, 1024]) {
       expect(
-        read(`public/dealer-social-dsp-v4-${size}.png`).equals(
-          read(`public/dealer-social-dsp-v4-maskable-${size}.png`),
+        read(`public/dealer-social-dsp-v5-${size}.png`).equals(
+          read(`public/dealer-social-dsp-v5-maskable-${size}.png`),
         ),
       ).toBe(false);
     }
@@ -132,7 +132,7 @@ describe("installable product identity", () => {
     expect(html).toContain(
       'rel="icon" type="image/svg+xml" href="/dsp-brand-mark-v4-micro.svg"',
     );
-    expect(html).toContain('href="/dealer-social-dsp-v4-180.png"');
+    expect(html).toContain('href="/dealer-social-dsp-v5-180.png"');
     expect(html).toContain('rel="manifest" href="/manifest.webmanifest"');
     expect(html).toContain("viewport-fit=cover");
   });

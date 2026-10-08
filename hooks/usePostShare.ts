@@ -75,9 +75,11 @@ const preparedFileKey = (file: File | undefined): string =>
 const localShare = (
   channel: PlatformDestinationId,
   via: PostShareVia,
+  mediaKind: "photo" | "video",
 ): NonNullable<GeneratedPost["sharedTo"]>[number] => ({
   channel,
   via,
+  mediaKind,
   at: new Date().toISOString(),
 });
 
@@ -225,10 +227,13 @@ export const usePostShare = ({
       const base = current || post;
       store.setGeneratedPost({
         ...base,
-        sharedTo: [...(base.sharedTo || []), localShare(channelId, via)],
+        sharedTo: [
+          ...(base.sharedTo || []),
+          localShare(channelId, via, isVideoContent(content) ? "video" : "photo"),
+        ],
       });
     },
-    [channelId, post, sessionIsCurrent],
+    [channelId, post, sessionIsCurrent, content],
   );
 
   const record = useCallback(
@@ -348,7 +353,11 @@ export const usePostShare = ({
     !fallbackActive &&
     Boolean(
       post.sharedTo?.some(
-        (event) => event.channel === channelId && event.via === "share_sheet",
+        (event) =>
+          event.channel === channelId &&
+          event.via === "share_sheet" &&
+          (event.mediaKind || "photo") ===
+            (isVideoContent(content) ? "video" : "photo"),
       ),
     );
 

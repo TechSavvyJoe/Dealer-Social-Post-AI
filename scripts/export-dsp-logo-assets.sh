@@ -64,3 +64,19 @@ render_opaque \
   180
 
 echo "Exported Dealer Social Post AI v4 logo assets."
+
+# Current installed-app artwork; v4 URLs remain immutable for older clients.
+studio_source="$repo_root/docs/brand/dealer-social-studio-v5-source.png"
+for size in 180 192 512 1024; do
+  render_opaque "$studio_source" "$public_dir/dealer-social-dsp-v5-${size}.png" "$size"
+done
+for size in 192 512 1024; do
+  inset=$((size / 10))
+  inner=$((size - inset * 2))
+  npx --yes "sharp-cli@${sharp_cli_version}" \
+    -i "$studio_source" -o "$public_dir/dealer-social-dsp-v5-maskable-${size}.png" -f png \
+    resize "$inner" "$inner" -- \
+    extend "$inset" "$inset" "$inset" "$inset" --background "#121416" -- \
+    flatten "#121416" -- removeAlpha
+done
+render_opaque "$studio_source" "$public_dir/apple-touch-icon.png" 180

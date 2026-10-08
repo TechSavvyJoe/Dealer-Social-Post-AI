@@ -108,7 +108,7 @@ const secondaryLinkClass =
 
 /** The one phone bottom bar; at lg and up it sits in the actions column. */
 const phoneBarClass =
-  "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:border-t max-lg:border-hairline max-lg:bg-panel max-lg:px-4 max-lg:pt-3 max-lg:pb-[max(12px,var(--sab))]";
+  "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:border-t max-lg:border-hairline max-lg:bg-panel max-lg:pl-[max(16px,var(--sal))] max-lg:pr-[max(16px,var(--sar))] max-lg:pt-3 max-lg:pb-[max(12px,var(--sab))]";
 
 /** A secondary Done beside a primary in the phone bar. */
 const barPair = "grid grid-cols-[auto_minmax(0,1fr)] gap-2";
@@ -417,11 +417,48 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     post,
     resultIdentity,
     websiteEnabled: website.websiteDraft?.enabled,
+    includeSourceImage: true,
     video,
   });
 
+  const latestPreviewVideo = [...video.videoJobs]
+    .reverse()
+    .find(
+      (job) =>
+        job.status === "completed" &&
+        job.url &&
+        job.sourceCreativeKey === video.currentVideoCreativeKey,
+    );
+  const previewSectionRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!latestPreviewVideo?.url) return;
+    previewSectionRef.current?.scrollIntoView?.({
+      block: "start",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    });
+  }, [latestPreviewVideo?.id, latestPreviewVideo?.url]);
+  const [previewMediaChoice, setPreviewMediaChoice] = useState<
+    "image" | "video" | null
+  >(null);
+  const selectPreviewMedia = (kind: "image" | "video") => {
+    if (postChanging) return;
+    setPreviewMediaChoice(kind);
+    if (kind === "video" && latestPreviewVideo?.url) {
+      video.setManualVideoSelected(true);
+      video.adoptVideoUrl(latestPreviewVideo.url);
+    } else if (kind === "image") {
+      video.setManualVideoSelected(false);
+      video.adoptVideoUrl(null);
+    }
+  };
+
   const deliveryKind =
-    video.videoUrl || post.mediaOutputMode === "video" ? "video" : "photo";
+    video.videoUrl ||
+    (previewMediaChoice !== "image" && post.mediaOutputMode === "video")
+      ? "video"
+      : "photo";
   const availableChannels = useMemo(() => {
     const ids = new Set(
       preparedDelivery.deliveryPlan.deliveries
@@ -673,16 +710,24 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   const sharedSelectedChannel =
     visibleCreativeSaved &&
     post.sharedTo?.some(
-      (event) => event.channel === selectedChannelId && event.via === "share_sheet",
+      (event) =>
+        event.channel === selectedChannelId &&
+        event.via === "share_sheet" &&
+        (event.mediaKind || "photo") === deliveryKind,
     );
   const sharedChannelIds = useMemo(
     () =>
       new Set(
         (post.sharedTo || [])
-          .filter((event) => visibleCreativeSaved && event.via === "share_sheet")
+          .filter(
+            (event) =>
+              visibleCreativeSaved &&
+              event.via === "share_sheet" &&
+              (event.mediaKind || "photo") === deliveryKind,
+          )
           .map((event) => event.channel),
       ),
-    [post.sharedTo, visibleCreativeSaved],
+    [post.sharedTo, visibleCreativeSaved, deliveryKind],
   );
   // "Shared" (and the primary Done) follows a completed share-sheet share only.
   const sharedViaSheet =
@@ -1470,6 +1515,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
       <div className="mx-auto grid w-full max-w-[1160px] gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
         <section
           className="mx-auto w-full max-w-[640px] lg:mx-0"
+          ref={previewSectionRef}
           aria-label="Post preview"
         >
           {!isDesktopLayout &&
@@ -1490,6 +1536,9 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
             dealerName={currentDealer?.name || "Your dealership"}
             image={preparedDelivery.formattedPreviewUrl || post.image}
             videoUrl={video.videoUrl}
+            availableVideoUrl={latestPreviewVideo?.url}
+            onSelectMedia={selectPreviewMedia}
+            mediaSelectionDisabled={postChanging}
             caption={caption}
             outboundText={previewOutboundText}
             employeeDisclosure={employeeDisclosure}

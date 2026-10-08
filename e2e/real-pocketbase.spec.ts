@@ -862,7 +862,7 @@ test.describe("real PocketBase release flow", () => {
       salespersonCookie,
     );
     await expect(
-      salespersonPage.getByRole("heading", { name: "What are you posting?" }),
+      salespersonPage.getByRole("heading", { name: "Your next great post." }),
     ).toBeVisible({ timeout: 15_000 });
 
     const restoredSalespersonResponse = await salespersonPage.request.get(

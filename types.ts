@@ -177,6 +177,8 @@ export interface PostShareRecord {
   /** Destination id from services/platformOutputs.ts, e.g. `facebook_feed`. */
   channel: PlatformDestinationId;
   via: PostShareVia;
+  /** Local asset choice; older server receipts predate image/video switching. */
+  mediaKind?: "photo" | "video";
   /** Server-written time the share was recorded. */
   at: string;
 }
