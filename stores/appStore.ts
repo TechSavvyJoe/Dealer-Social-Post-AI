@@ -298,6 +298,7 @@ export const resolveRestoredStep = (
         : AppStep.CAPTURE;
 
   if (requestedStep === AppStep.WORK) return AppStep.WORK;
+  if (requestedStep === AppStep.VEHICLE_SPIN) return AppStep.VEHICLE_SPIN;
   if (requestedStep === AppStep.RESULT && hasGeneratedPost) {
     return AppStep.RESULT;
   }

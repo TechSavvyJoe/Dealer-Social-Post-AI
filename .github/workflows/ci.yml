@@ -77,11 +77,41 @@ jobs:
       - run: npm run check
         working-directory: automation
 
-  playwright:
-    name: Playwright e2e
+  playwright-browser:
+    name: Playwright ${{ matrix.browser }}
     runs-on: ubuntu-latest
-    # 368 tests (Chromium and WebKit at eight sizes) on one worker.
+    # Separate runners retain one worker per engine without serializing both
+    # device matrices behind the full 48-frame CPU model test.
     timeout-minutes: 25
+    needs: typecheck-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Run Playwright e2e
+        run: |
+          if [ -d e2e ]; then
+            npx playwright test --project='${{ matrix.browser }}-*' \
+              --grep-invert 'vehicle background controls preserve originals'
+          else
+            echo "No e2e/ directory present — skipping Playwright run."
+          fi
+        env:
+          CI: true
+          # Frontend-only smoke tests stub API routes; PocketBase is not required.
+
+  vehicle-spin-editor:
+    name: Full 48-angle background editor
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
     needs: typecheck-and-test
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -90,17 +120,33 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npx playwright install --with-deps chromium webkit
-      - name: Run Playwright e2e
-        run: |
-          if [ -d e2e ]; then
-            npx playwright test
-          else
-            echo "No e2e/ directory present — skipping Playwright run."
-          fi
+      - run: npx playwright install --with-deps chromium
+      - name: Process and correct all 48 frames with the real model
+        run: >-
+          npx playwright test e2e/vehicle-spin-editor.spec.ts
+          --project=chromium-desktop-1440 --retries=0 --trace=off --reporter=line
         env:
           CI: true
-          # Frontend-only smoke tests stub API routes; PocketBase is not required.
+      - name: Preserve background editor diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vehicle-spin-editor
+          path: test-results/
+          retention-days: 7
+
+  playwright:
+    # Preserve the existing check name for branch protection.
+    name: Playwright e2e
+    runs-on: ubuntu-latest
+    needs: [playwright-browser, vehicle-spin-editor]
+    if: always()
+    steps:
+      - name: Require both engines and the full model run
+        env:
+          BROWSER_RESULT: ${{ needs.playwright-browser.result }}
+          EDITOR_RESULT: ${{ needs.vehicle-spin-editor.result }}
+        run: test "$BROWSER_RESULT" = success && test "$EDITOR_RESULT" = success
 
   container-smoke:
     name: production container + migration and backup safety
@@ -221,6 +267,12 @@ jobs:
               --project=chromium-desktop-1440 \
               --project=webkit-desktop-1440 \
               --reporter=line
+
+          E2E_BASE_URL=http://127.0.0.1:8090 \
+          E2E_REAL_POCKETBASE=true \
+          E2E_ADMIN_USERNAME="$login_username" \
+          E2E_ADMIN_PASSWORD="$login_secret" \
+            npm run test:spin:backend
 
           sensitive_event_count="$(docker exec "$container_id" sqlite3 \
             /pb/pb_data/data.db \
