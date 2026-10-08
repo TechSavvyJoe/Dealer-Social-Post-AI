@@ -107,7 +107,7 @@ describe("validateVideoMetadata", () => {
     });
     vi.spyOn(video, "pause").mockImplementation(() => undefined);
     vi.spyOn(video, "load").mockImplementation(() => {
-      if (video.getAttribute("src") || video.src) {
+      if (video.isConnected && (video.getAttribute("src") || video.src)) {
         queueMicrotask(() => video.dispatchEvent(new Event("loadedmetadata")));
       }
     });
@@ -118,10 +118,11 @@ describe("validateVideoMetadata", () => {
       tagName.toLowerCase() === "video"
         ? video
         : createElement(tagName, options)) as typeof document.createElement);
+    return video;
   };
 
   it("accepts exact vertical video pixels and duration", async () => {
-    installDecodedVideo(1080, 1920, 8.1);
+    const video = installDecodedVideo(1080, 1920, 8.1);
     await expect(
       validateVideoMetadata("blob:vertical", {
         width: 1080,
@@ -133,6 +134,9 @@ describe("validateVideoMetadata", () => {
       height: 1920,
       durationSeconds: 8.1,
     });
+    expect(video.playsInline).toBe(true);
+    expect(video.isConnected).toBe(false);
+    expect(video.getAttribute("src")).toBeNull();
   });
 
   it.each([
@@ -147,10 +151,30 @@ describe("validateVideoMetadata", () => {
       expected: { width: 1920, height: 1080, durationSeconds: 8 },
     },
   ])("rejects a $label", async ({ actual, expected }) => {
-    installDecodedVideo(actual.width, actual.height, actual.duration);
+    const video = installDecodedVideo(actual.width, actual.height, actual.duration);
     await expect(validateVideoMetadata("blob:mismatch", expected)).rejects.toThrow(
       /did not match/,
     );
+    expect(video.isConnected).toBe(false);
+  });
+
+  it("removes a connected probe and releases its blob URL after a timeout", async () => {
+    vi.useFakeTimers();
+    const video = installDecodedVideo(1080, 1920, 8);
+    vi.mocked(video.load).mockImplementation(() => undefined);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:verification");
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    const pending = validateVideoMetadata(
+      new Blob(["clip"], { type: "video/mp4" }),
+      { width: 1080, height: 1920, durationSeconds: 8 },
+      50,
+    );
+    const rejection = expect(pending).rejects.toThrow(/verification timed out/);
+    expect(video.isConnected).toBe(true);
+    await vi.advanceTimersByTimeAsync(50);
+    await rejection;
+    expect(video.isConnected).toBe(false);
+    expect(revoke).toHaveBeenCalledWith("blob:verification");
   });
 });
 

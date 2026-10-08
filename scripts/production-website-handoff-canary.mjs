@@ -550,6 +550,7 @@ async function runLockedCanary() {
       "RELEASE_CANARY_PERSON_PIN must be exactly four digits.",
     );
   }
+  const invitationToken = requireEnv("RELEASE_CANARY_INVITATION_TOKEN");
   await contractCheck(backendSourceForRelease(expectedReleaseSha));
 
   const marker = `QA-${expectedReleaseSha.slice(0, 8)}-${expectedReleaseSha.slice(8, 12)}`;
@@ -583,6 +584,7 @@ async function runLockedCanary() {
 
   try {
     console.log("Authenticating synthetic website handoff canary...");
+    const invitedDealerId = await client.acceptInvitation(invitationToken);
     const loginResponse = await client.request("/api/app/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -597,7 +599,11 @@ async function runLockedCanary() {
       "AUTH_FAILED",
       "Website canary authentication",
     );
-    if (login.role !== "salesperson" || login.person?.name !== "Release Canary") {
+    if (
+      login.role !== "salesperson" ||
+      login.person?.name !== "Release Canary" ||
+      login.dealer?.id !== invitedDealerId
+    ) {
       throw new WebsiteHandoffCanaryError(
         "AUTH_ROLE_INVALID",
         "Website canary credential did not resolve to the dedicated least-privilege Release Canary salesperson.",
@@ -609,7 +615,11 @@ async function runLockedCanary() {
         "Website canary dealer must allow an approval-free synthetic post.",
       );
     }
-    evidence.checks.authentication = { passed: true, role: "salesperson" };
+    evidence.checks.authentication = {
+      passed: true,
+      role: "salesperson",
+      privateInvitationConfirmed: true,
+    };
 
     const health = await jsonOrFail(
       await client.request("/api/app/health", {

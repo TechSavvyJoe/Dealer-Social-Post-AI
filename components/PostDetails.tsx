@@ -394,7 +394,7 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
             reach (same pattern as Post). Desktop: the foot of the column. */}
         <div
           ref={barRef}
-          className="max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:border-t max-lg:border-hairline max-lg:bg-panel max-lg:px-4 max-lg:pt-3 max-lg:pb-[max(12px,var(--sab))] sm:max-lg:px-6 lg:mt-auto lg:border-t lg:border-hairline lg:pt-6"
+          className="phone-action-bar max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:border-t max-lg:border-hairline max-lg:bg-panel max-lg:px-4 max-lg:pt-3 max-lg:pb-[max(12px,var(--sab))] sm:max-lg:px-6 lg:mt-auto lg:border-t lg:border-hairline lg:pt-6"
         >
           {gateReason ? (
             <p

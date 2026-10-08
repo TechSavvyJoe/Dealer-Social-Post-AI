@@ -108,7 +108,7 @@ const secondaryLinkClass =
 
 /** The one phone bottom bar; at lg and up it sits in the actions column. */
 const phoneBarClass =
-  "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:border-t max-lg:border-hairline max-lg:bg-panel max-lg:pl-[max(16px,var(--sal))] max-lg:pr-[max(16px,var(--sar))] max-lg:pt-3 max-lg:pb-[max(12px,var(--sab))]";
+  "phone-action-bar max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:border-t max-lg:border-hairline max-lg:bg-panel max-lg:pl-[max(16px,var(--sal))] max-lg:pr-[max(16px,var(--sar))] max-lg:pt-3 max-lg:pb-[max(12px,var(--sab))]";
 
 /** A secondary Done beside a primary in the phone bar. */
 const barPair = "grid grid-cols-[auto_minmax(0,1fr)] gap-2";

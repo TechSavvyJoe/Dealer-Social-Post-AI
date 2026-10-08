@@ -296,6 +296,7 @@ test.describe("Home Screen PWA contracts", () => {
     context,
     browserName,
   }, testInfo) => {
+    test.setTimeout(60_000);
     test.skip(
       browserName !== "chromium" || testInfo.project.name !== "chromium-phone-390",
       "The representative Chromium phone provides deterministic iPhone safe-area emulation.",
@@ -321,6 +322,21 @@ test.describe("Home Screen PWA contracts", () => {
         configurable: true,
         get: () => true,
       });
+      // Model iOS's cold-launch bug: the visible height is stale and shorter
+      // than the actual full-screen canvas, including after a rotation.
+      Object.defineProperty(screen, "width", {
+        configurable: true,
+        get: () => document.documentElement.clientWidth,
+      });
+      Object.defineProperty(screen, "height", {
+        configurable: true,
+        get: () => document.documentElement.clientHeight,
+      });
+      if (window.visualViewport)
+        Object.defineProperty(window.visualViewport, "height", {
+          configurable: true,
+          get: () => Math.max(1, document.documentElement.clientHeight - 93),
+        });
     });
     await stubAuthenticatedHome(page);
 
@@ -424,7 +440,7 @@ test.describe("Home Screen PWA contracts", () => {
             document.documentElement.clientHeight,
         };
       });
-      expect(shell.visualViewportHeight).toBe(shell.viewportHeight);
+      expect(shell.visualViewportHeight).toBe(shell.viewportHeight - 93);
       expect(shell.rootBottom).toBe(shell.viewportHeight);
       expect(shell.bodyBottom).toBe(shell.viewportHeight);
       expect(shell.rootPaddingTop).toBe(59);

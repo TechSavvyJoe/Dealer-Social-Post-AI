@@ -176,8 +176,9 @@ Two things must be true before it reports success, and both are asserted:
   ```
 
 Why this is a lighter gate than the ceremony below: the staged path cannot run
-unattended. Its provider canary needs `RELEASE_CANARY_PERSON_PIN` — a real
-production salesperson PIN — plus paid caption, image, and video generation on
+unattended. Its provider canary needs `RELEASE_CANARY_PERSON_PIN` and
+`RELEASE_CANARY_INVITATION_TOKEN` for the dedicated synthetic production
+dealership, plus paid caption, image, and video generation on
 every merge, and its promotion step requires a human browser-QA receipt. Putting
 that PIN in CI secrets and auto-issuing the QA receipt would keep the appearance
 of those gates while removing their substance. The automated job instead asserts
@@ -193,24 +194,27 @@ needs a human to look at generated output before customers do.
 
 1. Select one commit SHA. Require secret scan, model-policy and Vercel-config drift checks, scoped format check, three consecutive Vitest passes, typecheck, build, full dependency audit, Chromium/WebKit browser tests, dirty-upgrade smoke, deterministic provider-boundary canaries, the private website-handoff contract canary, and the local backup/restore canary.
 2. Open the time-limited Fly image bootstrap only for the first v2 release. Let the successful current-`main` CI run trigger the coordinated Fly workflow. Stale `workflow_run` SHAs are rejected twice. The workflow builds and labels one candidate image, pushes it to Fly's private registry, pins its digest, restores the production backup into that exact digest, and deploys the same digest without rebuilding. Readiness confirms every started machine reports that digest, repository, and SHA.
-3. Provision a dedicated active synthetic salesperson in a non-customer canary dealership and retain its PIN only in the release secret store. Confirm direct Fly health reports the candidate `releaseSha`, `backup.status: "verified"`, trusted proxy readiness, API/model-policy versions, and `ok: true`. Run the authenticated caption, standard-image, standard-video (vertical 720p, 6-second), and quality-video (landscape 1080p, 8-second) canaries below. They are pinned to the exact production Fly origin, use only `public/icon-512.png`, revoke the least-privilege session, and write redacted evidence without captions, provider payloads, media, operation names, file URIs, or credentials. The image check decodes the provider result and requires actual 4:5 pixels. The release workstation must have `ffprobe` from FFmpeg available (or set `RELEASE_CANARY_FFPROBE` to its executable); both video checks block promotion unless they verify the exact dimensions and duration, H.264 video, a present AAC audio stream, compatible pixel format, and readable video and audio packets.
+3. Provision a dedicated active synthetic salesperson in a non-customer canary dealership. Issue that dealership's private invitation and retain its token and the salesperson PIN only in the release secret store. The token is the 64-character fragment after `#` in the private link, not the complete URL. Both canaries explicitly join before sign-in and require the signed-in dealership to match that invitation; never disable the invitation policy to prepare a canary. Confirm direct Fly health reports the candidate `releaseSha`, `backup.status: "verified"`, trusted proxy readiness, API/model-policy versions, and `ok: true`. Run the authenticated caption, standard-image, standard-video (vertical 720p, 6-second), and quality-video (landscape 1080p, 8-second) canaries below. They are pinned to the exact production Fly origin, use only `public/icon-512.png`, revoke the least-privilege session, and write redacted evidence without captions, provider payloads, media, operation names, file URIs, or credentials. The image check decodes the provider result and requires actual 4:5 pixels. The release workstation must have `ffprobe` from FFmpeg available (or set `RELEASE_CANARY_FFPROBE` to its executable); both video checks block promotion unless they verify the exact dimensions and duration, H.264 video, a present AAC audio stream, compatible pixel format, and readable video and audio packets.
 
    ```bash
    set +x
    read -r -s -p "Dedicated synthetic salesperson PIN: " RELEASE_CANARY_PERSON_PIN
    printf '\n'
    export RELEASE_CANARY_PERSON_PIN
+   read -r -s -p "Dedicated test dealership invitation token: " RELEASE_CANARY_INVITATION_TOKEN
+   printf '\n'
+   export RELEASE_CANARY_INVITATION_TOKEN
    export RELEASE_CANARY_BASE_URL=https://dealer-social-post-ai-production.fly.dev
    export RELEASE_CANARY_EXPECTED_SHA="$(git rev-parse HEAD)"
    export RELEASE_CANARY_CONFIRM=caption-image-video-synthetic-only
    export RELEASE_CANARY_EVIDENCE_PATH="$PWD/.release-evidence/production-provider-canary.json"
    npm run release:provider-canary
-   unset RELEASE_CANARY_PERSON_PIN RELEASE_CANARY_BASE_URL \
+   unset RELEASE_CANARY_PERSON_PIN RELEASE_CANARY_INVITATION_TOKEN RELEASE_CANARY_BASE_URL \
      RELEASE_CANARY_EXPECTED_SHA RELEASE_CANARY_CONFIRM \
      RELEASE_CANARY_EVIDENCE_PATH
    ```
 
-   Review and archive the redacted JSON evidence with the release record. Starting a canary atomically replaces any older pass with a non-authorizing `running` receipt. Both staging and promotion refuse a missing, failed, mismatched, or more-than-six-hours-old receipt, and require every authentication, health, caption, standard-image, standard-video, quality-video, and session-revocation check to pass for the exact Fly SHA. A failed canary exits nonzero and records only a stable failure code, safe message, and HTTP status when applicable. Never run it with customer media or place the PIN on the command line. Rotate the dedicated PIN after any suspected exposure; never substitute the system-admin secret.
+   Review and archive the redacted JSON evidence with the release record. Starting a canary atomically replaces any older pass with a non-authorizing `running` receipt. Both staging and promotion refuse a missing, failed, mismatched, or more-than-six-hours-old receipt, and require every authentication, health, caption, standard-image, standard-video, quality-video, and session-revocation check to pass for the exact Fly SHA. A failed canary exits nonzero and records only a stable failure code, safe message, and HTTP status when applicable. Never run it with customer media or place either credential on the command line, in a receipt, or in chat. Rotate the dedicated PIN or invitation after any suspected exposure; never substitute the system-admin secret.
 
 4. Run the authenticated private website-handoff canary against that exact Fly SHA. Use only the checked-in synthetic delivery image and the dedicated `Release Canary` salesperson in the approval-free Customer Hub-enabled canary dealership. The canary first saves a website-only post and proves it stays `not_requested` across a worker boundary. Only its explicit final Send may enqueue the edited draft. It then proves the missing/stale revision blocks, exact replay idempotency, changed-replay block, clean zero-attempt private delivery, public image `404`, absent public marker, and session revocation.
 
@@ -219,6 +223,9 @@ needs a human to look at generated output before customers do.
    read -r -s -p "Dedicated Release Canary salesperson PIN: " RELEASE_CANARY_PERSON_PIN
    printf '\n'
    export RELEASE_CANARY_PERSON_PIN
+   read -r -s -p "Dedicated test dealership invitation token: " RELEASE_CANARY_INVITATION_TOKEN
+   printf '\n'
+   export RELEASE_CANARY_INVITATION_TOKEN
    export RELEASE_CANARY_BASE_URL=https://dealer-social-post-ai-production.fly.dev
    export RELEASE_CANARY_EXPECTED_SHA="$(git rev-parse HEAD)"
    export WEBSITE_HANDOFF_CANARY_CONFIRM=website-private-draft-synthetic-only
@@ -231,7 +238,7 @@ needs a human to look at generated output before customers do.
    ```bash
    export WEBSITE_HANDOFF_CANARY_CLEANUP_CONFIRM=private-synthetic-draft-purged
    npm run release:website-handoff-canary:confirm-cleanup
-   unset WEBSITE_HANDOFF_CANARY_CLEANUP_CONFIRM RELEASE_CANARY_PERSON_PIN \
+   unset WEBSITE_HANDOFF_CANARY_CLEANUP_CONFIRM RELEASE_CANARY_PERSON_PIN RELEASE_CANARY_INVITATION_TOKEN \
      RELEASE_CANARY_BASE_URL RELEASE_CANARY_EXPECTED_SHA
    ```
 

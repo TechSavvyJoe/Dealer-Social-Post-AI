@@ -175,6 +175,8 @@ describe("production website handoff canary", () => {
     const evidenceShape = source.slice(evidenceStart, evidenceEnd);
     for (const sensitiveField of [
       "personPin",
+      "invitationToken",
+      "invitationCookie",
       "cookie",
       "caption",
       "body",

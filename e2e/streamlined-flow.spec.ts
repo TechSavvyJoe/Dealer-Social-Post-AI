@@ -277,9 +277,10 @@ const clipboardWrites = (page: Page) =>
 async function seedRestoredPost(
   page: Page,
   platformIds = ["facebook_feed", "instagram_feed"],
+  restoreSource = false,
 ) {
   await page.evaluate(
-    async ({ image, revision, platformIds }) => {
+    async ({ image, revision, platformIds, restoreSource }) => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
         const req = indexedDB.open("dealer-social-post-ai", 2);
         req.onupgradeneeded = () => {
@@ -303,6 +304,13 @@ async function seedRestoredPost(
           updatedAt: Date.now(),
           mediaEpoch: 0,
         });
+        if (restoreSource)
+          tx.objectStore("creative-assets").put({
+            key: "qa-dealer:selected",
+            value: image,
+            updatedAt: Date.now(),
+            mediaEpoch: 0,
+          });
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
       });
@@ -333,7 +341,7 @@ async function seedRestoredPost(
         }),
       );
     },
-    { image: dataUrl, revision: SEEDED_REVISION, platformIds },
+    { image: dataUrl, revision: SEEDED_REVISION, platformIds, restoreSource },
   );
 }
 
@@ -744,6 +752,139 @@ test("Create post stores the signature first, Cancel keeps the draft, and the re
   if (phone) {
     await expect(page.getByText("Shared · Instagram", { exact: true })).toBeVisible();
   }
+});
+
+test("installed iPhone fills its canvas with a stale viewport and reachable image/video actions", async ({
+  page,
+}, info) => {
+  test.skip(
+    !info.project.name.endsWith("phone-390"),
+    "Representative installed phone in both browser engines.",
+  );
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "standalone", {
+      configurable: true,
+      get: () => true,
+    });
+    Object.defineProperty(screen, "width", {
+      configurable: true,
+      get: () => document.documentElement.clientWidth,
+    });
+    Object.defineProperty(screen, "height", {
+      configurable: true,
+      get: () => document.documentElement.clientHeight,
+    });
+    const nativeInnerHeight = () => document.documentElement.clientHeight;
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      get: () => nativeInnerHeight() - 93,
+    });
+    if (window.visualViewport)
+      Object.defineProperty(window.visualViewport, "height", {
+        configurable: true,
+        get: () =>
+          (window as unknown as { __keyboardHeight?: number }).__keyboardHeight ||
+          nativeInnerHeight() - 93,
+      });
+  });
+  const encodedVideo = readFileSync(
+    resolve("e2e/fixtures/studio-preview-6s.mp4"),
+  ).toString("base64");
+  await fixture(page, "salesperson", (request, path) => {
+    if (path.startsWith("/api/proxy/"))
+      return {
+        json: request.url().includes(":predictLongRunning")
+          ? { name: "operations/installed-preview" }
+          : {
+              name: "operations/installed-preview",
+              done: true,
+              response: {
+                generateVideoResponse: {
+                  generatedSamples: [{ video: { encodedVideo } }],
+                },
+              },
+            },
+      };
+    if (path.endsWith("/video-generated")) return { json: { id: "qa-post" } };
+    return undefined;
+  });
+  await expect(
+    page.getByRole("heading", { name: "Your next great post." }),
+  ).toBeVisible({ timeout: 15000 });
+  await seedRestoredPost(page, ["facebook_feed", "instagram_feed"], true);
+  await recordSharing(page);
+  await page.reload();
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty("--sat", "59px");
+    document.documentElement.style.setProperty("--sab", "34px");
+  });
+  const share = page.getByRole("button", { name: "Share to Facebook", exact: true });
+  await expect(share).toBeEnabled({ timeout: 15000 });
+  const assertCanvas = async (expectedHeight: number) => {
+    await expect
+      .poll(() =>
+        page.locator("#root").evaluate((root) => root.getBoundingClientRect().bottom),
+      )
+      .toBe(expectedHeight);
+    const geometry = await page.evaluate(() => {
+      const bar = document.querySelector<HTMLElement>(".phone-action-bar")!;
+      return {
+        rootBottom: document.getElementById("root")!.getBoundingClientRect().bottom,
+        bodyPosition: getComputedStyle(document.body).position,
+        barPosition: getComputedStyle(bar).position,
+        barBottom: bar.getBoundingClientRect().bottom,
+        headerTop: document.querySelector("header")!.getBoundingClientRect().top,
+      };
+    });
+    expect(geometry.rootBottom).toBe(expectedHeight);
+    expect(geometry.bodyPosition).toBe("relative");
+    expect(geometry.barPosition).toBe("absolute");
+    expect(geometry.barBottom).toBe(expectedHeight);
+    expect(geometry.headerTop).toBeGreaterThanOrEqual(59);
+  };
+  await assertCanvas(844);
+  await page.getByRole("button", { name: "Add video", exact: true }).click();
+  const versions = page.getByRole("group", { name: "Preview version", exact: true });
+  await expect(
+    versions.getByRole("button", { name: "Video", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Post video", { exact: true })).toBeInViewport();
+  await versions.getByRole("button", { name: "Image", exact: true }).click();
+  await expect(
+    page.getByRole("img", { name: "Post image", exact: true }),
+  ).toBeInViewport();
+  await page
+    .getByRole("group", { name: "Image and video previews", exact: true })
+    .evaluate((rail) => rail.scrollTo({ left: 0 }));
+  await expect(
+    versions.getByRole("button", { name: "Video", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await assertCanvas(844);
+  await page.getByRole("button", { name: "Edit caption", exact: true }).click();
+  await page.getByLabel("Caption", { exact: true }).focus();
+  await page.evaluate(() => {
+    (window as unknown as { __keyboardHeight?: number }).__keyboardHeight = 410;
+    window.visualViewport?.dispatchEvent(new Event("resize"));
+  });
+  await assertCanvas(410);
+  await page
+    .getByLabel("Caption", { exact: true })
+    .evaluate((editor: HTMLTextAreaElement) => editor.blur());
+  await assertCanvas(844);
+  await page.evaluate(() => {
+    delete (window as unknown as { __keyboardHeight?: number }).__keyboardHeight;
+    window.dispatchEvent(new Event("pageshow"));
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await assertCanvas(844);
+  await page.setViewportSize({ width: 844, height: 390 });
+  await assertCanvas(390);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertCanvas(844);
+  await share.click();
+  expect(await shareCalls(page)).toHaveLength(1);
+  expect(await clipboardWrites(page)).toHaveLength(1);
 });
 
 test("restored Post prepares direct sharing and follows Sunlight preference", async ({

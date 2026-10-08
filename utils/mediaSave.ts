@@ -213,6 +213,7 @@ export const validateVideoMetadata = (
       video.pause();
       video.removeAttribute("src");
       video.load();
+      video.remove();
       if (ownedObjectUrl) URL.revokeObjectURL(ownedObjectUrl);
       if (result.ok) resolve(result.metadata);
       else reject(result.error);
@@ -261,6 +262,14 @@ export const validateVideoMetadata = (
 
     video.preload = "metadata";
     video.muted = true;
+    video.playsInline = true;
+    // WebKit can defer metadata loading for detached media. Keep the probe
+    // connected without affecting layout, focus, or the visible preview.
+    video.setAttribute("aria-hidden", "true");
+    video.tabIndex = -1;
+    video.style.cssText =
+      "position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+    document.body.appendChild(video);
     video.addEventListener("loadedmetadata", handleLoadedMetadata);
     video.addEventListener("error", handleError);
     video.src = sourceUrl;
