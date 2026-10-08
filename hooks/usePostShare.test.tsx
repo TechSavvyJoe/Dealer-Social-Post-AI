@@ -156,6 +156,123 @@ describe("usePostShare", () => {
     expect(useAppStore.getState().generatedPost?.sharedTo).toHaveLength(1);
   });
 
+  it("downloads and copies in the same click, with honest combined feedback", async () => {
+    const { result } = renderHook(() => usePostShare(options()));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    let complete!: () => void;
+    mocks.copyPreparedCaption.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          complete = () => resolve(true);
+        }),
+    );
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = result.current.downloadAndCopy();
+      expect(mocks.downloadPreparedMedia).toHaveBeenCalledTimes(1);
+      expect(mocks.copyPreparedCaption).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      complete();
+      await pending;
+    });
+    expect(result.current.feedback?.detail).toContain("Caption copied. Open Facebook");
+    expect(mocks.recordPostShared.mock.calls.map((call) => call[1].via)).toEqual([
+      "download",
+      "copy",
+    ]);
+  });
+
+  it("makes the exact caption selectable when clipboard access fails", async () => {
+    mocks.copyPreparedCaption.mockResolvedValue(false);
+    const { result } = renderHook(() => usePostShare(options()));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      await result.current.copyCaption();
+    });
+    expect(result.current.feedback).toMatchObject({
+      title: "Caption not copied",
+      manualCopy: true,
+    });
+    expect(result.current.shareDisabled).toBe(false);
+    expect(mocks.recordPostShared).not.toHaveBeenCalled();
+  });
+
+  it("offers manual handoff after cancellation without claiming a share", async () => {
+    mocks.sharePrepared.mockResolvedValue({ kind: "cancelled", pasteRequired: true });
+    const { result } = renderHook(() => usePostShare(options()));
+    await shareOnce(result);
+    expect(result.current.fallbackActive).toBe(true);
+    expect(result.current.feedback?.title).toBe("Your post is still ready");
+    expect(mocks.recordPostShared).not.toHaveBeenCalled();
+  });
+
+  it("does not attach an old share completion to a new signed-in session", async () => {
+    let complete!: () => void;
+    mocks.sharePrepared.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = () => resolve({ kind: "shared", captionCopied: true });
+        }),
+    );
+    const { result } = renderHook(() => usePostShare(options()));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.share();
+    });
+    act(() => {
+      useAppStore.setState({
+        authEpoch: useAppStore.getState().authEpoch + 1,
+        generatedPost: null,
+      });
+    });
+    await act(async () => {
+      complete();
+      await pending;
+    });
+    expect(mocks.recordPostShared).not.toHaveBeenCalled();
+    expect(useAppStore.getState().generatedPost).toBeNull();
+  });
+
+  it("does not show a delayed share result on a different channel", async () => {
+    let complete!: () => void;
+    mocks.sharePrepared.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = () => resolve({ kind: "shared", captionCopied: true });
+        }),
+    );
+    const { result, rerender } = renderHook(
+      ({ channel }: { channel: PlatformDestinationId }) =>
+        usePostShare(options("Delivery day", channel)),
+      { initialProps: { channel: "facebook_feed" as PlatformDestinationId } },
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.share();
+    });
+    rerender({ channel: "instagram_feed" });
+    await act(async () => {
+      complete();
+      await pending;
+    });
+    expect(result.current.feedback).toBeNull();
+    expect(mocks.recordPostShared).toHaveBeenCalledWith(
+      "post-1",
+      expect.objectContaining({ channel: "facebook_feed" }),
+    );
+  });
+
   it("invalidates stale preparation immediately, then re-prepares after a caption edit", async () => {
     const { result, rerender } = renderHook(
       ({ caption }) => usePostShare(options(caption)),

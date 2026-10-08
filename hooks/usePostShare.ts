@@ -41,6 +41,7 @@ export interface PostShareFeedback {
    * `UsePostShareResult.fallbackActive`.
    */
   fallback?: boolean;
+  manualCopy?: boolean;
 }
 
 export interface UsePostShareResult {
@@ -61,6 +62,8 @@ export interface UsePostShareResult {
   share: () => Promise<PublishStatus>;
   copyCaption: () => Promise<boolean>;
   download: () => boolean;
+  downloadAndCopy: () => Promise<boolean>;
+  useManualHandoff: () => void;
   openTarget: () => "native" | "web" | "none";
 }
 
@@ -135,6 +138,7 @@ export const usePostShare = ({
 
   const activePrepared = preparedKey === requestedKey ? prepared : null;
   const deliveredCreativeKey = [
+    post.postId,
     channelId,
     content.text,
     content.disclosures,
@@ -144,6 +148,13 @@ export const usePostShare = ({
     preparedFileKey(content.preparedFile),
   ].join("\u0000");
   const previousCreativeKey = useRef(deliveredCreativeKey);
+  const currentKeyRef = useRef(deliveredCreativeKey);
+  currentKeyRef.current = deliveredCreativeKey;
+  const authEpoch = useAppStore.getState().authEpoch;
+  const sessionIsCurrent = useCallback(
+    () => useAppStore.getState().authEpoch === authEpoch,
+    [authEpoch],
+  );
 
   useEffect(() => {
     let active = true;
@@ -200,22 +211,34 @@ export const usePostShare = ({
   const mergeLocalShare = useCallback(
     (via: PostShareVia) => {
       const store = useAppStore.getState();
+      if (!sessionIsCurrent()) return;
       const current = store.generatedPost;
-      if (current && post.postId && current.postId !== post.postId) return;
+      if (
+        !current ||
+        current.postId !== post.postId ||
+        current.text !== post.text ||
+        current.image !== post.image
+      )
+        return;
       const base = current || post;
       store.setGeneratedPost({
         ...base,
         sharedTo: [...(base.sharedTo || []), localShare(channelId, via)],
       });
     },
-    [channelId, post],
+    [channelId, post, sessionIsCurrent],
   );
 
   const record = useCallback(
     async (via: PostShareVia) => {
       // A manager can deliver a teammate's file, but only its author owns
       // saved share receipts. Local delivery feedback still describes the action.
-      if (post.historyReadOnly || (post.postId && !expectedPostRevision)) return;
+      if (
+        !sessionIsCurrent() ||
+        post.historyReadOnly ||
+        (post.postId && !expectedPostRevision)
+      )
+        return;
       mergeLocalShare(via);
       if (!post.postId) return;
       await submitShareReceipt({
@@ -234,6 +257,7 @@ export const usePostShare = ({
       mergeLocalShare,
       post.historyReadOnly,
       post.postId,
+      sessionIsCurrent,
     ],
   );
 
@@ -248,6 +272,13 @@ export const usePostShare = ({
         });
     void flushDraft();
     return sharePromise.then((result) => {
+      // A native sheet can outlive navigation, a caption edit or logout.
+      // Preserve its receipt for the original post only in the original session.
+      if (!sessionIsCurrent()) return result;
+      if (currentKeyRef.current !== deliveredCreativeKey) {
+        if (result.kind === "shared") void record("share_sheet");
+        return result;
+      }
       // Only an error is a failure. A share, a closed sheet or the manual
       // fallback each replace an earlier failure; keeping it would leave the
       // screen on Try again after a share that went through.
@@ -276,6 +307,13 @@ export const usePostShare = ({
           via: "copy",
           fallback: true,
         });
+      } else if (result.kind === "cancelled") {
+        setFallbackActive(true);
+        setFeedback({
+          title: "Your post is still ready",
+          detail: `App missing from the share sheet? Save the ${mediaNoun} below, then open ${channelLabel} and add it.`,
+          via: "copy",
+        });
       } else if (result.kind === "error") {
         setPreparationError(result.message);
       }
@@ -291,6 +329,8 @@ export const usePostShare = ({
     onMediaDelivered,
     content,
     record,
+    deliveredCreativeKey,
+    sessionIsCurrent,
   ]);
 
   // A reopened post already shared through the sheet to this channel has its
@@ -307,6 +347,8 @@ export const usePostShare = ({
   const copyCaption = useCallback(async () => {
     if (!activePrepared || effectiveBlockedReason) return false;
     const copied = await copyPreparedCaption(activePrepared);
+    if (!sessionIsCurrent() || currentKeyRef.current !== deliveredCreativeKey)
+      return copied;
     if (copied) {
       setFeedback({
         title: "Caption copied",
@@ -317,6 +359,15 @@ export const usePostShare = ({
         via: "copy",
       });
       void record("copy");
+    } else {
+      setFeedback({
+        title: "Caption not copied",
+        detail:
+          "Tap Copy caption again, or select the full caption below and copy it manually.",
+        via: "copy",
+        fallback: true,
+        manualCopy: true,
+      });
     }
     return copied;
   }, [
@@ -326,6 +377,8 @@ export const usePostShare = ({
     mediaAlreadyInPost,
     mediaNoun,
     record,
+    deliveredCreativeKey,
+    sessionIsCurrent,
   ]);
 
   const download = useCallback(() => {
@@ -355,6 +408,46 @@ export const usePostShare = ({
     () => (activePrepared ? openPreparedTarget(activePrepared) : "none"),
     [activePrepared],
   );
+
+  const downloadAndCopy = useCallback(async () => {
+    if (!activePrepared || effectiveBlockedReason) return false;
+    // Both browser operations start in this click before yielding activation.
+    const copiedPromise = copyPreparedCaption(activePrepared);
+    const downloaded = download();
+    const copied = await copiedPromise;
+    if (!sessionIsCurrent() || currentKeyRef.current !== deliveredCreativeKey)
+      return downloaded;
+    if (copied) void record("copy");
+    setFeedback({
+      title: downloaded
+        ? mediaNoun === "video"
+          ? "Video downloaded"
+          : "Image downloaded"
+        : "File not downloaded",
+      detail: downloaded
+        ? copied
+          ? `Caption copied. Open ${channelLabel}, add the ${mediaNoun}, then paste the caption and post.`
+          : "Tap Copy caption again, or select the full caption below and copy it manually."
+        : "Try saving the file again. Your post is still here.",
+      via: downloaded ? "download" : "copy",
+      fallback: !downloaded || !copied,
+      manualCopy: !copied,
+    });
+    return downloaded;
+  }, [
+    activePrepared,
+    effectiveBlockedReason,
+    download,
+    sessionIsCurrent,
+    deliveredCreativeKey,
+    record,
+    mediaNoun,
+    channelLabel,
+  ]);
+
+  const useManualHandoff = useCallback(() => {
+    setFallbackActive(true);
+  }, []);
 
   const nativeFileShareAvailable = useMemo(() => {
     if (!activePrepared?.file || typeof navigator === "undefined") return false;
@@ -386,6 +479,8 @@ export const usePostShare = ({
     share,
     copyCaption,
     download,
+    downloadAndCopy,
+    useManualHandoff,
     openTarget,
   };
 };

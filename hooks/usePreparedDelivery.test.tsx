@@ -153,6 +153,20 @@ afterEach(() => {
 });
 
 describe("usePreparedDelivery", () => {
+  it("keeps the prepared file when the selected destination is tapped again", async () => {
+    const options = baseOptions();
+    const { result } = renderHook(() => usePreparedDelivery(options));
+    await waitFor(() => expect(result.current.activePreparedSave).not.toBeNull());
+    const prepared = result.current.activePreparedSave;
+    const count = mocks.prepareMediaForSave.mock.calls.length;
+    act(() => {
+      expect(result.current.selectDelivery("instagram_feed", "photo")).toBe(true);
+    });
+    expect(result.current.activePreparedSave).toBe(prepared);
+    expect(result.current.isPreparingSave).toBe(false);
+    expect(mocks.prepareMediaForSave).toHaveBeenCalledTimes(count);
+  });
+
   it("prepares the exact size and aspect for the first destination row", async () => {
     const options = baseOptions();
     const { result, unmount } = renderHook(() => usePreparedDelivery(options));

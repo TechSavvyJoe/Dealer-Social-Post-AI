@@ -256,6 +256,8 @@ vi.mock("../hooks/usePostShare", () => ({
       share: mocks.share,
       copyCaption: mocks.copyCaption,
       download: mocks.download,
+      downloadAndCopy: mocks.download,
+      useManualHandoff: vi.fn(),
       openTarget: mocks.openTarget,
     };
   },

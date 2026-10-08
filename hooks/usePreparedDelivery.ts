@@ -306,6 +306,9 @@ export const usePreparedDelivery = ({
   const selectDeliveryById = (deliveryId: string) => {
     const delivery = deliveriesById.get(deliveryId);
     if (!delivery) return;
+    // Re-selecting the current chip must not discard its prepared file:
+    // none of the preparation effect's dependencies would change to rebuild it.
+    if (deliveryId === selectedDeliveryId && !manualVideoSelected) return;
     triggerHapticFeedback();
     setPreparedSave(null);
     setPreparedSaveForKey(null);

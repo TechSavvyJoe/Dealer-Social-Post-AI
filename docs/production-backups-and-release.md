@@ -141,6 +141,18 @@ Until the gate is met, stage A's compatibility stays. It costs nothing for
 current clients, which always send a revision; it only keeps an older installed
 app able to save.
 
+The **Observe revision compatibility** workflow now runs daily at 14:17 UTC
+and can be dispatched manually. Each run retains a 30-day artifact with only
+the observation time, healthy production release SHA, retrieved entry count,
+and legacy-client count. Raw logs are deleted on the runner and never uploaded.
+An empty log response or failed health check cannot count as a clear day; a
+legacy-client entry fails the check and restarts the seven-day observation
+window. These are daily snapshots of Fly's recent buffer, not continuous log
+coverage. Review seven consecutive daily artifacts and the complete stage B
+deployment before merging stage C separately. This workflow never merges or
+deploys the strict stage automatically. Remove its schedule after stage C is
+verified live.
+
 Rolling back across these stages has its own order. See
 [the post-revision contract in the rollback runbook](runbooks/rollback.md#2a-the-post-revision-contract-stages-a-b-c).
 
