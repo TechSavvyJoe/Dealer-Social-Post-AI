@@ -104,10 +104,10 @@ describe("spin session boundaries", () => {
         }),
     );
     vi.stubGlobal("fetch", fetch);
-    await loadSpinFrames(
-      { ...spin, frameCount: 1 },
-      { signal: new AbortController().signal, publicToken: "a".repeat(48) },
-    );
+    await loadSpinFrames(spin, {
+      signal: new AbortController().signal,
+      publicToken: "a".repeat(48),
+    });
     expect(fetch).toHaveBeenCalledWith(
       "/api/public/vehicle-spin/frames/0",
       expect.objectContaining({

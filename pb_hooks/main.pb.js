@@ -1159,6 +1159,11 @@ routerAdd("GET", "/api/app/health", (c) => {
   // Aggregate tenant counts only for authenticated super-admins.
   if (isAuthedAdmin) {
     result.checks = checks;
+    try {
+      result.spinCapacity = require(__hooks + "/vehicleSpins.js").adminCapacity();
+    } catch (_e) {
+      result.spinCapacity = { storage: "unavailable" };
+    }
     result.counts = {
       dealers: 0,
       posts_24h: 0,
@@ -1559,7 +1564,10 @@ routerAdd("POST", "/api/app/session", (c) => {
       return c.json(429, {
         error: "LOCKED",
         code: "LOCKED",
-        message: "Too many login attempts. Sign-in is temporarily locked.",
+        message:
+          state.retryAfterSeconds <= 2
+            ? "Sign-in is busy. Try again in a moment."
+            : "Too many login attempts. Sign-in is temporarily locked.",
         retryAfterSeconds: state.retryAfterSeconds,
       });
     };

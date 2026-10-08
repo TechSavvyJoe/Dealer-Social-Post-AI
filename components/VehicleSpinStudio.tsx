@@ -11,6 +11,7 @@ import {
   deleteVehicleSpin,
   getVehicleSpin,
   listVehicleSpins,
+  type SpinCapacity,
   loadSpinFrames,
   saveVehicleSpin,
   spinAction,
@@ -73,6 +74,7 @@ export const VehicleSpinStudio: React.FC<{
     useState<SpinBackground>("graphite");
   const [spin, setSpin] = useState<VehicleSpin | null>(null);
   const [library, setLibrary] = useState<VehicleSpin[]>([]);
+  const [capacity, setCapacity] = useState<SpinCapacity | null>(null);
   const [canReview, setCanReview] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [vehicleOnly, setVehicleOnly] = useState(false);
@@ -107,6 +109,7 @@ export const VehicleSpinStudio: React.FC<{
     if (!signal?.aborted) {
       setLibrary(result.items);
       setCanReview(result.canReview);
+      setCapacity(result.capacity ?? null);
     }
   }, []);
   useEffect(() => {
@@ -1127,6 +1130,16 @@ export const VehicleSpinStudio: React.FC<{
         <h2 className="text-xl font-semibold text-ink">
           {canReview ? "Dealership spins" : "Your saved spins"}
         </h2>
+        {capacity && (
+          <p className="mt-2 text-sm text-ink-2" role="status">
+            {capacity.personalUsed} of {capacity.personalLimit} personal spaces used
+            {" · "}
+            {capacity.dealershipUsed} of {capacity.dealershipLimit} dealership spaces
+            used.
+            {!capacity.canCreate &&
+              " The library is full. Remove an older view or contact your administrator before creating another."}
+          </p>
+        )}
         {!library.length ? (
           <p className="mt-3 text-sm text-ink-2">
             Saved vehicle views will appear here.

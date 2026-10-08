@@ -1651,6 +1651,40 @@ describe("PocketBase auth helper invariants", () => {
     }
   });
 
+  it("rechecks in-flight login bursts promptly without opening the hard limit", () => {
+    const runtime = globalThis as any;
+    const originalApp = runtime.$app;
+    let age = 1000;
+    let detail = "credential comparison reserved";
+    try {
+      runtime.$app = {
+        dao: () => ({
+          findRecordsByFilter: () =>
+            Array.from({ length: 10 }, () => ({
+              getString: (field: string) =>
+                field === "created" ? new Date(Date.now() - age).toISOString() : detail,
+            })),
+        }),
+      };
+      expect(helpers.loginFailureState("203.0.113.20", 10, 900)).toMatchObject({
+        count: 10,
+        locked: true,
+        retryAfterSeconds: 2,
+      });
+      age = 31_000;
+      expect(
+        helpers.loginFailureState("203.0.113.20", 10, 900).retryAfterSeconds,
+      ).toBeGreaterThan(860);
+      age = 1000;
+      detail = "credential not recognized";
+      expect(
+        helpers.loginFailureState("203.0.113.20", 10, 900).retryAfterSeconds,
+      ).toBeGreaterThan(890);
+    } finally {
+      runtime.$app = originalApp;
+    }
+  });
+
   it("stores only credential presence in auth audit events", () => {
     const runtime: any = globalThis;
     const originalApp = runtime.$app;

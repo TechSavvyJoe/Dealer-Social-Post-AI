@@ -64,6 +64,13 @@ interface HealthPayload {
       | "stale"
       | "verified";
   };
+  spinCapacity?: {
+    savedSpins?: number;
+    totalLimit?: number;
+    dealershipLimit?: number;
+    personalLimit?: number;
+    storage: string;
+  };
   generation?: {
     aiSuccesses24h: number;
     basicFallbacks24h: number;
@@ -460,6 +467,11 @@ export const SystemHealthPanel: React.FC = () => {
     (r) => !r.critical && data && data.checks[r.key] === false,
   );
 
+  const storageAdvisory = Boolean(
+    data?.spinCapacity && data.spinCapacity.storage !== "available",
+  );
+  const advisoryCount = advisories.length + Number(storageAdvisory);
+
   // One truthful headline: criticals win, then the endpoint's own verdict,
   // then advisories. "All systems operational" can never share the strip
   // with a critical list.
@@ -467,7 +479,7 @@ export const SystemHealthPanel: React.FC = () => {
     ? ("loading" as const)
     : criticalFailures.length > 0 || !overallOk
       ? ("critical" as const)
-      : advisories.length > 0
+      : advisoryCount > 0
         ? ("advisory" as const)
         : ("operational" as const);
 
@@ -481,8 +493,8 @@ export const SystemHealthPanel: React.FC = () => {
             } attention`
           : "Service reports a readiness failure"
         : status === "advisory"
-          ? `Operational — ${advisories.length} ${
-              advisories.length === 1 ? "advisory" : "advisories"
+          ? `Operational — ${advisoryCount} ${
+              advisoryCount === 1 ? "advisory" : "advisories"
             }`
           : "All systems operational";
 
@@ -689,6 +701,30 @@ export const SystemHealthPanel: React.FC = () => {
                 </p>
               </section>
             </div>
+          ) : null}
+
+          {data?.spinCapacity ? (
+            <section className="space-y-2 rounded-md border border-hairline p-4">
+              <h3 className="text-sm font-semibold text-content-primary">
+                360° library capacity
+              </h3>
+              <p className="text-sm text-content-secondary">
+                {typeof data.spinCapacity.savedSpins === "number" &&
+                typeof data.spinCapacity.totalLimit === "number"
+                  ? `${data.spinCapacity.savedSpins} of ${data.spinCapacity.totalLimit} saved spins across dealerships.`
+                  : "Library usage is unavailable."}
+              </p>
+              <p className="text-xs text-content-tertiary">
+                {data.spinCapacity.storage === "available"
+                  ? "Space is available for another complete spin with backup headroom reserved."
+                  : "Storage needs attention. New spins may be blocked until space and backup headroom are available."}
+              </p>
+              {data.spinCapacity.storage !== "available" && (
+                <p role="status" className="text-sm text-warning-400">
+                  Review storage before onboarding more dealerships.
+                </p>
+              )}
+            </section>
           ) : null}
 
           {data?.generation ? (

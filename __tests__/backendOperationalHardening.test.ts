@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createCapacityHarness } from "../test/providerCapacityHarness";
+let capacity: ReturnType<typeof createCapacityHarness>;
+beforeEach(() => {
+  capacity = createCapacityHarness();
+});
+afterEach(() => capacity.close());
 
 type HelperModule = {
   checkProxyRateLimit: (
@@ -47,7 +53,12 @@ afterEach(() => {
 function loadHelpers(): HelperModule {
   const source = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
   const module = { exports: {} as HelperModule };
-  new Function("module", "exports", source)(module, module.exports);
+  new Function("module", "exports", "require", "__hooks", source)(
+    module,
+    module.exports,
+    () => capacity,
+    "pb_hooks",
+  );
   return module.exports;
 }
 
