@@ -3,6 +3,10 @@ import AxeBuilder from "@axe-core/playwright";
 import { readFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
+// These journeys own every API response. A production service worker must
+// not bypass the synthetic routes after a reload and contact the live backend.
+test.use({ serviceWorkers: "block" });
+
 const dealer = {
   id: "qa-dealer",
   name: "Northline Motors",
@@ -835,13 +839,14 @@ test("installed iPhone fills its canvas with a stale viewport and reachable imag
         barPosition: getComputedStyle(bar).position,
         barBottom: bar.getBoundingClientRect().bottom,
         headerTop: document.querySelector("header")!.getBoundingClientRect().top,
+        portrait: window.matchMedia("(orientation: portrait)").matches,
       };
     });
     expect(geometry.rootBottom).toBe(expectedHeight);
     expect(geometry.bodyPosition).toBe("relative");
     expect(geometry.barPosition).toBe("absolute");
     expect(geometry.barBottom).toBe(expectedHeight);
-    expect(geometry.headerTop).toBeGreaterThanOrEqual(59);
+    expect(geometry.headerTop).toBe(geometry.portrait ? 79 : 59);
   };
   await assertCanvas(844);
   await page.getByRole("button", { name: "Add video", exact: true }).click();
@@ -885,6 +890,22 @@ test("installed iPhone fills its canvas with a stale viewport and reachable imag
   await share.click();
   expect(await shareCalls(page)).toHaveLength(1);
   expect(await clipboardWrites(page)).toHaveLength(1);
+  // The extra clear strip belongs only to an installed Apple phone.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "standalone", {
+      configurable: true,
+      get: () => false,
+    });
+    window.dispatchEvent(new Event("pageshow"));
+  });
+  await expect(page.locator("html")).toHaveAttribute("data-apple-standalone", "false");
+  await expect
+    .poll(() =>
+      page
+        .locator("#root")
+        .evaluate((root) => Number.parseFloat(getComputedStyle(root).paddingTop)),
+    )
+    .toBe(59);
 });
 
 test("restored Post prepares direct sharing and follows Sunlight preference", async ({

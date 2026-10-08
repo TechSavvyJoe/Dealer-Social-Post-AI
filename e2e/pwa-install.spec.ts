@@ -443,7 +443,8 @@ test.describe("Home Screen PWA contracts", () => {
       expect(shell.visualViewportHeight).toBe(shell.viewportHeight - 93);
       expect(shell.rootBottom).toBe(shell.viewportHeight);
       expect(shell.bodyBottom).toBe(shell.viewportHeight);
-      expect(shell.rootPaddingTop).toBe(59);
+      // iOS's compositor can blur below its 59px status-bar safe area.
+      expect(shell.rootPaddingTop).toBe(79);
       expect(shell.rootPaddingBottom).toBe(34);
       expect(shell.bodyPaddingTop).toBe(0);
       expect(shell.documentOverflow).toBe(0);
@@ -520,6 +521,13 @@ test.describe("Home Screen PWA contracts", () => {
               .evaluate((root) => Math.round(root.getBoundingClientRect().bottom)),
           )
           .toBe(size.height);
+        await expect
+          .poll(() =>
+            page
+              .locator("#root")
+              .evaluate((root) => Number.parseFloat(getComputedStyle(root).paddingTop)),
+          )
+          .toBe(size.width > size.height ? 59 : 79);
         await expect
           .poll(() =>
             page.evaluate(
