@@ -1,0 +1,46 @@
+name: Inspect production storage
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A deployment or backup cannot overlap this snapshot. This job makes no writes
+# to the app, its database, its volume or its Fly configuration.
+concurrency:
+  group: production-release-and-backup
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    name: read-only volume measurements
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master 2026-07-15
+        with:
+          version: 0.4.71
+      - name: Measure the mounted data filesystem as the application user
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: node scripts/inspect-fly-storage.mjs
+      - name: Retain numeric storage evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-storage
+          path: .release-evidence/production-storage.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Publish the safe receipt
+        run: |
+          echo '### Read-only production storage snapshot' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat .release-evidence/production-storage.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

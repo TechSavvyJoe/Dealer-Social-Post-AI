@@ -70,6 +70,24 @@ timings on a busy development machine; use a clean runner and retain its evidenc
 The launch decision must identify outstanding gates explicitly. Passing CI does
 not close business, physical-device, provider-quality, or operational evidence gaps.
 
+### Read-only production storage inspection
+
+Run **Inspect production storage** from the Actions page on `main`, or use:
+
+```bash
+gh workflow run inspect-production-storage.yml --ref main
+```
+
+The protected production credential measures the mounted data filesystem as
+`pbuser`. It pins both measurements to one running machine and checks the health
+release before and after inspection. The job shares the deployment/backup lock,
+does not modify production, and retains a numeric `production-storage` artifact
+for 30 days. File names, application records, credentials and service logs are
+excluded. The filesystem totals are usable storage measurements, not the Fly
+billing allocation. A successful snapshot or room for one maximum spin does not
+establish capacity for all 25 dealerships; apply the fleet and backup requirements
+above to the measured available bytes before onboarding.
+
 ## Capacity failure found and corrected
 
 The first clean CI run provisioned 25 dealerships and 250 people, signed every
