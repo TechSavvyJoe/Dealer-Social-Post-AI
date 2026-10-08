@@ -563,10 +563,12 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           : undefined;
   const expectedPostRevision =
     post.postRevision || autosave.lastRevisionRef.current || undefined;
+  const nativeTarget = selectedChannelId === "native_share";
+  const handoffAppLabel = nativeTarget ? "your chosen app" : selectedChannel.label;
   const share = usePostShare({
     post,
     channelId: selectedChannel.id as PlatformDestinationId,
-    channelLabel: selectedChannel.label,
+    channelLabel: handoffAppLabel,
     content: shareContent,
     blockedReason:
       (website.revisionRecoveryRequired
@@ -885,7 +887,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           ? isDesktopLayout && mediaNoun === "video"
             ? "Open TikTok and upload the downloaded video."
             : `In the TikTok app, tap +, then Upload and choose the ${mediaNoun}.`
-          : `Open ${selectedChannel.label} and add the ${mediaNoun} to a new post.`;
+          : `Open ${handoffAppLabel} and add the ${mediaNoun} to a new post.`;
 
   const saveStatus =
     autosave.status === "saving"
@@ -1291,19 +1293,21 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
                 Copy caption
               </Button>
             </div>
-            <div className={isSaved ? barPair : undefined}>
+            <div className={isSaved && !nativeTarget ? barPair : undefined}>
               {doneSecondary()}
-              <Button
-                variant="primary"
-                size="lg"
-                fullWidth
-                className="px-4"
-                disabled={share.shareDisabled}
-                rightIcon={<ExternalLink />}
-                onClick={share.openTarget}
-              >
-                Open {selectedChannel.label}
-              </Button>
+              {!nativeTarget ? (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  className="px-4"
+                  disabled={share.shareDisabled}
+                  rightIcon={<ExternalLink />}
+                  onClick={share.openTarget}
+                >
+                  Open {selectedChannel.label}
+                </Button>
+              ) : null}
             </div>
           </>
         ) : (
@@ -1436,12 +1440,12 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
             {share.feedback?.manualCopy
               ? "Caption not copied. Use Copy caption or select it above."
               : share.feedback?.detail.startsWith("Caption copied.")
-                ? `Caption and hashtags copied. Paste in ${selectedChannel.label} only if missing.`
+                ? `Caption and hashtags copied. Paste in ${handoffAppLabel} only if missing.`
                 : sharedViaSheet
-                  ? `Finish your post in ${selectedChannel.label}. Paste the caption only if missing.`
+                  ? `Finish your post in ${handoffAppLabel}. Paste the caption only if missing.`
                   : manualHandoff
                     ? `Saving the ${mediaNoun} also copies your caption.`
-                    : `Choose ${selectedChannel.label} in the share sheet. Your caption is copied automatically.`}
+                    : `Choose ${nativeTarget ? "an app" : selectedChannel.label} in the share sheet. Your caption is copied automatically.`}
           </p>
         ) : null}
         {phoneBarContent}
@@ -1504,7 +1508,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
             </h1>
             <p className="mt-2 max-w-sm text-sm leading-6 text-ink-2">
               {isDesktopLayout
-                ? `Download saves the ${mediaNoun} and copies your caption. Open ${selectedChannel.label} to finish your post.`
+                ? `Download saves the ${mediaNoun} and copies your caption. Open ${handoffAppLabel} to finish your post.`
                 : `Pick where it's going, then share it to ${selectedChannel.label}.`}
             </p>
           </header>
@@ -1532,16 +1536,14 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
               className="rounded-sm border border-strong bg-panel px-3.5 py-3 text-sm leading-5"
               aria-label={`${selectedChannel.label} posting steps`}
             >
-              <p className="font-semibold text-ink">
-                Finish in {selectedChannel.label}
-              </p>
+              <p className="font-semibold text-ink">Finish in {handoffAppLabel}</p>
               <ol className="mt-2 list-decimal space-y-1 pl-4 text-ink-2">
                 <li>
                   {sharedViaSheet
-                    ? `Return to ${selectedChannel.label} to finish your post.`
+                    ? `Return to ${handoffAppLabel} to finish your post.`
                     : manualHandoff
                       ? `Save the ${mediaNoun} below. The caption is copied with it.`
-                      : `Tap Share and choose ${selectedChannel.label}.`}
+                      : `Tap Share and choose ${nativeTarget ? "an app" : selectedChannel.label}.`}
                 </li>
                 {manualHandoff ? <li>{addMediaInstruction}</li> : null}
                 <li>

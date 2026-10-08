@@ -407,7 +407,7 @@ test("Facebook Instagram and TikTok recover from a closed sheet with save-and-co
       ).toBeVisible();
       await expect(
         page.getByText(
-          `Caption copied. Choose Save Image, then open ${label} and add it. Paste the caption before posting.`,
+          `Caption copied. Choose Save Image, then open ${label} and add it. Paste the caption only if missing.`,
           { exact: true },
         ),
       ).toBeVisible();
@@ -418,7 +418,7 @@ test("Facebook Instagram and TikTok recover from a closed sheet with save-and-co
       expect(file.suggestedFilename()).toMatch(/\.(jpg|jpeg|png)$/);
       await expect(
         page.getByText(
-          `Caption copied. Open ${label}, add the image, then paste the caption and post.`,
+          `Caption copied. Open ${label}, add the image, and check the caption. Paste only if missing, then post.`,
           { exact: true },
         ),
       ).toBeVisible();
@@ -481,7 +481,7 @@ test("desktop save copies caption and opens the selected destination", async ({
     await download;
     await expect(
       page.getByText(
-        `Caption copied. Open ${label}, add the image, then paste the caption and post.`,
+        `Caption copied. Open ${label}, add the image, and check the caption. Paste only if missing, then post.`,
         { exact: true },
       ),
     ).toBeVisible();

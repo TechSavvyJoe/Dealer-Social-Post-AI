@@ -324,8 +324,8 @@ Monitor health, recent redacted client-error aggregates, generation fallback rat
 Before booting a restored production volume, stage a fresh observation epoch:
 
 ```bash
-flyctl secrets set --stage --app dealer-social-post-ai-production \
-  REVISION_OBSERVATION_EPOCH="recovery-$(date -u +%Y%m%dT%H%M%SZ)"
+printf 'REVISION_OBSERVATION_EPOCH=recovery-%s\n' "$(date -u +%Y%m%dT%H%M%SZ)" | \
+  flyctl secrets import --stage --app dealer-social-post-ai-production
 ```
 
 Apply it during the recovery deploy. Never reuse the pre-recovery epoch. Confirm

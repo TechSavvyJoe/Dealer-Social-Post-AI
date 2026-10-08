@@ -648,6 +648,16 @@ describe("PostScreen", () => {
     expect(guide).toHaveTextContent("paste only if missing");
   });
 
+  it("offers a real app choice for More without a nonexistent Open action", () => {
+    mocks.shareState = { nativeFileShareAvailable: false };
+    renderScreen({ post: { ...basePost, platformIds: ["native_share"] } });
+    expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
+    expect(screen.getByLabelText(/posting steps/)).toHaveTextContent(
+      "Open your chosen app",
+    );
+    expect(lastShareOptions().channelLabel).toBe("your chosen app");
+  });
+
   it("does not ask users to paste over X's prefilled caption", () => {
     mocks.shareState = { nativeFileShareAvailable: false };
     renderScreen({ post: { ...basePost, platformIds: ["x_twitter"] } });
