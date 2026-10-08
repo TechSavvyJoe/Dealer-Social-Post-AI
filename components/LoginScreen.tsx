@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { m, useReducedMotion } from "framer-motion";
 import { CheckCircle2, Delete, Eye, EyeOff, Loader2 } from "lucide-react";
 import { Logo } from "./Logo";
+import { PrivateInvitationEntry } from "./PrivateInvitationEntry";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
@@ -572,11 +573,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 </h1>
                 <p className="text-[15px] leading-[22px] text-ink-2">{instruction}</p>
                 {entryMode === "personal" && (
-                  <p className="mt-2 text-sm text-ink-2">
-                    {invitedDealer?.name
-                      ? `This device is set up for ${invitedDealer.name}.`
-                      : "New to the team? Open your manager’s private dealership invitation first."}
-                  </p>
+                  <div>
+                    <p className="mt-2 text-sm text-ink-2">
+                      {invitedDealer?.name
+                        ? `This device is set up for ${invitedDealer.name}.`
+                        : "New to the team? Open your manager’s private dealership invitation first."}
+                    </p>
+                    <PrivateInvitationEntry configured={!!invitedDealer} />
+                  </div>
                 )}
               </div>
 

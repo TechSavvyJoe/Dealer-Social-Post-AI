@@ -47,7 +47,12 @@ link and explicitly activates the requirement.
    privately to the team. The normal dealer list never reveals it again.
 3. Each person opens the link on their own device, chooses **Set up this device**,
    then signs in with their personal code. Repeat on each device/browser. Installed
-   iPhone web apps may have separate browser storage; open the invitation there too.
+   iPhone web apps have their own browser storage after installation. In an
+   already-installed app, choose **Use a private invitation** on Sign in, paste
+   the manager's link, then choose **Open invitation** and **Set up this device**.
+   Use **Change dealership** to replace an existing device setup. Opening a link
+   in Safari alone does not update an already-installed app's invitation cookie.
+   This follows [Apple's web-app storage behavior](https://developer.apple.com/videos/play/wwdc2023/10120/).
 4. For an existing store, only after distribution choose **Require invitation for
    sign-in**. Uninvited personal-code sessions end. The manager performing the
    action stays signed in; manager passwords and authorized admin impersonation
