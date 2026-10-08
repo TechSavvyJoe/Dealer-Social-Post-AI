@@ -314,3 +314,11 @@ jobs:
 
       - name: Create, download, and restore a full PocketBase backup
         run: bash scripts/backup-restore-canary.sh dealer-social-post-ai:ci
+
+      - name: Preserve synthetic container browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-browser-diagnostics
+          path: test-results/
+          retention-days: 7

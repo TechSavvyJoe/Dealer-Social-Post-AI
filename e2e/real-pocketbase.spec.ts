@@ -211,7 +211,7 @@ const assertActiveProductionServiceWorker = async (page: Page) => {
 
   // A first visit may activate the worker without controlling that page. One
   // reload must put the production shell under the active worker's control.
-  if (!result.controlled) await page.reload({ waitUntil: "networkidle" });
+  if (!result.controlled) await page.reload({ waitUntil: "domcontentloaded" });
   await expect
     .poll(() =>
       page.evaluate(() => navigator.serviceWorker.controller?.scriptURL || ""),
@@ -235,7 +235,14 @@ test.describe("real PocketBase release flow", () => {
     expect(adminUsername).not.toBe("");
     expect(adminPassword.length).toBeGreaterThanOrEqual(8);
 
-    await page.goto("/", { waitUntil: "networkidle" });
+    // The installed shell and background device-context reads need not become
+    // network-idle together. Verify the actual entry screen and active worker.
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: "Sign in", exact: true }),
+    ).toBeVisible({
+      timeout: 15_000,
+    });
     if (browserName === "chromium") {
       await assertActiveProductionServiceWorker(page);
     }
@@ -380,7 +387,7 @@ test.describe("real PocketBase release flow", () => {
     // that cookie on loopback HTTP, so restore the equivalent loopback-only
     // shim before the reload that proves session restoration.
     await installLoopbackSessionCookie(context, page, adminCookie);
-    await page.reload({ waitUntil: "networkidle" });
+    await page.reload({ waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("heading", { name: "System admin" })).toBeVisible({
       timeout: 15_000,
@@ -493,7 +500,7 @@ test.describe("real PocketBase release flow", () => {
     );
 
     await installLoopbackSessionCookie(context, page, adminCookie);
-    await page.reload({ waitUntil: "networkidle" });
+    await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "System admin" })).toBeVisible({
       timeout: 15_000,
     });
@@ -831,7 +838,7 @@ test.describe("real PocketBase release flow", () => {
     // production Secure refresh cookie. Restore the HTTP-only test shim before
     // the reload so WebKit can prove the same persisted session flow.
     await installLoopbackSessionCookie(managerContext, managerPage, managerCookie);
-    await managerPage.reload({ waitUntil: "networkidle" });
+    await managerPage.reload({ waitUntil: "domcontentloaded" });
     await expect(managerPage.getByText("Manager dashboard")).toBeVisible({
       timeout: 15_000,
     });
