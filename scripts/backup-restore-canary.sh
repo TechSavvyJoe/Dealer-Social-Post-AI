@@ -140,6 +140,14 @@ else
   file_sha256="$(shasum -a 256 public/icon-192.png | awk '{print $1}')"
 fi
 
+# Preserve a submitted synthetic spin so the restore verifier hashes its JPEGs.
+E2E_BASE_URL="http://127.0.0.1:${port}" \
+E2E_REAL_POCKETBASE=true \
+E2E_ADMIN_USERNAME=canary.admin \
+E2E_ADMIN_PASSWORD="$canary_login_secret" \
+SPIN_CANARY_KEEP_FIXTURE=true \
+  node scripts/vehicle-spin-canary.mjs >"$work_dir/spin-canary.json"
+
 POCKETBASE_BACKUP_URL="http://127.0.0.1:${port}" \
 POCKETBASE_EXPECTED_ORIGIN="http://127.0.0.1:${port}" \
 POCKETBASE_ADMIN_EMAIL="$admin_email" \

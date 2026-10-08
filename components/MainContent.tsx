@@ -35,6 +35,9 @@ const LazyDetails = React.lazy(() =>
 const LazyPost = React.lazy(() =>
   import("./PostScreen").then((m) => ({ default: m.PostScreen })),
 );
+const LazySpin = React.lazy(() =>
+  import("./VehicleSpinStudio").then((m) => ({ default: m.VehicleSpinStudio })),
+);
 const LazyWork = React.lazy(() =>
   import("./MyWork").then((m) => ({ default: m.MyWork })),
 );
@@ -129,11 +132,14 @@ export interface MainContentProps {
   onShowHistory?: () => void;
   onRequestLogout?: () => void;
   onManagementDirtyChange?: (dirty: boolean) => void;
+  onSpinDirtyChange: (dirty: boolean) => void;
+  onOpenSpin: () => void;
 }
 
 export const MainContent: React.FC<MainContentProps> = (props) => {
   const { displayedStep, selectedImage, generatedPost, currentDealer, error } = props;
   const draft = useAppStore((s) => s.postDraft);
+  const authEpoch = useAppStore((s) => s.authEpoch);
   React.useEffect(() => {
     if (props.step === AppStep.CREATING) void import("./PostScreen").catch(() => {});
   }, [props.step]);
@@ -163,11 +169,22 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
       break;
     case AppStep.DEALER_ADMIN:
       content = (
-        <LazyDealerAdmin
-          onSettingsDirtyChange={props.onManagementDirtyChange}
-          onOpenPost={openPost}
-        />
+        <>
+          <button
+            className="mx-4 mt-4 min-h-11 self-start rounded-sm border border-strong px-4 text-sm font-semibold text-ink"
+            onClick={props.onOpenSpin}
+          >
+            360° vehicle studio & reviews
+          </button>
+          <LazyDealerAdmin
+            onSettingsDirtyChange={props.onManagementDirtyChange}
+            onOpenPost={openPost}
+          />
+        </>
       );
+      break;
+    case AppStep.VEHICLE_SPIN:
+      content = <LazySpin key={authEpoch} onDirtyChange={props.onSpinDirtyChange} />;
       break;
     case AppStep.HOME:
       content = (
@@ -175,6 +192,7 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
           onPhotoPicked={
             props.onPhotoPicked || ((selection) => props.onImageSelected(selection))
           }
+          onOpenSpin={props.onOpenSpin}
           onShowHistory={() => props.onShowHistory?.()}
           onOpenPost={openPost}
         />

@@ -14,6 +14,7 @@ export enum AppStep {
   /** Per-dealership admin (GSM/GM): manages their own dealership only. */
   DEALER_ADMIN = 6,
   WORK = 7,
+  VEHICLE_SPIN = 8,
   /** Compatibility names for older integrations and stored numeric steps. */
   CAPTURE = HOME,
   CUSTOMIZE = DETAILS,

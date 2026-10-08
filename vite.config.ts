@@ -70,6 +70,7 @@ export default defineConfig(() => {
     },
     // Exclude PocketBase files from optimization
     optimizeDeps: {
+      include: ["@mediapipe/tasks-vision"],
       exclude: ["pocketbase"],
     },
     build: {

@@ -11,6 +11,7 @@ const STEP_TO_HASH: Record<AppStep, string> = {
   [AppStep.ADMIN]: "#/admin",
   [AppStep.DEALER_ADMIN]: "#/dealership",
   [AppStep.WORK]: "#/work",
+  [AppStep.VEHICLE_SPIN]: "#/vehicle-studio",
 };
 const HASH_TO_STEP = new Map<string, AppStep>([
   ["#/login", AppStep.LOGIN],
@@ -18,6 +19,7 @@ const HASH_TO_STEP = new Map<string, AppStep>([
   ["#/details", AppStep.DETAILS],
   ["#/post", AppStep.POST],
   ["#/work", AppStep.WORK],
+  ["#/vehicle-studio", AppStep.VEHICLE_SPIN],
   ["#/admin", AppStep.ADMIN],
   ["#/dealership", AppStep.DEALER_ADMIN],
   ["#/capture", AppStep.HOME],
@@ -56,6 +58,8 @@ export const useUrlStepSync = (options?: {
   /** Browser Back to Home from Details that holds the customer's signature. */
   onBlockedDraftBack?: (target: AppStep) => void;
   managementDirty?: boolean;
+  spinDirty?: boolean;
+  onBlockedSpinBack?: (target: AppStep) => void;
   onBlockedManagementBack?: (target: AppStep) => void;
 }) => {
   const step = useAppStore((s) => s.step);
@@ -150,6 +154,11 @@ export const useUrlStepSync = (options?: {
       if (current === AppStep.DEALER_ADMIN && managementRef.current?.managementDirty) {
         restore();
         managementRef.current.onBlockedManagementBack?.(target);
+        return;
+      }
+      if (current === AppStep.VEHICLE_SPIN && managementRef.current?.spinDirty) {
+        restore();
+        managementRef.current.onBlockedSpinBack?.(target);
         return;
       }
       applyingPop.current = true;

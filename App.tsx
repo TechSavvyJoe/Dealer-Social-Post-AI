@@ -152,7 +152,7 @@ const cancelSavedMessage = (
 };
 
 /** Which question the leave dialog is asking. */
-type LeaveKind = "post" | "settings" | "draft";
+type LeaveKind = "post" | "settings" | "draft" | "spin";
 
 const AppContent: React.FC = () => {
   const app = useAppController();
@@ -169,6 +169,7 @@ const AppContent: React.FC = () => {
   const leaveAction = useRef<(() => void) | null>(null);
   const [workReturnStep, setWorkReturnStep] = useState<AppStep | null>(null);
   const [managementDirty, setManagementDirty] = useState(false);
+  const [spinDirty, setSpinDirty] = useState(false);
   const toast = useToast();
   const mainRef = useRef<HTMLElement>(null);
 
@@ -243,6 +244,10 @@ const AppContent: React.FC = () => {
     }
     if (step === AppStep.DEALER_ADMIN && managementDirty) {
       confirmLeave("settings", action);
+      return;
+    }
+    if (step === AppStep.VEHICLE_SPIN && spinDirty) {
+      confirmLeave("spin", action);
       return;
     }
     action();
@@ -324,6 +329,8 @@ const AppContent: React.FC = () => {
   };
   useUrlStepSync({
     managementDirty,
+    spinDirty,
+    onBlockedSpinBack: (target) => confirmLeave("spin", () => app.setStep(target)),
     onBlockedManagementBack: (target) => {
       confirmLeave("settings", () => app.setStep(target));
     },
@@ -345,7 +352,12 @@ const AppContent: React.FC = () => {
         app.setIsSettingsOpen(false);
         return;
       }
-      if ([AppStep.DETAILS, AppStep.POST, AppStep.WORK].includes(step)) goBack();
+      if (
+        [AppStep.DETAILS, AppStep.POST, AppStep.WORK, AppStep.VEHICLE_SPIN].includes(
+          step,
+        )
+      )
+        goBack();
     },
     onPalette: () => app.setIsSettingsOpen(!app.isSettingsOpen),
     onFocusSearch: () =>
@@ -378,7 +390,9 @@ const AppContent: React.FC = () => {
         ? tileLabel(generatedPost?.scenarioId || postDraft?.scenarioId)
         : step === AppStep.WORK
           ? "My work"
-          : undefined;
+          : step === AppStep.VEHICLE_SPIN
+            ? "Vehicle studio"
+            : undefined;
   if (isRestoringSession)
     return (
       <main
@@ -402,7 +416,10 @@ const AppContent: React.FC = () => {
           onShowHistory={openWork}
           confirmBeforeLogout={false}
           onBack={
-            step === AppStep.DETAILS || step === AppStep.POST || step === AppStep.WORK
+            step === AppStep.DETAILS ||
+            step === AppStep.POST ||
+            step === AppStep.WORK ||
+            step === AppStep.VEHICLE_SPIN
               ? goBack
               : undefined
           }
@@ -442,6 +459,8 @@ const AppContent: React.FC = () => {
           onReset={() => requestLeave(app.reset)}
           onBackFromWork={goBack}
           onManagementDirtyChange={setManagementDirty}
+          onSpinDirtyChange={setSpinDirty}
+          onOpenSpin={() => requestLeave(() => app.setStep(AppStep.VEHICLE_SPIN))}
           onRemix={() => requestLeave(app.startRemix)}
           onDismissError={() => app.setError(null)}
           onGenerate={app.handleGenerate}
@@ -488,22 +507,26 @@ const AppContent: React.FC = () => {
         isOpen={leaveOpen}
         onClose={() => setLeaveOpen(false)}
         title={
-          leaveKind === "settings"
-            ? "Leave unsaved store settings?"
-            : leaveKind === "draft"
-              ? "Discard the post in progress?"
-              : "Leave this post?"
+          leaveKind === "spin"
+            ? "Leave this vehicle spin?"
+            : leaveKind === "settings"
+              ? "Leave unsaved store settings?"
+              : leaveKind === "draft"
+                ? "Discard the post in progress?"
+                : "Leave this post?"
         }
         description={
-          leaveKind === "settings"
-            ? "Save your dealership settings before leaving, or discard these changes."
-            : leaveKind === "draft"
-              ? pendingRelease
-                ? "Your photo, details and the customer's signature will be cleared."
-                : "Your photo and details will be cleared."
-              : postWorkAtRisk
-                ? "Changes are still saving or work is in progress."
-                : "This post has not been saved yet."
+          leaveKind === "spin"
+            ? "Unsaved frames and processing will be discarded. Saved spins stay in your vehicle studio."
+            : leaveKind === "settings"
+              ? "Save your dealership settings before leaving, or discard these changes."
+              : leaveKind === "draft"
+                ? pendingRelease
+                  ? "Your photo, details and the customer's signature will be cleared."
+                  : "Your photo and details will be cleared."
+                : postWorkAtRisk
+                  ? "Changes are still saving or work is in progress."
+                  : "This post has not been saved yet."
         }
         size="sm"
         footer={
@@ -533,6 +556,38 @@ const AppContent: React.FC = () => {
     </div>
   );
 };
+const LazyPublicSpin = React.lazy(() =>
+  import("./components/PublicVehicleSpin").then((m) => ({
+    default: m.PublicVehicleSpin,
+  })),
+);
 export default function App() {
-  return <AppContent />;
+  const [publicToken, setPublicToken] = useState(() =>
+    window.location.hash.startsWith("#/spin/") ? window.location.hash.slice(7) : "",
+  );
+  useEffect(() => {
+    const update = () =>
+      setPublicToken(
+        window.location.hash.startsWith("#/spin/") ? window.location.hash.slice(7) : "",
+      );
+    window.addEventListener("hashchange", update);
+    window.addEventListener("popstate", update);
+    return () => {
+      window.removeEventListener("hashchange", update);
+      window.removeEventListener("popstate", update);
+    };
+  }, []);
+  return publicToken ? (
+    <Suspense
+      fallback={
+        <p className="p-6 text-ink" role="status">
+          Opening vehicle view…
+        </p>
+      }
+    >
+      <LazyPublicSpin token={publicToken} />
+    </Suspense>
+  ) : (
+    <AppContent />
+  );
 }

@@ -63,3 +63,6 @@ credentials.json
 
 # Session scratch (screenshot scripts, probes) — never committed
 __tests__/__scratch__/
+
+# Verified model and runtime copied at build time
+public/vehicle-spin-v1/

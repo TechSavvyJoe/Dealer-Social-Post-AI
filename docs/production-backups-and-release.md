@@ -46,7 +46,7 @@ gh variable delete FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT --env production-back
 
 The first candidate Fly gate uses the new tooling to back up the v1 production source and boot that data with the exact v2 candidate image. This is the bootstrap restore drill; do not require the nightly workflow to exist in the old release. After v2 is running, scheduled drills target the reported running SHA even when `main` is ahead. Manual drills target the checked-out commit and refresh runtime evidence only when source and target are identical.
 
-The CI restore canary uploads the bundled synthetic `public/icon-192.png` as a dealer logo before taking the backup, then proves the database reference, storage-object hash, and PocketBase-served file all survive restoration. A production drill enumerates every non-empty known file reference (`dealers.logo`, `photo_releases.signature_png`, and `posts.creative_image`), including array-form values, and verifies the restored volume object. Public logos are also fetched through PocketBase. Customer uploads are never copied into release artifacts or logs.
+The CI restore canary uploads the bundled synthetic `public/icon-192.png` as a dealer logo before taking the backup, then proves the database reference, storage-object hash, and PocketBase-served file all survive restoration. A production drill enumerates every non-empty known file reference (`dealers.logo`, `photo_releases.signature_png`, `posts.creative_image`, and `vehicle_spin_frames.image`), including array-form values, and verifies the restored volume object. Public logos are also fetched through PocketBase. Customer uploads are never copied into release artifacts or logs.
 
 ## Turnstile and trusted Vercel proxy
 

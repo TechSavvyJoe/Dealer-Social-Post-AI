@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Images, LoaderCircle, Upload } from "lucide-react";
+import { Images, LoaderCircle, Rotate3D, Upload } from "lucide-react";
 import type { BrandCategoryId, GeneratedPost, ImageSelection } from "../types";
 import { useAppStore } from "../stores/appStore";
 import { homeTilesForDealer, type HomeTile } from "../services/storeDefaults";
@@ -18,6 +18,7 @@ export interface HomeProps {
     scenarioId: string,
   ) => void;
   onShowHistory: () => void;
+  onOpenSpin?: () => void;
   onOpenPost: (post: GeneratedPost) => void;
 }
 
@@ -25,6 +26,7 @@ export const Home: React.FC<HomeProps> = ({
   onPhotoPicked,
   onShowHistory,
   onOpenPost,
+  onOpenSpin,
 }) => {
   const dealer = useAppStore((state) => state.currentDealer);
   const person = useAppStore((state) => state.currentPerson);
@@ -157,6 +159,18 @@ export const Home: React.FC<HomeProps> = ({
             Choose from library
           </Button>
         </div>
+
+        {onOpenSpin && (
+          <Button
+            variant="ghost"
+            fullWidth
+            className="mt-2 justify-start"
+            leftIcon={<Rotate3D />}
+            onClick={onOpenSpin}
+          >
+            360° vehicle studio
+          </Button>
+        )}
 
         {intake.error ? (
           <ErrorBanner

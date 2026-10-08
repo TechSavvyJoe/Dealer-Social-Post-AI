@@ -198,6 +198,9 @@ WITH raw_file_refs(collection_name, collection_id, field_name, record_id, raw_va
   UNION ALL
   SELECT 'posts', (SELECT id FROM _collections WHERE name = 'posts'), 'creative_image', id, CAST(creative_image AS TEXT)
     FROM posts WHERE creative_image IS NOT NULL AND creative_image != ''
+  UNION ALL
+  SELECT 'vehicle_spin_frames', (SELECT id FROM _collections WHERE name = 'vehicle_spin_frames'), 'image', id, CAST(image AS TEXT)
+    FROM vehicle_spin_frames WHERE image IS NOT NULL AND image != ''
 ), normalized AS (
   SELECT collection_name, collection_id, field_name, record_id,
     CASE
@@ -220,7 +223,7 @@ verified_media_count=0
 if [[ -n "$file_references" ]]; then
   while IFS='|' read -r collection_name file_collection field_name file_record file_name; do
     case "$collection_name.$field_name" in
-      dealers.logo | photo_releases.signature_png | posts.creative_image) ;;
+      dealers.logo | photo_releases.signature_png | posts.creative_image | vehicle_spin_frames.image) ;;
       *)
         echo "Restore media query returned an unexpected file field." >&2
         exit 1
