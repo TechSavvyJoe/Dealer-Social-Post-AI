@@ -293,6 +293,7 @@ interface ShareHarness {
     postId?: string;
     omitExpectedRevision?: boolean;
   }) => RouteResult;
+  observeLegacy: ReturnType<typeof vi.fn>;
   events: ReturnType<typeof fakeRecord>[];
   savedRecords: unknown[];
   headers: Map<string, string>;
@@ -305,6 +306,7 @@ const shareHarness = (): ShareHarness => {
   const savedRecords: unknown[] = [];
   const headers = new Map<string, string>();
   const rateLimit = vi.fn((): AnyRecord => ({ ok: true }));
+  const observeLegacy = vi.fn();
   let eventSeq = 0;
 
   const run: ShareHarness["run"] = (options = {}) => {
@@ -379,6 +381,8 @@ const shareHarness = (): ShareHarness => {
         handler = callback;
       },
       require: (path: string) => {
+        if (path.endsWith("/revisionCompatibility.js"))
+          return { recordLegacy: observeLegacy };
         if (path.endsWith("/helpers.js")) return helpers;
         if (path.endsWith("/requestPolicies.js")) return realPolicies;
         if (path.endsWith("/websitePublications.js")) return realWebsite;
@@ -425,7 +429,7 @@ const shareHarness = (): ShareHarness => {
       json: (status: number, payload: AnyRecord) => ({ status, payload }),
     });
   };
-  return { run, events, savedRecords, headers, rateLimit };
+  return { run, events, savedRecords, headers, rateLimit, observeLegacy };
 };
 
 const seedEvent = (
@@ -474,6 +478,20 @@ describe("POST /api/app/posts/:id/shared", () => {
     expect(harness.headers.get("Cache-Control")).toBe("private, no-store");
   });
 
+  it("does not accept a legacy receipt if durable observation fails", () => {
+    const harness = shareHarness();
+    harness.observeLegacy.mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    expect(
+      harness.run({
+        omitExpectedRevision: true,
+        body: { channel: "facebook_feed", via: "copy" },
+      }).status,
+    ).toBe(503);
+    expect(harness.events).toHaveLength(0);
+  });
+
   it("accepts an absent legacy revision but rejects a stale supplied revision", () => {
     const legacy = shareHarness();
     expect(
@@ -489,6 +507,7 @@ describe("POST /api/app/posts/:id/shared", () => {
       },
     });
     expect(legacy.events).toHaveLength(1);
+    expect(legacy.observeLegacy).toHaveBeenCalledWith("share");
 
     const stale = shareHarness();
     expect(

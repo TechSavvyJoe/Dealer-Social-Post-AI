@@ -182,6 +182,7 @@ jobs:
 
           grep --fixed-strings '"ok":true' /tmp/health.json
           grep --fixed-strings '"status":"verified"' /tmp/health.json
+          node -e 'const s=require("/tmp/health.json").revisionCompatibility; if (!s || s.coverage !== "continuous-since-server-start" || s.ready !== false || !Number.isFinite(Date.parse(s.eligibleAfter))) process.exit(1)'
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:8090/api/app/session)" = "401"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \

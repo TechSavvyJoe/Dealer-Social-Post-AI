@@ -633,6 +633,29 @@ describe("PostScreen", () => {
     expect(mocks.retryPreparation).not.toHaveBeenCalled();
   });
 
+  it("only asks for the remaining steps after the share sheet finishes", () => {
+    mocks.shareState = {
+      feedback: {
+        title: "Sent to share sheet",
+        detail: "Caption copied.",
+        via: "share_sheet",
+      },
+    };
+    renderScreen();
+    const guide = screen.getByLabelText("Facebook posting steps");
+    expect(guide).toHaveTextContent("Return to Facebook to finish your post.");
+    expect(guide).not.toHaveTextContent("Tap Share");
+    expect(guide).toHaveTextContent("paste only if missing");
+  });
+
+  it("does not ask users to paste over X's prefilled caption", () => {
+    mocks.shareState = { nativeFileShareAvailable: false };
+    renderScreen({ post: { ...basePost, platformIds: ["x_twitter"] } });
+    const guide = screen.getByLabelText(/X.*posting steps/);
+    expect(guide).toHaveTextContent("caption opens already filled in");
+    expect(guide).not.toHaveTextContent("Paste the caption");
+  });
+
   it("renders Save image, Copy caption and Open {channel} without file sharing", async () => {
     const user = userEvent.setup();
     mocks.shareState = { nativeFileShareAvailable: false };

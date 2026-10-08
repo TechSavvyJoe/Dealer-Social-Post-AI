@@ -209,9 +209,9 @@ of it.
 
 | Stage | What it is                                                                                        | How to recognise it                                                       |
 | ----- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| A     | Backend returns revisions and still accepts a draft save without one                              | `pb_hooks/main.pb.js` contains `[revision-legacy-client]`                 |
+| A     | Backend returns revisions and still accepts a draft save without one                              | Both revision-less routes call `revisionCompatibility.recordLegacy`       |
 | B     | Frontend sends `expected_post_revision` on every draft save and share receipt                     | `services/posts.ts` appends `expected_post_revision` in `updatePostDraft` |
-| C     | Backend rejects a draft save or share receipt without a revision (`POST_DRAFT_REVISION_REQUIRED`) | `pb_hooks/main.pb.js` no longer contains `[revision-legacy-client]`       |
+| C     | Backend rejects a draft save or share receipt without a revision (`POST_DRAFT_REVISION_REQUIRED`) | Both revision-less routes reject before accepting a write                 |
 
 What must stay true at every moment:
 

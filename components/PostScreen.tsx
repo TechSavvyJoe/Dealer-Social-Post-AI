@@ -1436,10 +1436,12 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
             {share.feedback?.manualCopy
               ? "Caption not copied. Use Copy caption or select it above."
               : share.feedback?.detail.startsWith("Caption copied.")
-                ? `Caption copied. Paste it in ${selectedChannel.label}.`
-                : manualHandoff
-                  ? `Saving the ${mediaNoun} also copies your caption.`
-                  : `Choose ${selectedChannel.label} in the share sheet, then paste your caption.`}
+                ? `Caption and hashtags copied. Paste in ${selectedChannel.label} only if missing.`
+                : sharedViaSheet
+                  ? `Finish your post in ${selectedChannel.label}. Paste the caption only if missing.`
+                  : manualHandoff
+                    ? `Saving the ${mediaNoun} also copies your caption.`
+                    : `Choose ${selectedChannel.label} in the share sheet. Your caption is copied automatically.`}
           </p>
         ) : null}
         {phoneBarContent}
@@ -1535,12 +1537,18 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
               </p>
               <ol className="mt-2 list-decimal space-y-1 pl-4 text-ink-2">
                 <li>
-                  {manualHandoff
-                    ? `Save the ${mediaNoun} below. The caption is copied with it.`
-                    : `Tap Share and choose ${selectedChannel.label}.`}
+                  {sharedViaSheet
+                    ? `Return to ${selectedChannel.label} to finish your post.`
+                    : manualHandoff
+                      ? `Save the ${mediaNoun} below. The caption is copied with it.`
+                      : `Tap Share and choose ${selectedChannel.label}.`}
                 </li>
                 {manualHandoff ? <li>{addMediaInstruction}</li> : null}
-                <li>Paste the caption, review your account and audience, then post.</li>
+                <li>
+                  {manualHandoff && selectedChannelId === "x_twitter"
+                    ? "The caption opens already filled in. Review your account and audience, then post."
+                    : "Check the caption and hashtags; paste only if missing. Review your account and audience, then post."}
+                </li>
               </ol>
               {manualHandoff && applePhotosSave && !canSaveToPhotos ? (
                 <p className="mt-2 text-caption text-ink-2">

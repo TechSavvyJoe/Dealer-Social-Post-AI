@@ -127,13 +127,11 @@ this gate. All three conditions must hold:
 
 1. Stage B's `release-frontend` job is green and the canonical alias serves that
    build.
-2. The production log shows no `[revision-legacy-client]` line for seven
-   consecutive days. Each line names a post whose author is still on a build
-   from before stage B (an installed app or a tab that was never reopened).
-   `flyctl logs --app dealer-social-post-ai-production --no-tail | grep -c
-"revision-legacy-client"` (or the **Fetch Fly Logs** workflow) reads only
-   Fly's recent buffer, so check once a day through the window; a single check
-   at the end proves nothing about the earlier days.
+2. Production health's `revisionCompatibility.ready` is true. Both legacy
+   draft saves and share receipts persist an observation before being accepted.
+   Seven full days must pass without either route receiving a missing revision.
+   Every server restart resets this conservative window, including deployments,
+   restores and rollbacks: time on an uninstrumented backend never counts.
 3. The stage C change is the only change in its `main` commit and merges after
    stage B's whole pipeline has finished.
 
@@ -141,17 +139,16 @@ Until the gate is met, stage A's compatibility stays. It costs nothing for
 current clients, which always send a revision; it only keeps an older installed
 app able to save.
 
-The **Observe revision compatibility** workflow now runs daily at 14:17 UTC
-and can be dispatched manually. Each run retains a 30-day artifact with only
-the observation time, healthy production release SHA, retrieved entry count,
-and legacy-client count. Raw logs are deleted on the runner and never uploaded.
-An empty log response or failed health check cannot count as a clear day; a
-legacy-client entry fails the check and restarts the seven-day observation
-window. These are daily snapshots of Fly's recent buffer, not continuous log
-coverage. Review seven consecutive daily artifacts and the complete stage B
-deployment before merging stage C separately. This workflow never merges or
-deploys the strict stage automatically. Remove its schedule after stage C is
-verified live.
+The **Observe revision compatibility** workflow runs daily at 14:17 UTC and
+can be dispatched manually. Its 30-day artifact records the healthy release
+SHA, continuous observation start, clear-since time and earliest stage C review.
+It reads durable aggregate state through public health; it does not rely on
+Fly's short-lived log buffer. No post, person, caption or raw log is exposed.
+Missing or invalid observation state fails the check. `observing` is a healthy
+monitor result, not permission to ship stage C. Review a
+`ready-for-stage-c-review` artifact and the complete stage B deployment before
+merging stage C separately. This workflow never merges or deploys the strict
+stage automatically. Remove its schedule after stage C is verified live.
 
 Rolling back across these stages has its own order. See
 [the post-revision contract in the rollback runbook](runbooks/rollback.md#2a-the-post-revision-contract-stages-a-b-c).
