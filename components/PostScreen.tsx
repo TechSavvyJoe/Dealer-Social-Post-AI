@@ -20,7 +20,11 @@ import type {
   VideoStyle,
 } from "../types";
 import type { WebsiteDraft } from "../services/websitePublishing";
-import { PUBLISH_TARGETS, fitPublishCaptionToBudget } from "../services/publishTargets";
+import {
+  PUBLISH_TARGETS,
+  fitPublishCaptionToBudget,
+  isAppleTouchDevice,
+} from "../services/publishTargets";
 import type { PlatformDestinationId } from "../services/platformOutputs";
 import type { StoreLook } from "../services/storeDefaults";
 import { resolveStoreDefaults } from "../services/storeDefaults";
@@ -869,6 +873,8 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     (target) => target.id === selectedChannelId,
   );
   const manualHandoff = isDesktopLayout || useFallbackControls;
+  const applePhotosSave = isAppleTouchDevice();
+  const canSaveToPhotos = applePhotosSave && share.nativeFileShareAvailable;
   const targetWebUrl = share.prepared?.webUrl;
   const addMediaInstruction =
     selectedChannelId === "facebook_feed"
@@ -1267,9 +1273,13 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
                 size="md"
                 className="px-3"
                 disabled={share.shareDisabled}
-                onClick={() => void share.downloadAndCopy()}
+                onClick={() =>
+                  void (canSaveToPhotos
+                    ? share.saveToPhotos()
+                    : share.downloadAndCopy())
+                }
               >
-                Save {mediaNoun}
+                {canSaveToPhotos ? "Save to Photos" : `Save ${mediaNoun}`}
               </Button>
               <Button
                 variant="secondary"
@@ -1374,11 +1384,15 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
         aria-label={
           share.shareDisabled
             ? `Download for ${selectedChannel.label} unavailable. ${shareDisabledReason}`
-            : `Download for ${selectedChannel.label}`
+            : canSaveToPhotos
+              ? "Save to Photos"
+              : `Download for ${selectedChannel.label}`
         }
-        onClick={() => void share.downloadAndCopy()}
+        onClick={() =>
+          void (canSaveToPhotos ? share.saveToPhotos() : share.downloadAndCopy())
+        }
       >
-        Download for {selectedChannel.label}
+        {canSaveToPhotos ? "Save to Photos" : `Download for ${selectedChannel.label}`}
       </Button>
       <Button
         variant="secondary"
@@ -1528,6 +1542,13 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
                 {manualHandoff ? <li>{addMediaInstruction}</li> : null}
                 <li>Paste the caption, review your account and audience, then post.</li>
               </ol>
+              {manualHandoff && applePhotosSave && !canSaveToPhotos ? (
+                <p className="mt-2 text-caption text-ink-2">
+                  If the file lands in Files, open it and choose Share → Save{" "}
+                  {mediaNoun === "video" ? "Video" : "Image"} before opening{" "}
+                  {selectedChannel.label}.
+                </p>
+              ) : null}
               {selectedChannelId === "tiktok" &&
               isDesktopLayout &&
               mediaNoun === "image" ? (

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   copyPreparedCaption: vi.fn(),
   downloadPreparedMedia: vi.fn(),
   openPreparedTarget: vi.fn(),
+  savePreparedMediaToLibrary: vi.fn(),
   recordPostShared: vi.fn(),
   logError: vi.fn(),
 }));
@@ -21,6 +22,10 @@ vi.mock("../services/publishTargets", () => ({
   openPreparedTarget: mocks.openPreparedTarget,
 }));
 vi.mock("../services/posts", () => ({ recordPostShared: mocks.recordPostShared }));
+vi.mock("../utils/mediaSave", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utils/mediaSave")>()),
+  savePreparedMediaToLibrary: mocks.savePreparedMediaToLibrary,
+}));
 vi.mock("../utils/telemetry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../utils/telemetry")>()),
   logError: mocks.logError,
@@ -95,6 +100,10 @@ describe("usePostShare", () => {
     });
     mocks.copyPreparedCaption.mockResolvedValue(true);
     mocks.downloadPreparedMedia.mockReturnValue(true);
+    mocks.savePreparedMediaToLibrary.mockResolvedValue({
+      method: "photos-share",
+      kind: "image",
+    });
     mocks.openPreparedTarget.mockReturnValue("native");
     mocks.recordPostShared.mockResolvedValue({
       id: "share-1",
@@ -183,6 +192,55 @@ describe("usePostShare", () => {
       "download",
       "copy",
     ]);
+  });
+
+  it("opens the prepared Photos save sheet synchronously and does not claim a social share", async () => {
+    const { result } = renderHook(() => usePostShare(options()));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = result.current.saveToPhotos();
+      expect(mocks.savePreparedMediaToLibrary).toHaveBeenCalledWith({
+        file,
+        filename: file.name,
+        kind: "image",
+      });
+    });
+    await act(async () => {
+      await pending;
+    });
+    expect(result.current.feedback).toMatchObject({
+      title: "Save to Photos opened",
+      via: "copy",
+    });
+    expect(result.current.feedback?.detail).toContain("Choose Save Image");
+    expect(mocks.recordPostShared.mock.calls.map((call) => call[1].via)).toEqual([
+      "copy",
+    ]);
+  });
+
+  it("keeps the media at risk when the Photos save is cancelled", async () => {
+    mocks.savePreparedMediaToLibrary.mockResolvedValue({
+      method: "cancelled",
+      kind: "image",
+    });
+    const delivered = vi.fn();
+    const { result } = renderHook(() =>
+      usePostShare({ ...options(), onMediaDelivered: delivered }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      expect(await result.current.saveToPhotos()).toBe(false);
+    });
+    expect(result.current.feedback?.title).toBe("Save cancelled");
+    expect(delivered).not.toHaveBeenCalled();
+    expect(
+      mocks.recordPostShared.mock.calls.every((call) => call[1].via === "copy"),
+    ).toBe(true);
   });
 
   it("makes the exact caption selectable when clipboard access fails", async () => {

@@ -369,9 +369,17 @@ test("Facebook Instagram and TikTok recover from a closed sheet with save-and-co
   test.setTimeout(90_000);
   await recordSharing(page);
   await page.addInitScript(() => {
+    let attempts = 0;
+    const apple = /iPad|iPhone|iPod/.test(navigator.userAgent);
     Object.defineProperty(navigator, "share", {
       configurable: true,
-      value: () => Promise.reject(new DOMException("Closed", "AbortError")),
+      value: () => {
+        attempts += 1;
+        // First sheet has no selected social app; the next iOS sheet saves to Photos.
+        return apple && attempts % 2 === 0
+          ? Promise.resolve()
+          : Promise.reject(new DOMException("Closed", "AbortError"));
+      },
     });
   });
   await fixture(page);
@@ -380,6 +388,7 @@ test("Facebook Instagram and TikTok recover from a closed sheet with save-and-co
   ).toBeVisible();
   await seedRestoredPost(page, ["facebook_feed", "instagram_feed", "tiktok"]);
   await page.reload();
+  const apple = await page.evaluate(() => /iPad|iPhone|iPod/.test(navigator.userAgent));
   for (const label of ["Facebook", "Instagram", "TikTok"]) {
     await page
       .getByRole("group", { name: "Share to" })
@@ -391,16 +400,29 @@ test("Facebook Instagram and TikTok recover from a closed sheet with save-and-co
     await expect(
       page.getByText("Your post is still ready", { exact: true }),
     ).toBeVisible();
-    const download = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Save image", exact: true }).click();
-    const file = await download;
-    expect(file.suggestedFilename()).toMatch(/\.(jpg|jpeg|png)$/);
-    await expect(
-      page.getByText(
-        `Caption copied. Open ${label}, add the image, then paste the caption and post.`,
-        { exact: true },
-      ),
-    ).toBeVisible();
+    if (apple) {
+      await page.getByRole("button", { name: "Save to Photos", exact: true }).click();
+      await expect(
+        page.getByText("Save to Photos opened", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText(
+          `Caption copied. Choose Save Image, then open ${label} and add it. Paste the caption before posting.`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+    } else {
+      const download = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Save image", exact: true }).click();
+      const file = await download;
+      expect(file.suggestedFilename()).toMatch(/\.(jpg|jpeg|png)$/);
+      await expect(
+        page.getByText(
+          `Caption copied. Open ${label}, add the image, then paste the caption and post.`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+    }
     expect((await clipboardWrites(page)).at(-1)).toContain(EMPLOYEE_DISCLOSURE);
     await expect(
       page.getByRole("button", { name: `Open ${label}`, exact: true }),
@@ -515,7 +537,7 @@ test("blocked clipboard exposes the complete outbound caption for manual copying
     ),
   ).toBe((await field.inputValue()).length);
   await expect(
-    page.getByRole("button", { name: "Save image", exact: true }),
+    page.getByRole("button", { name: /^Save (image|to Photos)$/ }),
   ).toBeEnabled();
 });
 

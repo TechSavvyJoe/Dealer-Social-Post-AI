@@ -15,6 +15,7 @@ import { submitShareReceipt } from "../services/shareReceipts";
 import { useAppStore } from "../stores/appStore";
 import { toUiMessage } from "../utils/errorMessages";
 import { sharedLabel } from "../utils/postLabels";
+import { savePreparedMediaToLibrary } from "../utils/mediaSave";
 
 export type PostSharePreparationStatus = "idle" | "preparing" | "ready" | "failed";
 
@@ -63,6 +64,7 @@ export interface UsePostShareResult {
   copyCaption: () => Promise<boolean>;
   download: () => boolean;
   downloadAndCopy: () => Promise<boolean>;
+  saveToPhotos: () => Promise<boolean>;
   useManualHandoff: () => void;
   openTarget: () => "native" | "web" | "none";
 }
@@ -449,6 +451,65 @@ export const usePostShare = ({
     setFallbackActive(true);
   }, []);
 
+  const saveToPhotos = useCallback(async () => {
+    if (!activePrepared?.file || effectiveBlockedReason) return false;
+    const copiedPromise = copyPreparedCaption(activePrepared);
+    // The exact file is already prepared. Open the OS save sheet in this click.
+    const savePromise = savePreparedMediaToLibrary({
+      file: activePrepared.file,
+      filename: activePrepared.file.name,
+      kind: mediaNoun === "video" ? "video" : "image",
+    });
+    const [saved, copied] = await Promise.all([savePromise, copiedPromise]);
+    if (!sessionIsCurrent() || currentKeyRef.current !== deliveredCreativeKey)
+      return false;
+    if (copied) void record("copy");
+    if (saved.method === "cancelled") {
+      setFeedback({
+        title: "Save cancelled",
+        detail: "Your post is still ready. Tap Save to Photos when you're ready.",
+        via: "copy",
+      });
+      return false;
+    }
+    if (saved.method === "error") {
+      setFeedback({
+        title: "File not saved",
+        detail: saved.message,
+        via: "copy",
+        fallback: true,
+      });
+      return false;
+    }
+    onMediaDelivered?.(content);
+    // A Photos sheet does not attest a social post, or even which save action
+    // was selected. Only the actual browser-download branch gets that receipt.
+    if (saved.method === "download") void record("download");
+    const saveInstruction =
+      saved.method === "photos-share"
+        ? `Choose Save ${mediaNoun === "video" ? "Video" : "Image"}, then open ${channelLabel} and add it.`
+        : `Open the downloaded ${mediaNoun} and choose Share → Save ${mediaNoun === "video" ? "Video" : "Image"} to add it to Photos.`;
+    setFeedback({
+      title:
+        saved.method === "photos-share" ? "Save to Photos opened" : "File downloaded",
+      detail: `${copied ? "Caption copied. " : ""}${saveInstruction}${copied ? " Paste the caption before posting." : " Tap Copy caption before posting."}`,
+      via: "copy",
+      manualCopy: !copied,
+      fallback: !copied,
+    });
+    return true;
+  }, [
+    activePrepared,
+    effectiveBlockedReason,
+    mediaNoun,
+    sessionIsCurrent,
+    deliveredCreativeKey,
+    record,
+    onMediaDelivered,
+    content,
+    channelLabel,
+  ]);
+
   const nativeFileShareAvailable = useMemo(() => {
     if (!activePrepared?.file || typeof navigator === "undefined") return false;
     if (typeof navigator.share !== "function") return false;
@@ -480,6 +541,7 @@ export const usePostShare = ({
     copyCaption,
     download,
     downloadAndCopy,
+    saveToPhotos,
     useManualHandoff,
     openTarget,
   };
