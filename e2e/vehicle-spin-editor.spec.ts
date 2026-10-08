@@ -9,6 +9,7 @@ test("vehicle background controls preserve originals and refine the selected ang
     "Full 48-frame model sequence runs once; WebKit model and editor have separate coverage.",
   );
   test.setTimeout(480000);
+  page.setDefaultTimeout(15000);
   await page.route("**/api/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     return route.fulfill({
@@ -32,7 +33,9 @@ test("vehicle background controls preserve originals and refine the selected ang
           : { items: [], canReview: false },
     });
   });
-  await page.goto("/#/vehicle-studio");
+  await page.goto("/");
+  await page.getByRole("button", { name: "360° vehicle studio", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Every angle. One great view." })).toBeVisible();
   // Six-second still-video fixture derived from the repo's generated inventory
   // category image. It exercises editing, not real-world walkaround quality.
   await page
