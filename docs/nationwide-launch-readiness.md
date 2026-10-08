@@ -69,3 +69,19 @@ timings on a busy development machine; use a clean runner and retain its evidenc
 
 The launch decision must identify outstanding gates explicitly. Passing CI does
 not close business, physical-device, provider-quality, or operational evidence gaps.
+
+## Capacity failure found and corrected
+
+The first clean CI run provisioned 25 dealerships and 250 people, signed every
+person in, and saved all 250 drafts, then timed out during concurrent History
+reads. Profiling an isolated PocketBase process identified repeated compilation
+of the same 18 customer-identity regular expressions. The fixed grammar is now
+cached per JSVM; customer content and dealer-specific allowances are never cached.
+Empty projection work also returns early. All identity decisions remain enforced.
+
+After the fix, the complete local canary passed, including 1,000 History reads
+at concurrency 25, cross-dealer denial, 250 spin projects, and 500 capacity-lease
+attempts. History p95 was 1,943 ms and max 3,820 ms on the heavily loaded local
+host. These are synthetic loopback measurements, not production latency claims.
+The 1,421 identity/disclosure regression tests also passed. Clean CI and the
+production release verification remain required.
