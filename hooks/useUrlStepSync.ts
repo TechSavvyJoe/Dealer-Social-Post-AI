@@ -82,6 +82,10 @@ export const useUrlStepSync = (options?: {
   }, [step]);
   useEffect(() => {
     const onPopState = () => {
+      // App owns public capability links outside the authenticated workspace.
+      // Leave the hash intact so its route listener can open the customer view,
+      // including same-document navigation from an already-open app tab.
+      if (window.location.hash.startsWith("#/spin/")) return;
       const state = useAppStore.getState();
       const current = state.step;
       let target = HASH_TO_STEP.get(window.location.hash);

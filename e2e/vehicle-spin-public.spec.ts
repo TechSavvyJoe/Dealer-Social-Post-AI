@@ -68,4 +68,14 @@ test("customer spin opens privately, supports controls and clears a revoked view
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "2024 Test Vehicle" })).toHaveCount(0);
   await expect(page.getByRole("img")).toHaveCount(0);
+
+  // A customer link also works when opened in a tab already showing the app.
+  // Workspace popstate handling must not replace the public capability hash.
+  await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: "System admin", exact: true }),
+  ).toBeVisible();
+  await page.goto("/#/spin/" + token);
+  await expect(page.getByRole("heading", { name: "2024 Test Vehicle" })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp("/#/spin/" + token + "$"));
 });
