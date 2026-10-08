@@ -37,6 +37,7 @@ const SHORT_HEADERS: Partial<Record<SetupRowId, string>> = {
   instagram: "Instagram",
   voice: "Voice",
   look: "Look",
+  private_access: "Access",
 };
 
 export interface BoardColumn {

@@ -408,7 +408,7 @@ describe("manager password authentication backend contract", () => {
     const helperSource = read("pb_hooks/helpers.js");
     const sessionValidator = between(
       helperSource,
-      "function sessionContext(c)",
+      "function sessionContext(c, daoOverride)",
       "function dealerFromSession(c)",
     );
     expect(sessionValidator).toContain(

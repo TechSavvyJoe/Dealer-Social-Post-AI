@@ -1,6 +1,7 @@
 // Real PocketBase only, fresh temporary data, synthetic users, zero provider calls.
 // No URL override: this harness cannot target a customer deployment.
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, mkdir, cp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
@@ -71,6 +72,7 @@ async function api(
   );
   return {
     value,
+    headers: response.headers,
     ms: performance.now() - start,
     cookie: response.headers.get("set-cookie")?.match(/dealer_session=([^;]+)/)?.[0],
   };
@@ -167,6 +169,16 @@ routerAdd("POST", "/__launch/capacity", (c) => {
       })
     ).value;
     dealers.push(dealer);
+    const invitation = (
+      await api(`/api/app/dealers/${dealer.id}/invitation`, {
+        method: "POST",
+        cookie: admin,
+        data: { action: "issue" },
+      })
+    ).value;
+    assert.equal(invitation.required, true);
+    assert.equal(invitation.hasInvitation, true);
+    dealer.invitation = `dealer_invitation=${invitation.token}`;
     for (let person = 0; person < 10; person++) {
       const issued = (
         await api("/api/app/salespeople", {
@@ -179,18 +191,59 @@ routerAdd("POST", "/__launch/capacity", (c) => {
           },
         })
       ).value;
-      people.push({ ...issued, dealerId: dealer.id, ip: `203.0.113.${store + 1}` });
+      people.push({
+        ...issued,
+        dealerId: dealer.id,
+        invitation: dealer.invitation,
+        ip: `203.0.113.${store + 1}`,
+      });
     }
   }
   console.log("Created 25 synthetic dealerships and 250 users.");
   checks.push(
     "25 stores and 250 personal identities provisioned through application routes",
   );
+  // Caller-supplied dealer ids and PINs cannot replace a private invitation.
+  await api("/api/app/session", {
+    method: "POST",
+    ip: "203.0.113.240",
+    data: { dealerCode: people[1].pin, dealerId: dealers[0].id },
+    expected: 401,
+  });
+  await api("/api/app/session", {
+    method: "POST",
+    ip: "203.0.113.240",
+    cookie: dealers[1].invitation,
+    data: { dealerCode: people[1].pin, dealerId: dealers[0].id },
+    expected: 401,
+  });
+  await api("/api/app/dealership-invitation", { expected: 404 });
+  const accepted = await api("/api/app/dealership-invitation", {
+    method: "POST",
+    data: { token: dealers[0].invitation.split("=")[1] },
+  });
+  assert.equal(accepted.value.id, dealers[0].id);
+  assert.deepEqual(Object.keys(accepted.value).sort(), ["id", "name"]);
+  const invitationCookie = accepted.headers
+    .getSetCookie()
+    .find((v) => v.startsWith("dealer_invitation="));
+  assert(
+    invitationCookie &&
+      /HttpOnly/.test(invitationCookie) &&
+      /Secure/.test(invitationCookie) &&
+      /SameSite=Strict/.test(invitationCookie) &&
+      /Path=\/api/.test(invitationCookie),
+  );
+  assert.match(accepted.headers.get("cache-control"), /no-store/);
+  checks.push(
+    "Private invitation required; wrong-store invitations and forged dealer hints denied; secure device cookie verified",
+  );
   const loginMs = [];
   await parallel(people, async (person) => {
     const login = await api("/api/app/session", {
       method: "POST",
       ip: person.ip,
+      cookie: person.invitation,
       data: { dealerCode: person.pin, dealerId: person.dealerId },
     });
     assert.equal(login.value.dealer.id, person.dealerId);
@@ -340,6 +393,109 @@ routerAdd("POST", "/__launch/capacity", (c) => {
   });
   await api("/api/app/session", { cookie: people[1].cookie, expected: 401 });
   checks.push("Deactivation immediately invalidated the existing browser session");
+  // Invitation administration is tenant- and role-bound, including rotation.
+  const manager = people[0];
+  await api(`/api/app/dealers/${dealers[0].id}/invitation`, {
+    cookie: people[2].cookie,
+    method: "POST",
+    data: { action: "issue" },
+    expected: 403,
+  });
+  await api(`/api/app/dealers/${dealers[1].id}/invitation`, {
+    cookie: manager.cookie,
+    method: "POST",
+    data: { action: "issue" },
+    expected: 403,
+  });
+  const replacement = await api(`/api/app/dealers/${dealers[0].id}/invitation`, {
+    cookie: manager.cookie,
+    method: "POST",
+    data: { action: "issue" },
+  });
+  assert.match(replacement.value.token, /^[a-f0-9]{64}$/);
+  assert.notEqual(replacement.value.token, dealers[0].invitation.split("=")[1]);
+  await api("/api/app/session", { cookie: manager.cookie });
+  await api("/api/app/session", { cookie: people[2].cookie, expected: 401 });
+  await api("/api/app/dealership-invitation", {
+    cookie: dealers[0].invitation,
+    expected: 404,
+  });
+  await api("/api/app/session", {
+    method: "POST",
+    ip: "203.0.113.240",
+    cookie: dealers[0].invitation,
+    data: { dealerCode: people[2].pin },
+    expected: 401,
+  });
+  const renewed = await api("/api/app/session", {
+    method: "POST",
+    ip: "203.0.113.240",
+    cookie: "dealer_invitation=" + replacement.value.token,
+    data: { dealerCode: people[2].pin },
+  });
+  assert.equal(renewed.value.person.id, people[2].id);
+  assert.equal(renewed.value.dealer.invitation_required, true);
+  assert.equal(renewed.value.dealer.has_invitation, true);
+  assert.equal(renewed.value.dealer.invitation_hash, undefined);
+  // Switching stores explicitly redeems the link and revokes the previous bearer.
+  await api("/api/app/dealership-invitation", {
+    method: "POST",
+    cookie: renewed.cookie,
+    data: { token: dealers[1].invitation.split("=")[1] },
+  });
+  await api("/api/app/session", { cookie: renewed.cookie, expected: 401 });
+  checks.push(
+    "Invitation rotation revoked old links and other PIN sessions, preserved the issuing manager, and explicit store switching revoked the old bearer",
+  );
+  // Exercise the compatibility state of a dealership that predates this
+  // migration. Only this disposable database is writable by the fixture.
+  const fixtureDb = new DatabaseSync(join(scratch, "data/data.db"));
+  try {
+    fixtureDb
+      .prepare("UPDATE dealers SET invitation_required = 0 WHERE id = ?")
+      .run(dealers[24].id);
+  } finally {
+    fixtureDb.close();
+  }
+  const legacySeller = await api("/api/app/session", {
+    method: "POST",
+    ip: "203.0.113.239",
+    data: { dealerCode: people[241].pin },
+  });
+  const legacyManager = await api("/api/app/session", {
+    method: "POST",
+    ip: "203.0.113.239",
+    data: { dealerCode: people[240].pin },
+  });
+  const legacyInvite = await api(`/api/app/dealers/${dealers[24].id}/invitation`, {
+    cookie: legacyManager.cookie,
+    method: "POST",
+    data: { action: "issue" },
+  });
+  assert.equal(legacyInvite.value.required, false);
+  await api("/api/app/session", { cookie: legacySeller.cookie });
+  await api(`/api/app/dealers/${dealers[24].id}/invitation`, {
+    cookie: legacyManager.cookie,
+    method: "POST",
+    data: { action: "require" },
+  });
+  await api("/api/app/session", { cookie: legacyManager.cookie });
+  await api("/api/app/session", { cookie: legacySeller.cookie, expected: 401 });
+  await api("/api/app/session", {
+    method: "POST",
+    ip: "203.0.113.239",
+    data: { dealerCode: people[241].pin },
+    expected: 401,
+  });
+  await api("/api/app/session", {
+    method: "POST",
+    ip: "203.0.113.239",
+    cookie: "dealer_invitation=" + legacyInvite.value.token,
+    data: { dealerCode: people[241].pin },
+  });
+  checks.push(
+    "Existing-store access survived issuing a link until explicit activation; activation revoked uninvited sessions and kept the issuing manager signed in",
+  );
   report.status = "passed";
   report.completedAt = new Date().toISOString();
   console.log(JSON.stringify(report, null, 2));

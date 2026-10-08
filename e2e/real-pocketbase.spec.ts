@@ -430,6 +430,28 @@ test.describe("real PocketBase release flow", () => {
     expect(createDealerResponse.status()).toBe(200);
     const dealerId = String(((await createDealerResponse.json()) as JsonObject).id);
     expect(dealerId).toMatch(/^[a-z0-9]{15}$/);
+    const privateInviteResponse = await page.request.post(
+      `/api/app/dealers/${dealerId}/invitation`,
+      { data: { action: "issue" } },
+    );
+    expect(privateInviteResponse.status()).toBe(200);
+    const privateInvite = String((await privateInviteResponse.json()).token);
+    const installInvite = async (
+      context: import("@playwright/test").BrowserContext,
+    ) => {
+      await context.addCookies([
+        {
+          name: "dealer_invitation",
+          value: privateInvite,
+          domain: new URL(page.url()).hostname,
+          path: "/api",
+          httpOnly: true,
+          secure: false,
+          sameSite: "Strict",
+        },
+      ]);
+    };
+
     await expect(newDealerDialog).toBeHidden();
 
     // The setup board lists the store this spec just created, read back from
@@ -664,6 +686,7 @@ test.describe("real PocketBase release flow", () => {
       baseURL: new URL(page.url()).origin,
       viewport: testInfo.project.use.viewport,
     });
+    await installInvite(managerContext);
     const managerPage = await managerContext.newPage();
     await managerPage.goto("/");
     await managerPage
@@ -839,6 +862,7 @@ test.describe("real PocketBase release flow", () => {
       baseURL: new URL(page.url()).origin,
       viewport: testInfo.project.use.viewport,
     });
+    await installInvite(salespersonContext);
     const salespersonPage = await salespersonContext.newPage();
     await salespersonPage.goto("/");
     const salespersonLoginPromise = salespersonPage.waitForResponse(
@@ -1083,6 +1107,7 @@ test.describe("real PocketBase release flow", () => {
         baseURL: new URL(page.url()).origin,
         viewport: testInfo.project.use.viewport,
       });
+      await installInvite(lifecycleContext);
       const lifecyclePage = await lifecycleContext.newPage();
       const passwordReloginResponse = await lifecyclePage.request.post(
         "/api/app/session",

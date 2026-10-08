@@ -1,3 +1,4 @@
+import { DealerInvitationPanel } from "../DealerInvitationPanel";
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown } from "lucide-react";
@@ -751,6 +752,9 @@ const StoreDetail: React.FC<StoreDetailProps> = ({
           {fileBlock}
           {notesBlock}
         </div>
+        {isSystemAdmin && (
+          <DealerInvitationPanel key={dealer.id} dealerId={dealer.id} />
+        )}
         {sampleBlock}
         {actions}
       </div>
@@ -769,6 +773,9 @@ const StoreDetail: React.FC<StoreDetailProps> = ({
             <div className="min-w-0 flex-[1_1_18.75rem]">{notesBlock}</div>
           ) : null}
         </div>
+        {isSystemAdmin && (
+          <DealerInvitationPanel key={dealer.id} dealerId={dealer.id} />
+        )}
         {actions}
       </div>
       <div className="w-[13.5rem] shrink-0">{sampleBlock}</div>

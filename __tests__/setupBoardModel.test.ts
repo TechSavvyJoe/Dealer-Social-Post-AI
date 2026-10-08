@@ -188,3 +188,23 @@ describe("the phone list's line", () => {
     expect(missingLine(dealerSetupStatus(complete))).toBeNull();
   });
 });
+
+describe("private dealership access readiness", () => {
+  it("counts the invitation requirement only when reported by the server", () => {
+    expect(dealerSetupStatus(complete).total).toBe(6);
+    const pending = { ...complete, invitation_required: false, has_invitation: true };
+    expect(dealerSetupStatus(pending).summary).toBe("6 of 7 set up");
+    expect(dealerSetupStatus(pending).missing[0].id).toBe("private_access");
+    expect(dealerSetupStatus({ ...pending, invitation_required: true }).summary).toBe(
+      "7 of 7 set up",
+    );
+    expect(
+      dealerSetupStatus({
+        ...pending,
+        invitation_required: true,
+        has_invitation: false,
+      }).missing[0].id,
+    ).toBe("private_access");
+    expect(boardColumns([dealerSetupStatus(pending)]).at(-1)?.header).toBe("Access");
+  });
+});

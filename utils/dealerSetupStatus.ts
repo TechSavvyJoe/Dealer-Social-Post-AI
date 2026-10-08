@@ -9,7 +9,7 @@ import type { ApprovalPolicy, BrandCategoryId, Dealer, SignatureLook } from "../
  * `serializeDealer` in pb_hooks/helpers.js. Every value shown here is a public
  * profile field; nothing secret is read.
  *
- * Six rows count toward "N of 6 set up": Store profile, Brand, Facebook,
+ * Six profile rows count toward setup, plus Private team access when reported: Store profile, Brand, Facebook,
  * Instagram, Brand voice and Signature look. Google Business Profile, TikTok,
  * X and LinkedIn are optional: the app stores them, but a missing one costs
  * the store nothing (the Google share target opens
@@ -60,7 +60,8 @@ export type SetupRowId =
   | "look"
   | "approval"
   | "disclosure"
-  | "creative_system";
+  | "creative_system"
+  | "private_access";
 
 export interface SetupRow {
   id: SetupRowId;
@@ -522,6 +523,28 @@ export const dealerSetupStatus = (dealer: Dealer): DealerSetupStatus => {
     section: null,
     reason: null,
   });
+
+  if (
+    typeof dealer.invitation_required === "boolean" &&
+    typeof dealer.has_invitation === "boolean"
+  ) {
+    const ready = dealer.invitation_required && dealer.has_invitation;
+    rows.push({
+      id: "private_access",
+      label: "Private team access",
+      state: ready ? "ready" : "missing",
+      counts: true,
+      attention: !ready,
+      value: [ready ? "Private invitation required" : "Invitation setup needed"],
+      guidance: ready
+        ? null
+        : "Create and distribute the private link in Private dealership access below, then require it for sign-in. Managers can also find it under Team.",
+      section: null,
+      reason: ready
+        ? null
+        : "Finish private invitations before onboarding this store's team.",
+    });
+  }
 
   const counted = rows.filter((row) => row.counts);
   const ready = counted.filter((row) => row.state === "ready").length;

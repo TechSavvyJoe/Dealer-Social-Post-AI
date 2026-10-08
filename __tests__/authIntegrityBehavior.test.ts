@@ -793,6 +793,9 @@ describe("authoritative session revalidation", () => {
     };
     runtime.$app = {
       dao: () => ({
+        runInTransaction(this: unknown, callback: (dao: unknown) => void) {
+          callback(this);
+        },
         findCollectionByNameOrId: () => ({ id: "sessions" }),
         findRecordById: (collection: string, id: string) => {
           if (collection === "dealers" && id === dealer.id) return dealer;
@@ -853,6 +856,9 @@ describe("authoritative session revalidation", () => {
     runtime.Record = class {};
     runtime.$app = {
       dao: () => ({
+        runInTransaction(this: unknown, callback: (dao: unknown) => void) {
+          callback(this);
+        },
         findCollectionByNameOrId: () => ({ id: "sessions" }),
         findRecordById: (collection: string, id: string) => {
           if (collection === "dealers" && id === dealer.id) return dealer;
