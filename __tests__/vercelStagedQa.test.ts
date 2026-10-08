@@ -186,7 +186,11 @@ describe("Vercel staged browser QA receipt", () => {
       completedAt: new Date(now - 5 * 60 * 1000).toISOString(),
       outcome: "passed",
       checks: {
-        authentication: { passed: true, role: "salesperson" },
+        authentication: {
+          passed: true,
+          role: "salesperson",
+          privateInvitationConfirmed: true,
+        },
         health: {
           passed: true,
           releaseSha: validEvidence.releaseSha,
@@ -205,6 +209,24 @@ describe("Vercel staged browser QA receipt", () => {
 
     for (const invalid of [
       { ...validCanary, schemaVersion: 2 },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          authentication: { passed: true, role: "salesperson" },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          authentication: {
+            passed: true,
+            role: "salesperson",
+            privateInvitationConfirmed: false,
+          },
+        },
+      },
       { ...validCanary, targetOrigin: "https://example.com" },
       { ...validCanary, expectedReleaseSha: "d".repeat(40) },
       { ...validCanary, outcome: "failed" },
@@ -251,7 +273,11 @@ describe("Vercel staged browser QA receipt", () => {
       completedAt: new Date(now - 5 * 60 * 1000).toISOString(),
       outcome: "passed",
       checks: {
-        authentication: { passed: true, role: "salesperson" },
+        authentication: {
+          passed: true,
+          role: "salesperson",
+          privateInvitationConfirmed: true,
+        },
         health: {
           passed: true,
           releaseSha: validEvidence.releaseSha,
@@ -292,6 +318,24 @@ describe("Vercel staged browser QA receipt", () => {
 
     for (const invalid of [
       { ...validCanary, expectedReleaseSha: "d".repeat(40) },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          authentication: { passed: true, role: "salesperson" },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          authentication: {
+            passed: true,
+            role: "salesperson",
+            privateInvitationConfirmed: false,
+          },
+        },
+      },
       { ...validCanary, outcome: "failed" },
       {
         ...validCanary,

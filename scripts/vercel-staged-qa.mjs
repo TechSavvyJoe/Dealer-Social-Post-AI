@@ -238,6 +238,7 @@ export const validateProviderCanaryEvidence = (evidence, releaseSha) => {
     completedAt > Date.now() + 300_000 ||
     Date.now() - completedAt > PROVIDER_CANARY_MAX_AGE_MS ||
     evidence.checks?.authentication?.role !== "salesperson" ||
+    evidence.checks?.authentication?.privateInvitationConfirmed !== true ||
     evidence.checks?.health?.releaseSha !== releaseSha ||
     evidence.checks?.health?.backupStatus !== "verified" ||
     !requiredChecks.every((name) => evidence.checks?.[name]?.passed === true)
@@ -267,6 +268,7 @@ export const validateWebsiteHandoffCanaryEvidence = (evidence, releaseSha) => {
     Date.now() - completedAt > WEBSITE_HANDOFF_CANARY_MAX_AGE_MS ||
     checks.authentication?.passed !== true ||
     checks.authentication?.role !== "salesperson" ||
+    checks.authentication?.privateInvitationConfirmed !== true ||
     checks.health?.passed !== true ||
     checks.health?.releaseSha !== releaseSha ||
     checks.health?.backupStatus !== "verified" ||

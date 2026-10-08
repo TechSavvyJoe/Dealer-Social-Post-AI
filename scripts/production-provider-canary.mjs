@@ -440,12 +440,14 @@ export class AuthenticatedClient {
   constructor(origin) {
     this.origin = origin;
     this.cookie = "";
+    this.invitationCookie = "";
     this.apiContractVersion = "";
   }
 
   async request(path, options = {}) {
     const headers = new Headers(options.headers || {});
-    if (this.cookie) headers.set("Cookie", this.cookie);
+    const cookies = [this.invitationCookie, this.cookie].filter(Boolean).join("; ");
+    if (cookies) headers.set("Cookie", cookies);
     if (this.apiContractVersion) {
       headers.set("X-Dealer-Client-Contract", this.apiContractVersion);
     }
@@ -455,6 +457,46 @@ export class AuthenticatedClient {
       redirect: "error",
       signal: options.signal || AbortSignal.timeout(310_000),
     });
+  }
+
+  async acceptInvitation(token) {
+    if (!/^[a-f0-9]{64}$/.test(token || "")) {
+      throw new CanaryError(
+        "CONFIG_INVALID_INVITATION",
+        "RELEASE_CANARY_INVITATION_TOKEN must be the dedicated test dealership's 64-character invitation token.",
+      );
+    }
+    // A fresh client joins before sign-in. Never redeem over an existing
+    // session: the real setup route intentionally revokes that session.
+    if (this.cookie || this.invitationCookie) {
+      throw new CanaryError("INVITATION_ORDER_INVALID", "Join before authenticating.");
+    }
+    const response = await this.request("/api/app/dealership-invitation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const context = await jsonOrFail(
+      response,
+      "INVITATION_FAILED",
+      "Canary invitation",
+    );
+    const values =
+      typeof response.headers.getSetCookie === "function"
+        ? response.headers.getSetCookie()
+        : [response.headers.get("set-cookie")].filter(Boolean);
+    const invitation = values
+      .map((value) => value.split(";", 1)[0])
+      .find((value) => value === `dealer_invitation=${token}`);
+    if (!invitation || !/^[a-z0-9]{15}$/.test(context?.id || "")) {
+      throw new CanaryError(
+        "INVITATION_CONTEXT_INVALID",
+        "The private invitation did not establish a verified test dealership.",
+      );
+    }
+    this.invitationCookie = invitation;
+    return context.id;
   }
 
   captureCookie(response) {
@@ -475,8 +517,13 @@ export class AuthenticatedClient {
   }
 
   async logout() {
-    if (!this.cookie) return;
-    const previousCookie = this.cookie;
+    if (!this.cookie) {
+      this.invitationCookie = "";
+      return;
+    }
+    const previousCookie = [this.invitationCookie, this.cookie]
+      .filter(Boolean)
+      .join("; ");
     const response = await this.request("/api/app/session", {
       method: "DELETE",
       signal: AbortSignal.timeout(20_000),
@@ -508,6 +555,7 @@ export class AuthenticatedClient {
         (/max-age=0/i.test(value) || /expires=Thu, 01 Jan 1970/i.test(value)),
     );
     this.cookie = "";
+    this.invitationCookie = "";
     if (probe.status !== 401 || !cookieWasCleared) {
       throw new CanaryError(
         "REVOCATION_PROBE_FAILED",
@@ -985,6 +1033,7 @@ async function runLockedCanary() {
       "RELEASE_CANARY_PERSON_PIN must be exactly four digits.",
     );
   }
+  const invitationToken = requireEnv("RELEASE_CANARY_INVITATION_TOKEN");
   const policy = await loadPolicy();
   await contractCheck();
   const syntheticImage = await readFile(syntheticImagePath);
@@ -998,27 +1047,31 @@ async function runLockedCanary() {
 
   try {
     console.log("Authenticating release canary (credential remains hidden)...");
+    const invitedDealerId = await client.acceptInvitation(invitationToken);
     const loginResponse = await client.request("/api/app/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dealerCode: personPin }),
       signal: AbortSignal.timeout(30_000),
     });
+    // Revoke even a malformed successful response in the finally block.
+    if (loginResponse.ok) client.captureCookie(loginResponse);
     const login = await jsonOrFail(
       loginResponse,
       "AUTH_FAILED",
       "Canary authentication",
     );
-    // Capture first so even an incorrectly privileged session is revoked in
-    // the finally block before the canary fails its least-privilege check.
-    client.captureCookie(loginResponse);
-    if (login.role !== "salesperson") {
+    if (login.role !== "salesperson" || login.dealer?.id !== invitedDealerId) {
       throw new CanaryError(
         "AUTH_ROLE_INVALID",
-        "Canary credential did not resolve to least-privilege salesperson access.",
+        "Canary credential did not resolve to salesperson access in the invited test dealership.",
       );
     }
-    evidence.checks.authentication = { passed: true, role: "salesperson" };
+    evidence.checks.authentication = {
+      passed: true,
+      role: "salesperson",
+      privateInvitationConfirmed: true,
+    };
 
     const healthResponse = await client.request("/api/app/health", {
       method: "GET",

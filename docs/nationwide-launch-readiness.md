@@ -88,6 +88,55 @@ billing allocation. A successful snapshot or room for one maximum spin does not
 establish capacity for all 25 dealerships; apply the fleet and backup requirements
 above to the measured available bytes before onboarding.
 
+### Reviewed storage growth plan
+
+The protected inspection on October 8, 2026 measured 1,021,005,824 filesystem
+bytes, 896,565,248 available bytes and 54,812,672 bytes in the data directory.
+This is roughly a 1 GB filesystem and is insufficient for the full fleet quota.
+The numeric receipt is in [run 37844690958](https://github.com/TechSavvyJoe/Dealer-Social-Post-AI/actions/runs/37844690958).
+
+The initial proposal is **60 GB for the existing `pb_data` volume**. Maximum
+spin frames require 27 GB; allowing another 27 GB for backup working space
+leaves a limited buffer for other media and the database. Reassess that buffer
+as media usage grows; this is not an unlimited retention promise.
+At [Fly's October 1, 2026 pricing](https://fly.io/pricing-update/), the provisioned
+volume costs $9 per month at $0.15/GB/month, excluding compute, egress,
+off-box backups and snapshots. Snapshot storage has its own charges.
+[Extensions cannot be shrunk](https://docs.fly.io/volumes/volume-manage).
+Get the owner's explicit cost approval before performing the extension.
+
+**Plan or grow production storage** defaults to a read-only `inspect-plan`.
+It runs only on protected `main`, shares the deployment/backup lock, requires
+the exact healthy release and release-bound recovery proof, and selects only
+the named data volume attached at `/pb/pb_data` to the sole running writer.
+It retains a safe preflight receipt before any extension, refuses volumes above
+the reviewed target, and will not automatically restart the machine.
+
+After the approved code has deployed, inspect the plan:
+
+```bash
+gh workflow run grow-production-storage.yml --ref main -f mode=inspect-plan
+```
+
+Only after explicit owner approval for that recurring cost, run the protected
+backup/restore drill and require it to pass. The growth preflight requires a
+release-bound recovery verification within the last 30 minutes. Then run the
+extension:
+
+```bash
+gh workflow run pocketbase-backup.yml --ref main
+# Wait for that backup/restore run to pass before the extension below.
+gh workflow run grow-production-storage.yml --ref main \
+  -f mode=extend-to-60gb -f confirmation=approve-60gb-monthly-volume
+```
+
+Download the `production-storage-growth` receipt. A passed extension requires
+both the allocated 60 GB and measured mounted capacity, the same healthy writer,
+and enough free space for maximum fleet frames plus backup headroom. An error
+may occur after Fly accepts an extension: inspect current allocation and the
+receipt before retrying. Do not interpret an `in_progress` receipt as success.
+The operation does not alter media quotas, replicas or retention policies.
+
 ## Capacity failure found and corrected
 
 The first clean CI run provisioned 25 dealerships and 250 people, signed every

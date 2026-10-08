@@ -214,13 +214,44 @@
           padding-right: 0;
         }
       }
-      /* iOS can retain the browser-sized fixed containing block on a Home
-         Screen launch. Measure standalone's visual viewport and update it on
-         rotation/keyboard resize; #root still owns each safe inset once. */
-      @media (max-width: 768px), (max-height: 599px) {
-        html[data-app-display="standalone"] body {
-          height: var(--app-viewport-height, 100dvh);
-          bottom: auto;
+      /* Installed iOS can retain a short browser viewport and clip a fixed
+         body. Keep the shell in normal flow, size its full-screen canvas in
+         viewportShell, and anchor phone actions to this canvas rather than
+         WebKit's stale fixed-position viewport. */
+      html[data-app-display="standalone"] body {
+        position: relative;
+        inset: auto;
+        height: var(--app-viewport-height, 100dvh);
+        min-height: 0;
+        overflow: hidden;
+      }
+      html[data-app-display="standalone"] .app-container {
+        height: 100%;
+        min-height: 0;
+        max-height: 100%;
+        overflow: hidden;
+      }
+      html[data-app-display="standalone"] #root {
+        height: 100%;
+        overflow: hidden;
+        padding-top: var(--header-safe-top);
+        padding-bottom: max(var(--sab), 8px);
+        padding-left: var(--sal);
+        padding-right: var(--sar);
+      }
+      html[data-app-display="standalone"] .modal-viewport {
+        position: absolute;
+      }
+      html[data-app-display="standalone"] .modal-viewport > [role="dialog"] {
+        max-height: calc(
+          var(--app-viewport-height, 100dvh) - max(1rem, var(--sat)) -
+            max(1rem, var(--sab))
+        );
+      }
+      @media (max-width: 1023px) {
+        html[data-app-display="standalone"] .phone-action-bar {
+          position: absolute;
+          bottom: 0;
         }
       }
     </style>

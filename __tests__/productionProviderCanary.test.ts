@@ -37,6 +37,8 @@ describe("production provider canary", () => {
     for (const sensitiveField of [
       "adminCode",
       "personPin",
+      "invitationToken",
+      "invitationCookie",
       "cookie",
       "prompt",
       "captionText",
@@ -47,6 +49,146 @@ describe("production provider canary", () => {
       expect(evidenceShape).not.toContain(sensitiveField);
     }
   });
+
+  it("uses the private invitation with sign-in and proves revocation with both cookies", async () => {
+    const token = "a".repeat(64);
+    const seen: Array<{ path?: string; cookie?: string; body: string }> = [];
+    const server = createServer(async (request, response) => {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      seen.push({ path: request.url, cookie: request.headers.cookie, body });
+      if (request.url === "/api/app/dealership-invitation") {
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "set-cookie": [
+            "dealer_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+            `dealer_invitation=${token}; Path=/api; HttpOnly; Secure; SameSite=Strict`,
+          ],
+        });
+        response.end('{"id":"testdealer00001","name":"Synthetic store"}');
+      } else if (request.method === "POST") {
+        response.writeHead(200, {
+          "set-cookie": "dealer_session=opaque-session; Path=/; HttpOnly; Secure",
+        });
+        response.end('{"role":"salesperson"}');
+      } else if (request.method === "DELETE") {
+        response.writeHead(200);
+        response.end('{"success":true}');
+      } else {
+        response.writeHead(401, {
+          "set-cookie": "dealer_session=; Path=/; HttpOnly; Secure; Max-Age=0",
+        });
+        response.end('{"error":"Invalid session"}');
+      }
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("missing test port");
+      const client = new AuthenticatedClient(`http://127.0.0.1:${address.port}`);
+      expect(await client.acceptInvitation(token)).toBe("testdealer00001");
+      const login = await client.request("/api/app/session", {
+        method: "POST",
+        body: '{"dealerCode":"1234"}',
+      });
+      client.captureCookie(login);
+      await expect(client.acceptInvitation(token)).rejects.toMatchObject({
+        code: "INVITATION_ORDER_INVALID",
+      });
+      await client.logout();
+      expect(client.cookie).toBe("");
+      expect(client.invitationCookie).toBe("");
+      expect(seen).toEqual([
+        {
+          path: "/api/app/dealership-invitation",
+          cookie: undefined,
+          body: JSON.stringify({ token }),
+        },
+        {
+          path: "/api/app/session",
+          cookie: `dealer_invitation=${token}`,
+          body: '{"dealerCode":"1234"}',
+        },
+        {
+          path: "/api/app/session",
+          cookie: `dealer_invitation=${token}; dealer_session=opaque-session`,
+          body: "",
+        },
+        {
+          path: "/api/app/session",
+          cookie: `dealer_invitation=${token}; dealer_session=opaque-session`,
+          body: "",
+        },
+      ]);
+    } finally {
+      await new Promise<void>((done, reject) =>
+        server.close((error) => (error ? reject(error) : done())),
+      );
+    }
+  });
+
+  it.each([
+    "",
+    "a".repeat(63),
+    "A".repeat(64),
+    "https://example.com/join#token",
+    "a".repeat(64) + "; other=value",
+  ])(
+    "rejects malformed invitation credentials before making a request",
+    async (token) => {
+      const client = new AuthenticatedClient("http://127.0.0.1:1");
+      await expect(client.acceptInvitation(token)).rejects.toMatchObject({
+        code: "CONFIG_INVALID_INVITATION",
+      });
+      expect(client.invitationCookie).toBe("");
+    },
+  );
+
+  it.each([
+    { status: 404, context: { error: "Unavailable" }, cookie: "" },
+    {
+      status: 200,
+      context: { id: "testdealer00001" },
+      cookie: `dealer_invitation=${"b".repeat(64)}`,
+    },
+    {
+      status: 200,
+      context: { id: "invalid" },
+      cookie: `dealer_invitation=${"a".repeat(64)}`,
+    },
+    {
+      status: 200,
+      context: { id: "testdealer00001" },
+      cookie: "dealer_session=unexpected",
+    },
+  ])(
+    "refuses failed or mismatched invitation context without accepting a cookie",
+    async ({ status, context, cookie }) => {
+      const server = createServer((_request, response) => {
+        response.writeHead(status, {
+          "content-type": "application/json",
+          "set-cookie": cookie,
+        });
+        response.end(JSON.stringify(context));
+      });
+      await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+      try {
+        const address = server.address();
+        if (!address || typeof address === "string")
+          throw new Error("missing test port");
+        const client = new AuthenticatedClient(`http://127.0.0.1:${address.port}`);
+        await expect(client.acceptInvitation("a".repeat(64))).rejects.toMatchObject({
+          code: status === 404 ? "INVITATION_FAILED" : "INVITATION_CONTEXT_INVALID",
+        });
+        expect(client.invitationCookie).toBe("");
+        expect(client.cookie).toBe("");
+      } finally {
+        await new Promise<void>((done, reject) =>
+          server.close((error) => (error ? reject(error) : done())),
+        );
+      }
+    },
+  );
 
   it("gates release on both exact playable video tiers", () => {
     const source = readFileSync(scriptPath, "utf8");
