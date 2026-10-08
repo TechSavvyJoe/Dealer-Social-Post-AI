@@ -32,6 +32,12 @@ onAfterBootstrap(() => {
   }
 });
 
+$app.onBeforeServe().add(() => {
+  // Migrations have finished. If observation storage is unavailable, do not
+  // serve legacy writes that would leave a gap in the stage C release gate.
+  require(__hooks + "/revisionCompatibility.js").beginWindow();
+});
+
 // Rate limiting - using simple object instead of Map for PocketBase JSVM compatibility
 const proxyHandler = (c) => {
   const helpers = require(__hooks + "/helpers.js");
@@ -1141,6 +1147,14 @@ routerAdd("GET", "/api/app/health", (c) => {
       status: backupStatus,
     },
   };
+
+  try {
+    result.revisionCompatibility = require(
+      __hooks + "/revisionCompatibility.js",
+    ).snapshot();
+  } catch (_e) {
+    result.revisionCompatibility = { ready: false, coverage: "unavailable" };
+  }
 
   // Aggregate tenant counts only for authenticated super-admins.
   if (isAuthedAdmin) {
@@ -3142,9 +3156,7 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
       "expected_post_revision",
     );
     if (!revisionWasSupplied) {
-      // Stage C's release gate: strict enforcement ships only after these
-      // lines stop appearing in the production log for the rollout window.
-      console.log("[revision-legacy-client] route=draft post=" + record.id);
+      require(__hooks + "/revisionCompatibility.js").recordLegacy("draft");
     }
     const expectedPostRevision = revisionWasSupplied
       ? typeof body.expected_post_revision === "string"
@@ -3614,6 +3626,15 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
     body,
     "expected_post_revision",
   );
+  if (!revisionWasSupplied) {
+    try {
+      require(__hooks + "/revisionCompatibility.js").recordLegacy("share");
+    } catch (_e) {
+      return c.json(503, {
+        error: "Share recording is temporarily unavailable. Try again.",
+      });
+    }
+  }
   const expectedPostRevision = revisionWasSupplied
     ? typeof body.expected_post_revision === "string"
       ? body.expected_post_revision.trim()

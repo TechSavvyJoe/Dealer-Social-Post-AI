@@ -209,9 +209,9 @@ of it.
 
 | Stage | What it is                                                                                        | How to recognise it                                                       |
 | ----- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| A     | Backend returns revisions and still accepts a draft save without one                              | `pb_hooks/main.pb.js` contains `[revision-legacy-client]`                 |
+| A     | Backend returns revisions and still accepts a draft save without one                              | Both revision-less routes call `revisionCompatibility.recordLegacy`       |
 | B     | Frontend sends `expected_post_revision` on every draft save and share receipt                     | `services/posts.ts` appends `expected_post_revision` in `updatePostDraft` |
-| C     | Backend rejects a draft save or share receipt without a revision (`POST_DRAFT_REVISION_REQUIRED`) | `pb_hooks/main.pb.js` no longer contains `[revision-legacy-client]`       |
+| C     | Backend rejects a draft save or share receipt without a revision (`POST_DRAFT_REVISION_REQUIRED`) | Both revision-less routes reject before accepting a write                 |
 
 What must stay true at every moment:
 
@@ -345,10 +345,12 @@ browser context, not by asking a user what their installed app shows.
 
 Read this before running any `flyctl deploy`.
 
-Three Fly secrets, all set by the deploy job in one `flyctl secrets set --stage` call
+Four Fly secrets, all set by the deploy job in one `flyctl secrets set --stage` call
 (`fly-deploy.yml:326-334`), describe _which release is running and whether its data was
 proven restorable_:
 
+- `REVISION_OBSERVATION_EPOCH` — rotated for a deployment or recovery, preserving
+  normal same-deployment restarts while invalidating restored observation state
 - `RELEASE_SHA` — reported by `/api/app/health` as `releaseSha`, ahead of the
   `FLY_IMAGE_REF` / `"unknown"` fallbacks (`pb_hooks/main.pb.js:995-1001`).
 - `POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA` — the release a restore drill actually
@@ -541,6 +543,7 @@ ROLLBACK_DRILL_VERIFIED_AT='<ISO-8601 UTC from step 5.2>'
 
 flyctl secrets set --stage --app dealer-social-post-ai-production \
   RELEASE_SHA="$ROLLBACK_SHA" \
+  REVISION_OBSERVATION_EPOCH="rollback-$(date -u +%Y%m%dT%H%M%SZ)" \
   POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA="$ROLLBACK_SHA" \
   POCKETBASE_BACKUP_LAST_VERIFIED_AT="$ROLLBACK_DRILL_VERIFIED_AT"
 
@@ -555,7 +558,7 @@ and expect a 503 until Section 6 is done.
 **Expected:** `flyctl deploy` reports the release created and the machine started
 within the 10-minute wait.
 
-**Only these three secrets change.** `flyctl secrets set --stage` sets the names you
+**Only these four secrets change.** `flyctl secrets set --stage` sets the names you
 list and leaves every other secret alone, so `TURNSTILE_*`,
 `LEGACY_CLIENT_COMPATIBILITY_ENABLED`, `POCKETBASE_R2_BACKUPS_ENABLED`,
 `GEMINI_API_KEY`, `SALESPERSON_PIN_PEPPER`, `ADMIN_LOGIN_*`,

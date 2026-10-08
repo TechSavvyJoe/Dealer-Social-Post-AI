@@ -153,6 +153,20 @@ afterEach(() => {
 });
 
 describe("usePreparedDelivery", () => {
+  it("keeps the prepared file when the selected destination is tapped again", async () => {
+    const options = baseOptions();
+    const { result } = renderHook(() => usePreparedDelivery(options));
+    await waitFor(() => expect(result.current.activePreparedSave).not.toBeNull());
+    const prepared = result.current.activePreparedSave;
+    const count = mocks.prepareMediaForSave.mock.calls.length;
+    act(() => {
+      expect(result.current.selectDelivery("instagram_feed", "photo")).toBe(true);
+    });
+    expect(result.current.activePreparedSave).toBe(prepared);
+    expect(result.current.isPreparingSave).toBe(false);
+    expect(mocks.prepareMediaForSave).toHaveBeenCalledTimes(count);
+  });
+
   it("prepares the exact size and aspect for the first destination row", async () => {
     const options = baseOptions();
     const { result, unmount } = renderHook(() => usePreparedDelivery(options));
@@ -342,6 +356,79 @@ describe("usePreparedDelivery", () => {
     expect(result.current.mediaPreparationError).toBeNull();
     // A video file never gets an image preview URL.
     expect(result.current.formattedPreviewUrl).toBeNull();
+    unmount();
+  });
+
+  it("prepares a six-second house clip against its own verified spec", async () => {
+    const job = reelJob({ duration: 6, resolution: "720p" });
+    const video = makeVideo({
+      videoJobs: [job],
+      videoUrl: job.url!,
+      manualVideoSelected: true,
+    });
+    const { result, unmount } = renderHook(() =>
+      usePreparedDelivery(baseOptions({ video })),
+    );
+    await waitFor(() => expect(result.current.activePreparedSave?.kind).toBe("video"));
+    expect(video.adoptVideoUrl).not.toHaveBeenCalled();
+    expect(mocks.validateVideoMetadata).toHaveBeenCalledWith("blob:reel", {
+      width: 720,
+      height: 1280,
+      durationSeconds: 6,
+    });
+    expect(mocks.prepareMediaForSave).toHaveBeenCalledWith({
+      sourceUrl: "blob:reel",
+      kind: "video",
+      basename: "dealer-social-video",
+    });
+    unmount();
+  });
+
+  it("does not discard the prepared video when a delivery receipt is recorded", async () => {
+    const job = reelJob({ duration: 6, resolution: "720p" });
+    const initial = baseOptions({
+      video: makeVideo({
+        videoJobs: [job],
+        videoUrl: job.url!,
+        manualVideoSelected: true,
+      }),
+    });
+    const { result, rerender, unmount } = renderHook(
+      (props: UsePreparedDeliveryOptions) => usePreparedDelivery(props),
+      { initialProps: initial },
+    );
+    await waitFor(() => expect(result.current.activePreparedSave?.kind).toBe("video"));
+    const file = result.current.activePreparedSave?.file;
+    const calls = mocks.prepareMediaForSave.mock.calls.length;
+    rerender({
+      ...initial,
+      video: { ...initial.video, videoJobs: [{ ...job, delivered: true }] },
+    });
+    await act(async () => undefined);
+    expect(result.current.activePreparedSave?.file).toBe(file);
+    expect(mocks.prepareMediaForSave).toHaveBeenCalledTimes(calls);
+    unmount();
+  });
+
+  it("blocks a generated clip when its own dimensions cannot be verified", async () => {
+    mocks.validateVideoMetadata.mockRejectedValue(new Error("wrong size"));
+    const job = reelJob({ duration: 6, resolution: "720p" });
+    const { result, unmount } = renderHook(() =>
+      usePreparedDelivery(
+        baseOptions({
+          video: makeVideo({
+            videoJobs: [job],
+            videoUrl: job.url!,
+            manualVideoSelected: true,
+          }),
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(result.current.mediaPreparationError).toBe("wrong size"),
+    );
+    expect(result.current.activePreparedSave).toBeNull();
+    expect(mocks.prepareMediaForSave).not.toHaveBeenCalled();
     unmount();
   });
 

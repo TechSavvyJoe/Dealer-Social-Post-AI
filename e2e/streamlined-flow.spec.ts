@@ -274,6 +274,69 @@ const clipboardWrites = (page: Page) =>
     () => (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites,
   );
 
+async function seedRestoredPost(
+  page: Page,
+  platformIds = ["facebook_feed", "instagram_feed"],
+) {
+  await page.evaluate(
+    async ({ image, revision, platformIds }) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open("dealer-social-post-ai", 2);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains("creative-assets"))
+            req.result.createObjectStore("creative-assets", { keyPath: "key" });
+          if (!req.result.objectStoreNames.contains("media-archive")) {
+            const store = req.result.createObjectStore("media-archive", {
+              keyPath: "id",
+            });
+            store.createIndex("dealerId", "dealerId", { unique: false });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("creative-assets", "readwrite");
+        tx.objectStore("creative-assets").put({
+          key: "qa-dealer:generated",
+          value: image,
+          updatedAt: Date.now(),
+          mediaEpoch: 0,
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+      localStorage.setItem(
+        "dealer-social-post-ai.session",
+        JSON.stringify({
+          dealerId: "qa-dealer",
+          step: 4,
+          theme: "light",
+          loginTimestamp: Date.now(),
+          generatedPost: {
+            image: "",
+            text: "Find your next adventure at Northline Motors.",
+            postId: "qa-post",
+            postRevision: revision,
+            scenarioId: "new_arrival",
+            customerIdentityRequired: false,
+            imageReviewRequired: false,
+            releaseStatus: "not_required",
+            approvalStatus: "n_a",
+            platformIds,
+            primaryFormatId: "feed_portrait",
+            imageAspectRatio: "4:5",
+            mediaOutputMode: "photo",
+            aiMeta: { modelPolicyVersion: "5" },
+          },
+        }),
+      );
+    },
+    { image: dataUrl, revision: SEEDED_REVISION, platformIds },
+  );
+}
+
 async function signRelease(page: Page, customerName: string) {
   const dialog = page.getByRole("dialog", { name: "Customer photo release" });
   await expect(dialog).toBeVisible();
@@ -295,6 +358,188 @@ async function signRelease(page: Page, customerName: string) {
   await dialog.getByRole("button", { name: "Save signature" }).click();
   await expect(dialog).toBeHidden();
 }
+
+test("Facebook Instagram and TikTok recover from a closed sheet with save-and-copy", async ({
+  page,
+}, info) => {
+  test.skip(
+    !info.project.name.endsWith("phone-390"),
+    "Representative phone handoff coverage",
+  );
+  test.setTimeout(90_000);
+  await recordSharing(page);
+  await page.addInitScript(() => {
+    let attempts = 0;
+    const apple = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => {
+        attempts += 1;
+        // First sheet has no selected social app; the next iOS sheet saves to Photos.
+        return apple && attempts % 2 === 0
+          ? Promise.resolve()
+          : Promise.reject(new DOMException("Closed", "AbortError"));
+      },
+    });
+  });
+  await fixture(page);
+  await expect(
+    page.getByRole("heading", { name: "What are you posting?" }),
+  ).toBeVisible();
+  await seedRestoredPost(page, ["facebook_feed", "instagram_feed", "tiktok"]);
+  await page.reload();
+  const apple = await page.evaluate(() => /iPad|iPhone|iPod/.test(navigator.userAgent));
+  for (const label of ["Facebook", "Instagram", "TikTok"]) {
+    await page
+      .getByRole("group", { name: "Share to" })
+      .getByRole("button", { name: label, exact: true })
+      .click();
+    const share = page.getByRole("button", { name: `Share to ${label}`, exact: true });
+    await expect(share).toBeEnabled({ timeout: 15000 });
+    await share.click();
+    await expect(
+      page.getByText("Your post is still ready", { exact: true }),
+    ).toBeVisible();
+    if (apple) {
+      await page.getByRole("button", { name: "Save to Photos", exact: true }).click();
+      await expect(
+        page.getByText("Save to Photos opened", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText(
+          `Caption copied. Choose Save Image, then open ${label} and add it. Paste the caption only if missing.`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+    } else {
+      const download = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Save image", exact: true }).click();
+      const file = await download;
+      expect(file.suggestedFilename()).toMatch(/\.(jpg|jpeg|png)$/);
+      await expect(
+        page.getByText(
+          `Caption copied. Open ${label}, add the image, and check the caption. Paste only if missing, then post.`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+    }
+    expect((await clipboardWrites(page)).at(-1)).toContain(EMPLOYEE_DISCLOSURE);
+    await expect(
+      page.getByRole("button", { name: `Open ${label}`, exact: true }),
+    ).toBeEnabled();
+    await expect(
+      page.getByRole("link", { name: `Open ${label} in browser instead` }),
+    ).toBeVisible();
+    await quality(page);
+  }
+  const dir = "/tmp/dsp-social-polish-screens";
+  mkdirSync(dir, { recursive: true });
+  await page.screenshot({
+    path: resolve(dir, `manual-${info.project.name}.png`),
+    fullPage: true,
+  });
+});
+
+test("desktop save copies caption and opens the selected destination", async ({
+  page,
+}, info) => {
+  test.skip(
+    !info.project.name.endsWith("desktop-1440"),
+    "Representative desktop handoff coverage",
+  );
+  test.setTimeout(90_000);
+  await recordSharing(page);
+  await page.addInitScript(() => {
+    (window as unknown as { __opened: string[] }).__opened = [];
+    window.open = ((url?: string | URL) => {
+      (window as unknown as { __opened: string[] }).__opened.push(String(url));
+      return null;
+    }) as typeof window.open;
+  });
+  await fixture(page);
+  await expect(
+    page.getByRole("heading", { name: "What are you posting?" }),
+  ).toBeVisible();
+  await seedRestoredPost(page, ["facebook_feed", "instagram_feed", "tiktok"]);
+  await page.reload();
+  for (const [label, origin] of [
+    ["Facebook", "https://www.facebook.com/"],
+    ["Instagram", "https://www.instagram.com/"],
+    ["TikTok", "https://www.tiktok.com/upload"],
+  ]) {
+    await page
+      .getByRole("group", { name: "Share to" })
+      .getByRole("button", { name: label, exact: true })
+      .click();
+    const save = page.getByRole("button", {
+      name: `Download for ${label}`,
+      exact: true,
+    });
+    await expect(save).toBeEnabled({ timeout: 15000 });
+    const download = page.waitForEvent("download");
+    await save.click();
+    await download;
+    await expect(
+      page.getByText(
+        `Caption copied. Open ${label}, add the image, and check the caption. Paste only if missing, then post.`,
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: `Open ${label}`, exact: true }).click();
+    expect(
+      await page.evaluate(() =>
+        (window as unknown as { __opened: string[] }).__opened.at(-1),
+      ),
+    ).toBe(origin);
+    await quality(page);
+  }
+  const dir = "/tmp/dsp-social-polish-screens";
+  mkdirSync(dir, { recursive: true });
+  await page.screenshot({
+    path: resolve(dir, `desktop-${info.project.name}.png`),
+    fullPage: true,
+  });
+});
+
+test("blocked clipboard exposes the complete outbound caption for manual copying", async ({
+  page,
+}, info) => {
+  test.setTimeout(60_000);
+  test.skip(
+    !info.project.name.endsWith("phone-390"),
+    "Representative phone clipboard recovery",
+  );
+  await recordSharing(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error("Clipboard blocked")) },
+    });
+    document.execCommand = () => false;
+  });
+  await fixture(page);
+  await expect(
+    page.getByRole("heading", { name: "What are you posting?" }),
+  ).toBeVisible();
+  await seedRestoredPost(page);
+  await page.reload();
+  await page
+    .getByRole("button", { name: "App not listed? Save and open instead" })
+    .click();
+  await page.getByRole("button", { name: "Copy caption", exact: true }).click();
+  const field = page.getByRole("textbox", { name: "Full caption to copy" });
+  await expect(field).toBeVisible();
+  expect(await field.inputValue()).toContain(EMPLOYEE_DISCLOSURE);
+  await field.focus();
+  expect(
+    await field.evaluate(
+      (el: HTMLTextAreaElement) => el.selectionEnd - el.selectionStart,
+    ),
+  ).toBe((await field.inputValue()).length);
+  await expect(
+    page.getByRole("button", { name: /^Save (image|to Photos)$/ }),
+  ).toBeEnabled();
+});
 
 test("category capture opens Details directly, with a single signature sheet", async ({
   page,
@@ -509,63 +754,7 @@ test("restored Post prepares direct sharing and follows Sunlight preference", as
   await expect(
     page.getByRole("heading", { name: "What are you posting?" }),
   ).toBeVisible();
-  await page.evaluate(
-    async ({ image, revision }) => {
-      const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const req = indexedDB.open("dealer-social-post-ai", 2);
-        req.onupgradeneeded = () => {
-          if (!req.result.objectStoreNames.contains("creative-assets"))
-            req.result.createObjectStore("creative-assets", { keyPath: "key" });
-          if (!req.result.objectStoreNames.contains("media-archive")) {
-            const store = req.result.createObjectStore("media-archive", {
-              keyPath: "id",
-            });
-            store.createIndex("dealerId", "dealerId", { unique: false });
-          }
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction("creative-assets", "readwrite");
-        tx.objectStore("creative-assets").put({
-          key: "qa-dealer:generated",
-          value: image,
-          updatedAt: Date.now(),
-          mediaEpoch: 0,
-        });
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-      db.close();
-      localStorage.setItem(
-        "dealer-social-post-ai.session",
-        JSON.stringify({
-          dealerId: "qa-dealer",
-          step: 4,
-          theme: "light",
-          loginTimestamp: Date.now(),
-          generatedPost: {
-            image: "",
-            text: "Find your next adventure at Northline Motors.",
-            postId: "qa-post",
-            postRevision: revision,
-            scenarioId: "new_arrival",
-            customerIdentityRequired: false,
-            imageReviewRequired: false,
-            releaseStatus: "not_required",
-            approvalStatus: "n_a",
-            platformIds: ["facebook_feed", "instagram_feed"],
-            primaryFormatId: "feed_portrait",
-            imageAspectRatio: "4:5",
-            mediaOutputMode: "photo",
-            aiMeta: { modelPolicyVersion: "5" },
-          },
-        }),
-      );
-    },
-    { image: dataUrl, revision: SEEDED_REVISION },
-  );
+  await seedRestoredPost(page);
   await recordSharing(page);
   await page.reload();
   await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible();

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   copyPreparedCaption: vi.fn(),
   downloadPreparedMedia: vi.fn(),
   openPreparedTarget: vi.fn(),
+  savePreparedMediaToLibrary: vi.fn(),
   recordPostShared: vi.fn(),
   logError: vi.fn(),
 }));
@@ -21,6 +22,10 @@ vi.mock("../services/publishTargets", () => ({
   openPreparedTarget: mocks.openPreparedTarget,
 }));
 vi.mock("../services/posts", () => ({ recordPostShared: mocks.recordPostShared }));
+vi.mock("../utils/mediaSave", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utils/mediaSave")>()),
+  savePreparedMediaToLibrary: mocks.savePreparedMediaToLibrary,
+}));
 vi.mock("../utils/telemetry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../utils/telemetry")>()),
   logError: mocks.logError,
@@ -95,6 +100,10 @@ describe("usePostShare", () => {
     });
     mocks.copyPreparedCaption.mockResolvedValue(true);
     mocks.downloadPreparedMedia.mockReturnValue(true);
+    mocks.savePreparedMediaToLibrary.mockResolvedValue({
+      method: "photos-share",
+      kind: "image",
+    });
     mocks.openPreparedTarget.mockReturnValue("native");
     mocks.recordPostShared.mockResolvedValue({
       id: "share-1",
@@ -154,6 +163,218 @@ describe("usePostShare", () => {
     });
     expect(result.current.feedback?.title).toBe("Shared · Facebook");
     expect(useAppStore.getState().generatedPost?.sharedTo).toHaveLength(1);
+  });
+
+  it("downloads and copies in the same click, with honest combined feedback", async () => {
+    const { result } = renderHook(() => usePostShare(options()));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    let complete!: () => void;
+    mocks.copyPreparedCaption.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          complete = () => resolve(true);
+        }),
+    );
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = result.current.downloadAndCopy();
+      expect(mocks.downloadPreparedMedia).toHaveBeenCalledTimes(1);
+      expect(mocks.copyPreparedCaption).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      complete();
+      await pending;
+    });
+    expect(result.current.feedback?.detail).toContain("Caption copied. Open Facebook");
+    expect(mocks.recordPostShared.mock.calls.map((call) => call[1].via)).toEqual([
+      "download",
+      "copy",
+    ]);
+  });
+
+  it("opens the prepared Photos save sheet synchronously and does not claim a social share", async () => {
+    const { result } = renderHook(() => usePostShare(options()));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = result.current.saveToPhotos();
+      expect(mocks.savePreparedMediaToLibrary).toHaveBeenCalledWith({
+        file,
+        filename: file.name,
+        kind: "image",
+      });
+    });
+    await act(async () => {
+      await pending;
+    });
+    expect(result.current.feedback).toMatchObject({
+      title: "Save to Photos opened",
+      via: "copy",
+    });
+    expect(result.current.feedback?.detail).toContain("Choose Save Image");
+    expect(mocks.recordPostShared.mock.calls.map((call) => call[1].via)).toEqual([
+      "copy",
+    ]);
+  });
+
+  it("does not turn a timed-out social sheet into a completed delivery", async () => {
+    mocks.sharePrepared.mockResolvedValue({
+      kind: "started",
+      captionCopied: true,
+      message: "Handoff not confirmed",
+    });
+    const delivered = vi.fn();
+    const { result } = renderHook(() =>
+      usePostShare({ ...options(), onMediaDelivered: delivered }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      await result.current.share();
+    });
+    expect(delivered).not.toHaveBeenCalled();
+    expect(mocks.recordPostShared).not.toHaveBeenCalled();
+    expect(result.current.feedback).toMatchObject({
+      title: "Share sheet opened",
+      via: "copy",
+    });
+  });
+
+  it("keeps an unconfirmed Photos handoff at risk without recording a delivery", async () => {
+    mocks.savePreparedMediaToLibrary.mockResolvedValue({
+      method: "photos-share-pending",
+      kind: "video",
+    });
+    const delivered = vi.fn();
+    const { result } = renderHook(() =>
+      usePostShare({ ...options(), onMediaDelivered: delivered }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      expect(await result.current.saveToPhotos()).toBe(false);
+    });
+    expect(delivered).not.toHaveBeenCalled();
+    expect(result.current.feedback?.title).toBe("Save not confirmed");
+    expect(
+      mocks.recordPostShared.mock.calls.every((call) => call[1].via === "copy"),
+    ).toBe(true);
+  });
+
+  it("keeps the media at risk when the Photos save is cancelled", async () => {
+    mocks.savePreparedMediaToLibrary.mockResolvedValue({
+      method: "cancelled",
+      kind: "image",
+    });
+    const delivered = vi.fn();
+    const { result } = renderHook(() =>
+      usePostShare({ ...options(), onMediaDelivered: delivered }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      expect(await result.current.saveToPhotos()).toBe(false);
+    });
+    expect(result.current.feedback?.title).toBe("Save cancelled");
+    expect(delivered).not.toHaveBeenCalled();
+    expect(
+      mocks.recordPostShared.mock.calls.every((call) => call[1].via === "copy"),
+    ).toBe(true);
+  });
+
+  it("makes the exact caption selectable when clipboard access fails", async () => {
+    mocks.copyPreparedCaption.mockResolvedValue(false);
+    const { result } = renderHook(() => usePostShare(options()));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      await result.current.copyCaption();
+    });
+    expect(result.current.feedback).toMatchObject({
+      title: "Caption not copied",
+      manualCopy: true,
+    });
+    expect(result.current.shareDisabled).toBe(false);
+    expect(mocks.recordPostShared).not.toHaveBeenCalled();
+  });
+
+  it("offers manual handoff after cancellation without claiming a share", async () => {
+    mocks.sharePrepared.mockResolvedValue({ kind: "cancelled", pasteRequired: true });
+    const { result } = renderHook(() => usePostShare(options()));
+    await shareOnce(result);
+    expect(result.current.fallbackActive).toBe(true);
+    expect(result.current.feedback?.title).toBe("Your post is still ready");
+    expect(mocks.recordPostShared).not.toHaveBeenCalled();
+  });
+
+  it("does not attach an old share completion to a new signed-in session", async () => {
+    let complete!: () => void;
+    mocks.sharePrepared.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = () => resolve({ kind: "shared", captionCopied: true });
+        }),
+    );
+    const { result } = renderHook(() => usePostShare(options()));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.share();
+    });
+    act(() => {
+      useAppStore.setState({
+        authEpoch: useAppStore.getState().authEpoch + 1,
+        generatedPost: null,
+      });
+    });
+    await act(async () => {
+      complete();
+      await pending;
+    });
+    expect(mocks.recordPostShared).not.toHaveBeenCalled();
+    expect(useAppStore.getState().generatedPost).toBeNull();
+  });
+
+  it("does not show a delayed share result on a different channel", async () => {
+    let complete!: () => void;
+    mocks.sharePrepared.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = () => resolve({ kind: "shared", captionCopied: true });
+        }),
+    );
+    const { result, rerender } = renderHook(
+      ({ channel }: { channel: PlatformDestinationId }) =>
+        usePostShare(options("Delivery day", channel)),
+      { initialProps: { channel: "facebook_feed" as PlatformDestinationId } },
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    let pending!: Promise<unknown>;
+    act(() => {
+      pending = result.current.share();
+    });
+    rerender({ channel: "instagram_feed" });
+    await act(async () => {
+      complete();
+      await pending;
+    });
+    expect(result.current.feedback).toBeNull();
+    expect(mocks.recordPostShared).toHaveBeenCalledWith(
+      "post-1",
+      expect.objectContaining({ channel: "facebook_feed" }),
+    );
   });
 
   it("invalidates stale preparation immediately, then re-prepares after a caption edit", async () => {
@@ -279,7 +500,10 @@ describe("usePostShare", () => {
   });
 
   it.each([
-    [true, "Caption copied. Paste it into your Facebook post, then tap Post there."],
+    [
+      true,
+      "Caption copied. Check your Facebook caption and paste only if missing, then tap Post there.",
+    ],
     [false, "Tap Copy caption, then paste it into your Facebook post."],
   ])(
     "says whether the caption reached the clipboard after a share (copied: %s)",
@@ -305,7 +529,7 @@ describe("usePostShare", () => {
       });
       expect(result.current.feedback).toEqual({
         title: "Caption copied",
-        detail: "Paste it into your Facebook post.",
+        detail: "Check your Facebook caption and paste only if missing.",
         via: "copy",
       });
     },
@@ -341,7 +565,7 @@ describe("usePostShare", () => {
     });
     expect(result.current.feedback).toEqual({
       title: "Caption copied",
-      detail: "Paste it into Facebook with the image.",
+      detail: "Add the image in Facebook; paste the caption only if missing.",
       via: "copy",
     });
     expect(result.current.fallbackActive).toBe(true);
@@ -366,7 +590,7 @@ describe("usePostShare", () => {
     });
     expect(result.current.feedback).toEqual({
       title: "Caption copied",
-      detail: "Paste it into Instagram with the image.",
+      detail: "Add the image in Instagram; paste the caption only if missing.",
       via: "copy",
     });
   });
@@ -458,7 +682,9 @@ describe("usePostShare", () => {
     await act(async () => {
       await result.current.copyCaption();
     });
-    expect(result.current.feedback?.detail).toBe("Paste it into your Facebook post.");
+    expect(result.current.feedback?.detail).toBe(
+      "Check your Facebook caption and paste only if missing.",
+    );
 
     // A share to another channel says nothing about this one.
     const elsewhere: GeneratedPost = {
@@ -479,7 +705,7 @@ describe("usePostShare", () => {
       await other.result.current.copyCaption();
     });
     expect(other.result.current.feedback?.detail).toBe(
-      "Paste it into Facebook with the image.",
+      "Add the image in Facebook; paste the caption only if missing.",
     );
   });
 
@@ -502,7 +728,7 @@ describe("usePostShare", () => {
     });
     expect(result.current.feedback).toEqual({
       title: "Caption copied",
-      detail: "Paste it into Facebook with the image.",
+      detail: "Add the image in Facebook; paste the caption only if missing.",
       via: "copy",
     });
   });

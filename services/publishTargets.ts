@@ -48,6 +48,7 @@ export type PublishStatus =
       message: string;
       pasteRequired: boolean;
     }
+  | { kind: "started"; captionCopied: boolean; message: string }
   | { kind: "cancelled"; pasteRequired: boolean; message?: string }
   | { kind: "error"; message: string };
 
@@ -230,8 +231,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     directApiConnected: false,
     handoff: "share-or-intent",
     hint: "1:1 image · paste caption if needed",
-    webIntentUrl: (c) =>
-      `https://www.linkedin.com/shareArticle?mini=true&summary=${encodeURIComponent(c.text)}`,
+    webIntentUrl: () => "https://www.linkedin.com/feed/",
   },
   {
     id: "x_twitter",
@@ -314,8 +314,10 @@ export const copyTextToClipboard = async (text: string): Promise<boolean> => {
   } catch {
     /* fall through to legacy approach */
   }
+  let ta: HTMLTextAreaElement | undefined;
+  const previousFocus = document.activeElement;
   try {
-    const ta = document.createElement("textarea");
+    ta = document.createElement("textarea");
     ta.value = text;
     ta.setAttribute("readonly", "");
     ta.style.position = "fixed";
@@ -329,10 +331,13 @@ export const copyTextToClipboard = async (text: string): Promise<boolean> => {
     ta.select();
     ta.setSelectionRange(0, text.length);
     const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
     return ok;
   } catch {
     return false;
+  } finally {
+    ta?.remove();
+    if (previousFocus instanceof HTMLElement)
+      previousFocus.focus({ preventScroll: true });
   }
 };
 
@@ -675,8 +680,10 @@ export const sharePrepared = async (
 
   try {
     // Do not move any asynchronous preparation above this call.
-    const sharePromise = invokeWebShareNow(shareData);
+    // Web Share consumes activation. Start the clipboard write first, then
+    // invoke share in the same click without awaiting either operation.
     const clipboardPromise = copyTextToClipboard(prepared.caption);
+    const sharePromise = invokeWebShareNow(shareData);
     const attempt = await sharePromise;
     if (attempt.kind === "cancelled") {
       return {
@@ -695,6 +702,13 @@ export const sharePrepared = async (
       };
     }
     const copied = await clipboardPromise;
+    if (attempt.kind === "started") {
+      return {
+        kind: "started",
+        captionCopied: copied,
+        message: "The share sheet opened, but the handoff is not confirmed.",
+      };
+    }
     return {
       kind: "shared",
       via: "web-share",
@@ -728,7 +742,9 @@ export const openPreparedTarget = (
   prepared: PreparedPublishShare,
 ): "native" | "web" | "none" =>
   openNativeAppOrWeb(prepared.target.appSchemeUrl, prepared.webUrl, {
-    allowWebOnMobile: false,
+    // Destinations without an app scheme (Google, LinkedIn, X) must still
+    // open on a phone. Meta and TikTok retain their native app handoff.
+    allowWebOnMobile: !prepared.target.appSchemeUrl,
   });
 
 /**

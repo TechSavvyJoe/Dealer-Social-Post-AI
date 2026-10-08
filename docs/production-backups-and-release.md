@@ -127,19 +127,30 @@ this gate. All three conditions must hold:
 
 1. Stage B's `release-frontend` job is green and the canonical alias serves that
    build.
-2. The production log shows no `[revision-legacy-client]` line for seven
-   consecutive days. Each line names a post whose author is still on a build
-   from before stage B (an installed app or a tab that was never reopened).
-   `flyctl logs --app dealer-social-post-ai-production --no-tail | grep -c
-"revision-legacy-client"` (or the **Fetch Fly Logs** workflow) reads only
-   Fly's recent buffer, so check once a day through the window; a single check
-   at the end proves nothing about the earlier days.
+2. Production health's `revisionCompatibility.ready` is true. Both legacy
+   draft saves and share receipts persist an observation before being accepted.
+   Seven full days must pass without either route receiving a missing revision.
+   Routine restarts preserve it, including nightly backup-secret refreshes. Each
+   deliberate deploy rotates `REVISION_OBSERVATION_EPOCH`; recovery/rollback must
+   also rotate that external value before starting traffic. A changed epoch or
+   release resets coverage, so restored database state cannot authorize stage C.
 3. The stage C change is the only change in its `main` commit and merges after
    stage B's whole pipeline has finished.
 
 Until the gate is met, stage A's compatibility stays. It costs nothing for
 current clients, which always send a revision; it only keeps an older installed
 app able to save.
+
+The **Observe revision compatibility** workflow runs daily at 14:17 UTC and
+can be dispatched manually. Its 30-day artifact records the healthy release
+SHA, continuous observation start, clear-since time and earliest stage C review.
+It reads durable aggregate state through public health; it does not rely on
+Fly's short-lived log buffer. No post, person, caption or raw log is exposed.
+Missing or invalid observation state fails the check. `observing` is a healthy
+monitor result, not permission to ship stage C. Review a
+`ready-for-stage-c-review` artifact and the complete stage B deployment before
+merging stage C separately. This workflow never merges or deploys the strict
+stage automatically. Remove its schedule after stage C is verified live.
 
 Rolling back across these stages has its own order. See
 [the post-revision contract in the rollback runbook](runbooks/rollback.md#2a-the-post-revision-contract-stages-a-b-c).
@@ -309,6 +320,16 @@ Monitor health, recent redacted client-error aggregates, generation fallback rat
   ```
 
   Boot that scrubbed copy only with the current `ADMIN_LOGIN_USERNAME` / `ADMIN_LOGIN_PASSWORD` supplied from Fly secrets, rerun the exact-case and prior-session rejection proofs, then take and verify a new sanitized archive before switching the production volume. Never restore a rotated credential or a pre-hardening session row.
+
+Before booting a restored production volume, stage a fresh observation epoch:
+
+```bash
+printf 'REVISION_OBSERVATION_EPOCH=recovery-%s\n' "$(date -u +%Y%m%dT%H%M%SZ)" | \
+  flyctl secrets import --stage --app dealer-social-post-ai-production
+```
+
+Apply it during the recovery deploy. Never reuse the pre-recovery epoch. Confirm
+`revisionCompatibility.ready` is false and `observedSince` is the recovery time.
 
 Record the authentication-hardening minimum SHA, Fly release/image digest, compatible Vercel deployment URL, immutable backup object manifest, restore-drill run, canary results, cutover evidence, and rollback targets together. A local backup canary proves tooling; only the source-bound off-box workflow proves production recovery.
 

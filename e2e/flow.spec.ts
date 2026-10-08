@@ -915,12 +915,11 @@ test.describe("Dealer Social Post AI Flow", () => {
         Math.ceil(previewGeometry.viewportHeight * 0.56) + 1,
       );
       expect(previewGeometry.objectFit).toBe("contain");
+      await page.screenshot({ path: testInfo.outputPath("post-first-screen.png") });
       const viewport = page.viewportSize();
       // Held upright, the cap leaves the caption's first line fully on screen
-      // above the fixed share bar. Not at 320x568: there the first line starts
-      // under the bar (measured 498 px against a 471 px bar top), a design
-      // question reported for the Post screen, not a property of the cap.
-      if (viewport && viewport.height > viewport.width && viewport.height >= 600) {
+      // above the fixed share bar, including narrow and short phones.
+      if (viewport && viewport.height > viewport.width) {
         const captionGeometry = await share.evaluate((button) => {
           let bar: Element | null = button;
           while (bar && getComputedStyle(bar).position !== "fixed") {
@@ -1168,7 +1167,8 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expectControlsInsideViewport(page, open);
     await expectNoHorizontalOverflow(page);
 
-    await copy.click();
+    // Saving must copy the full outgoing caption without a separate Copy tap.
+    await save.click();
     await expect
       .poll(() =>
         page.evaluate(
@@ -1181,7 +1181,6 @@ test.describe("Dealer Social Post AI Flow", () => {
       () => (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites,
     );
     expect(copied.startsWith(`${EMPLOYEE_DISCLOSURE}\n\n`)).toBe(true);
-    await save.click();
     await expect
       .poll(() =>
         page.evaluate(
@@ -1190,7 +1189,7 @@ test.describe("Dealer Social Post AI Flow", () => {
       )
       .toEqual(["dealer-social-qa-post-1-facebook-feed-photo-4x5-1080x1350.jpg"]);
     await expect
-      .poll(() => shares.map((share) => share.via))
+      .poll(() => shares.map((share) => share.via).sort())
       .toEqual(["copy", "download"]);
     for (const share of shares) {
       expect(share).toMatchObject({ channel: "facebook_feed" });

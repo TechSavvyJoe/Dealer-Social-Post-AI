@@ -20,7 +20,11 @@ import type {
   VideoStyle,
 } from "../types";
 import type { WebsiteDraft } from "../services/websitePublishing";
-import { PUBLISH_TARGETS, fitPublishCaptionToBudget } from "../services/publishTargets";
+import {
+  PUBLISH_TARGETS,
+  fitPublishCaptionToBudget,
+  isAppleTouchDevice,
+} from "../services/publishTargets";
 import type { PlatformDestinationId } from "../services/platformOutputs";
 import type { StoreLook } from "../services/storeDefaults";
 import { resolveStoreDefaults } from "../services/storeDefaults";
@@ -282,6 +286,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     dealerId,
     motion: defaults.motion,
     onGenerateVideo,
+    previewMode: "generated",
   });
 
   const website = useWebsiteHandoff({
@@ -448,6 +453,9 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   ) || { id: selectedChannelId, label: "Facebook" };
 
   useEffect(() => {
+    // A house clip is a valid generated asset even when the optional exact
+    // delivery profile calls for a different duration, resolution or aspect.
+    if (video.manualVideoSelected && video.videoUrl) return;
     preparedDelivery.selectDelivery(selectedChannelId, deliveryKind);
     // selectDelivery is intentionally keyed by destination/media. The hook's
     // function identity follows its live plan and must not restart this effect.
@@ -455,6 +463,8 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   }, [
     selectedChannelId,
     deliveryKind,
+    video.manualVideoSelected,
+    video.videoUrl,
     availableChannels.map((channel) => channel.id).join(","),
   ]);
 
@@ -512,10 +522,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
         selectedCaption?.disclosures || captionSetAnalysis.disclosures || undefined,
       requiredPrefix: employeeDisclosure || undefined,
       imageDataUrl: post.image,
-      videoUrl:
-        preparedDelivery.selectedDelivery?.mediaKind === "video"
-          ? video.videoUrl || undefined
-          : undefined,
+      videoUrl: video.videoUrl || undefined,
       preparedFile: preparedDelivery.activePreparedSave?.file,
     }),
     [
@@ -559,10 +566,12 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           : undefined;
   const expectedPostRevision =
     post.postRevision || autosave.lastRevisionRef.current || undefined;
+  const nativeTarget = selectedChannelId === "native_share";
+  const handoffAppLabel = nativeTarget ? "your chosen app" : selectedChannel.label;
   const share = usePostShare({
     post,
     channelId: selectedChannel.id as PlatformDestinationId,
-    channelLabel: selectedChannel.label,
+    channelLabel: handoffAppLabel,
     content: shareContent,
     blockedReason:
       (website.revisionRecoveryRequired
@@ -617,10 +626,13 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   const selectChannel = useCallback(
     (channel: { id: string }) => {
       if (!isPlatformDestinationId(channel.id)) return;
-      if (preparedDelivery.selectDelivery(channel.id, deliveryKind))
+      if (
+        (video.manualVideoSelected && video.videoUrl) ||
+        preparedDelivery.selectDelivery(channel.id, deliveryKind)
+      )
         setSelectedChannelId(channel.id);
     },
-    [preparedDelivery, deliveryKind],
+    [preparedDelivery, deliveryKind, video.manualVideoSelected, video.videoUrl],
   );
 
   const sendWebsite = useCallback(
@@ -674,6 +686,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   );
   // "Shared" (and the primary Done) follows a completed share-sheet share only.
   const sharedViaSheet =
+    !share.fallbackActive &&
     visibleCreativeSaved &&
     (share.feedback?.via === "share_sheet" || Boolean(sharedSelectedChannel));
   const hideCreativeTools =
@@ -689,8 +702,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   const isSaved = Boolean(post.postId);
   const approvalPending =
     approval.reviewRequired && approval.approvalStatus === "pending";
-  const mediaNoun =
-    preparedDelivery.selectedDelivery?.mediaKind === "video" ? "video" : "image";
+  const mediaNoun = deliveryKind === "video" ? "video" : "image";
 
   const missingRevisionReason =
     post.postId && !expectedPostRevision
@@ -862,6 +874,25 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   // a failed share sheet, so using one control never brings the failed Share
   // button back. The banner tone still keys off `feedback.fallback`.
   const useFallbackControls = !share.nativeFileShareAvailable || share.fallbackActive;
+  const handoffReady =
+    !share.shareDisabled && (delivery === "ready" || delivery === "shared");
+  const selectedTarget = PUBLISH_TARGETS.find(
+    (target) => target.id === selectedChannelId,
+  );
+  const manualHandoff = isDesktopLayout || useFallbackControls;
+  const applePhotosSave = isAppleTouchDevice();
+  const canSaveToPhotos = applePhotosSave && share.nativeFileShareAvailable;
+  const targetWebUrl = share.prepared?.webUrl;
+  const addMediaInstruction =
+    selectedChannelId === "facebook_feed"
+      ? `In Facebook, start a post and choose Photo/video to add the ${mediaNoun}.`
+      : selectedChannelId.startsWith("instagram_")
+        ? `In Instagram, tap Create (+), choose your post type and add the ${mediaNoun}.`
+        : selectedChannelId === "tiktok"
+          ? isDesktopLayout && mediaNoun === "video"
+            ? "Open TikTok and upload the downloaded video."
+            : `In the TikTok app, tap +, then Upload and choose the ${mediaNoun}.`
+          : `Open ${handoffAppLabel} and add the ${mediaNoun} to a new post.`;
 
   const saveStatus =
     autosave.status === "saving"
@@ -1249,9 +1280,13 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
                 size="md"
                 className="px-3"
                 disabled={share.shareDisabled}
-                onClick={share.download}
+                onClick={() =>
+                  void (canSaveToPhotos
+                    ? share.saveToPhotos()
+                    : share.downloadAndCopy())
+                }
               >
-                Save {mediaNoun}
+                {canSaveToPhotos ? "Save to Photos" : `Save ${mediaNoun}`}
               </Button>
               <Button
                 variant="secondary"
@@ -1263,19 +1298,21 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
                 Copy caption
               </Button>
             </div>
-            <div className={isSaved ? barPair : undefined}>
+            <div className={isSaved && !nativeTarget ? barPair : undefined}>
               {doneSecondary()}
-              <Button
-                variant="primary"
-                size="lg"
-                fullWidth
-                className="px-4"
-                disabled={share.shareDisabled}
-                rightIcon={<ExternalLink />}
-                onClick={share.openTarget}
-              >
-                Open {selectedChannel.label}
-              </Button>
+              {!nativeTarget ? (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  className="px-4"
+                  disabled={share.shareDisabled}
+                  rightIcon={<ExternalLink />}
+                  onClick={share.openTarget}
+                >
+                  Open {selectedChannel.label}
+                </Button>
+              ) : null}
             </div>
           </>
         ) : (
@@ -1356,11 +1393,15 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
         aria-label={
           share.shareDisabled
             ? `Download for ${selectedChannel.label} unavailable. ${shareDisabledReason}`
-            : `Download for ${selectedChannel.label}`
+            : canSaveToPhotos
+              ? "Save to Photos"
+              : `Download for ${selectedChannel.label}`
         }
-        onClick={share.download}
+        onClick={() =>
+          void (canSaveToPhotos ? share.saveToPhotos() : share.downloadAndCopy())
+        }
       >
-        Download for {selectedChannel.label}
+        {canSaveToPhotos ? "Save to Photos" : `Download for ${selectedChannel.label}`}
       </Button>
       <Button
         variant="secondary"
@@ -1377,6 +1418,18 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
       >
         Copy caption
       </Button>
+      {selectedTarget?.webIntentUrl?.(shareContent) ? (
+        <Button
+          variant="secondary"
+          size="md"
+          fullWidth
+          rightIcon={<ExternalLink />}
+          disabled={share.shareDisabled}
+          onClick={share.openTarget}
+        >
+          Open {selectedChannel.label}
+        </Button>
+      ) : null}
       {isSaved ? (
         <Button variant="ghost" size="md" fullWidth onClick={onStartOver}>
           Done
@@ -1387,6 +1440,19 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   ) : (
     <div className={phoneBarClass}>
       <div className="mx-auto flex w-full max-w-[640px] flex-col gap-2">
+        {handoffReady ? (
+          <p className="text-caption leading-4 text-ink-2" aria-live="polite">
+            {share.feedback?.manualCopy
+              ? "Caption not copied. Use Copy caption or select it above."
+              : share.feedback?.detail.startsWith("Caption copied.")
+                ? `Caption and hashtags copied. Paste in ${handoffAppLabel} only if missing.`
+                : sharedViaSheet
+                  ? `Finish your post in ${handoffAppLabel}. Paste the caption only if missing.`
+                  : manualHandoff
+                    ? `Saving the ${mediaNoun} also copies your caption.`
+                    : `Choose ${nativeTarget ? "an app" : selectedChannel.label} in the share sheet. Your caption is copied automatically.`}
+          </p>
+        ) : null}
         {phoneBarContent}
       </div>
     </div>
@@ -1396,8 +1462,8 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     <div
       className={`min-h-0 flex-1 overflow-y-auto bg-canvas px-4 pt-4 text-ink sm:px-6 lg:px-10 lg:py-8 ${
         tallPhoneBar
-          ? "pb-[calc(160px+env(safe-area-inset-bottom))]"
-          : "pb-[calc(96px+env(safe-area-inset-bottom))]"
+          ? "pb-[calc(190px+env(safe-area-inset-bottom))]"
+          : "pb-[calc(126px+env(safe-area-inset-bottom))]"
       }`}
     >
       <h1 className="sr-only lg:hidden">Your post</h1>
@@ -1406,10 +1472,23 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           className="mx-auto w-full max-w-[640px] lg:mx-0"
           aria-label="Post preview"
         >
+          {!isDesktopLayout &&
+          !preparedDelivery.websiteOnly &&
+          availableChannels.length > 0 ? (
+            <div className="mb-3">
+              <ChannelChips
+                channels={availableChannels}
+                selectedId={selectedChannelId}
+                sharedIds={sharedChannelIds}
+                disabled={creative.busy}
+                onSelect={selectChannel}
+              />
+            </div>
+          ) : null}
           <PostPreviewCard
             salespersonName={salespersonName}
             dealerName={currentDealer?.name || "Your dealership"}
-            image={post.image}
+            image={preparedDelivery.formattedPreviewUrl || post.image}
             videoUrl={video.videoUrl}
             caption={caption}
             outboundText={previewOutboundText}
@@ -1434,14 +1513,16 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
             </h1>
             <p className="mt-2 max-w-sm text-sm leading-6 text-ink-2">
               {isDesktopLayout
-                ? `Pick where it's going, download the ${mediaNoun} and copy the caption, then post it in ${selectedChannel.label}.`
+                ? `Download saves the ${mediaNoun} and copies your caption. Open ${handoffAppLabel} to finish your post.`
                 : `Pick where it's going, then share it to ${selectedChannel.label}.`}
             </p>
           </header>
 
           {banner ? <LockBanner {...banner} /> : null}
 
-          {!preparedDelivery.websiteOnly && availableChannels.length > 0 ? (
+          {isDesktopLayout &&
+          !preparedDelivery.websiteOnly &&
+          availableChannels.length > 0 ? (
             <ChannelChips
               channels={availableChannels}
               selectedId={selectedChannelId}
@@ -1455,6 +1536,74 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           {websiteBlock}
           {creativeTools}
           {statusLine}
+          {!preparedDelivery.websiteOnly && handoffReady ? (
+            <div
+              className="rounded-sm border border-strong bg-panel px-3.5 py-3 text-sm leading-5"
+              aria-label={`${selectedChannel.label} posting steps`}
+            >
+              <p className="font-semibold text-ink">Finish in {handoffAppLabel}</p>
+              <ol className="mt-2 list-decimal space-y-1 pl-4 text-ink-2">
+                <li>
+                  {sharedViaSheet
+                    ? `Return to ${handoffAppLabel} to finish your post.`
+                    : manualHandoff
+                      ? `Save the ${mediaNoun} below. The caption is copied with it.`
+                      : `Tap Share and choose ${nativeTarget ? "an app" : selectedChannel.label}.`}
+                </li>
+                {manualHandoff ? <li>{addMediaInstruction}</li> : null}
+                <li>
+                  {manualHandoff && selectedChannelId === "x_twitter"
+                    ? "The caption opens already filled in. Review your account and audience, then post."
+                    : "Check the caption and hashtags; paste only if missing. Review your account and audience, then post."}
+                </li>
+              </ol>
+              {manualHandoff && applePhotosSave && !canSaveToPhotos ? (
+                <p className="mt-2 text-caption text-ink-2">
+                  If the file lands in Files, open it and choose Share → Save{" "}
+                  {mediaNoun === "video" ? "Video" : "Image"} before opening{" "}
+                  {selectedChannel.label}.
+                </p>
+              ) : null}
+              {selectedChannelId === "tiktok" &&
+              isDesktopLayout &&
+              mediaNoun === "image" ? (
+                <p className="mt-2 text-caption text-ink-2">
+                  For a photo post, open My work on your phone and continue in the
+                  TikTok app.
+                </p>
+              ) : null}
+              {!manualHandoff ? (
+                <button
+                  type="button"
+                  className="mt-2 min-h-11 text-left font-medium text-brand-ink underline underline-offset-4"
+                  onClick={share.useManualHandoff}
+                >
+                  App not listed? Save and open instead
+                </button>
+              ) : !isDesktopLayout && targetWebUrl ? (
+                <a
+                  href={targetWebUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex min-h-11 items-center font-medium text-brand-ink underline underline-offset-4"
+                >
+                  Open {selectedChannel.label} in browser instead
+                </a>
+              ) : null}
+              {share.feedback?.manualCopy && share.prepared?.caption ? (
+                <label className="mt-3 block font-medium text-ink">
+                  Full caption to copy
+                  <textarea
+                    readOnly
+                    value={share.prepared.caption}
+                    onFocus={(event) => event.currentTarget.select()}
+                    rows={5}
+                    className="mt-1 w-full rounded-sm border border-strong bg-panel-raised p-3 text-base font-normal text-ink"
+                  />
+                </label>
+              ) : null}
+            </div>
+          ) : null}
           {deliveryActions}
         </section>
       </div>

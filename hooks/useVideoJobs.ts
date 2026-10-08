@@ -39,6 +39,8 @@ export interface UseVideoJobsOptions {
   /** `resolved.motion` from resolveCreative — the dealership motion signature. */
   motion: ResolvedMotion | null;
   onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
+  /** The single-preview studio shares the generated clip at its original spec. */
+  previewMode?: "delivery" | "generated";
 }
 
 export interface UseVideoJobsResult {
@@ -105,6 +107,7 @@ export const useVideoJobs = ({
   dealerId,
   motion,
   onGenerateVideo,
+  previewMode = "delivery",
 }: UseVideoJobsOptions): UseVideoJobsResult => {
   const toast = useToast();
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -287,6 +290,7 @@ export const useVideoJobs = ({
         const url = await onGenerateVideo(style, options);
         // Always show the latest successful render (previous logic kept a
         // stale/null URL if something odd was already set).
+        if (previewMode === "generated") setManualVideoSelected(true);
         adoptVideoUrl(url);
         if (dealerId) {
           void archiveDealerMedia(dealerId, {

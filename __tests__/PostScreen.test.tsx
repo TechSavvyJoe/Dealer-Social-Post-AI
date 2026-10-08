@@ -83,7 +83,11 @@ const mocks = vi.hoisted(() => ({
     busy?: boolean;
     tryAnotherUsed?: boolean;
   },
-  videoState: {} as { isVideoLoading?: boolean },
+  videoState: {} as {
+    isVideoLoading?: boolean;
+    videoUrl?: string;
+    manualVideoSelected?: boolean;
+  },
   defaultsOverrides: {} as Record<string, unknown>,
 }));
 
@@ -195,9 +199,9 @@ vi.mock("../hooks/useWebsiteHandoff", () => ({
 vi.mock("../hooks/useVideoJobs", () => ({
   useVideoJobs: () => ({
     videoJobs: [],
-    videoUrl: null,
+    videoUrl: mocks.videoState.videoUrl || null,
     adoptVideoUrl: vi.fn(),
-    manualVideoSelected: false,
+    manualVideoSelected: mocks.videoState.manualVideoSelected || false,
     setManualVideoSelected: vi.fn(),
     isVideoLoading: mocks.videoState.isVideoLoading ?? false,
     videoLoadingMessage: "",
@@ -227,7 +231,7 @@ vi.mock("../hooks/usePreparedDelivery", () => ({
   usePreparedDelivery: ({ post }: { post: GeneratedPost }) => ({
     deliveryPlan: derivePlatformDeliveryPlan(
       post.platformIds ?? ["instagram_feed"],
-      "photo",
+      mocks.videoState.videoUrl ? "both" : "photo",
       "test",
     ),
     websiteOnly: mocks.preparedState.websiteOnly ?? false,
@@ -256,6 +260,9 @@ vi.mock("../hooks/usePostShare", () => ({
       share: mocks.share,
       copyCaption: mocks.copyCaption,
       download: mocks.download,
+      downloadAndCopy: mocks.download,
+      saveToPhotos: mocks.download,
+      useManualHandoff: vi.fn(),
       openTarget: mocks.openTarget,
     };
   },
@@ -630,6 +637,39 @@ describe("PostScreen", () => {
     expect(mocks.retryPreparation).not.toHaveBeenCalled();
   });
 
+  it("only asks for the remaining steps after the share sheet finishes", () => {
+    mocks.shareState = {
+      feedback: {
+        title: "Sent to share sheet",
+        detail: "Caption copied.",
+        via: "share_sheet",
+      },
+    };
+    renderScreen();
+    const guide = screen.getByLabelText("Facebook posting steps");
+    expect(guide).toHaveTextContent("Return to Facebook to finish your post.");
+    expect(guide).not.toHaveTextContent("Tap Share");
+    expect(guide).toHaveTextContent("paste only if missing");
+  });
+
+  it("offers a real app choice for More without a nonexistent Open action", () => {
+    mocks.shareState = { nativeFileShareAvailable: false };
+    renderScreen({ post: { ...basePost, platformIds: ["native_share"] } });
+    expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
+    expect(screen.getByLabelText(/posting steps/)).toHaveTextContent(
+      "Open your chosen app",
+    );
+    expect(lastShareOptions().channelLabel).toBe("your chosen app");
+  });
+
+  it("does not ask users to paste over X's prefilled caption", () => {
+    mocks.shareState = { nativeFileShareAvailable: false };
+    renderScreen({ post: { ...basePost, platformIds: ["x_twitter"] } });
+    const guide = screen.getByLabelText(/X.*posting steps/);
+    expect(guide).toHaveTextContent("caption opens already filled in");
+    expect(guide).not.toHaveTextContent("Paste the caption");
+  });
+
   it("renders Save image, Copy caption and Open {channel} without file sharing", async () => {
     const user = userEvent.setup();
     mocks.shareState = { nativeFileShareAvailable: false };
@@ -705,7 +745,7 @@ describe("PostScreen", () => {
       feedback: {
         title: "Shared · Facebook",
         detail:
-          "Caption copied. Paste it into your Facebook post, then tap Post there.",
+          "Caption copied. Check your Facebook caption and paste only if missing, then tap Post there.",
         via: "share_sheet",
       },
     };
@@ -783,6 +823,24 @@ describe("PostScreen", () => {
     await user.click(within(banner).getByRole("button", { name: "Dismiss" }));
     expect(useAppStore.getState().error).toBeNull();
     expect(mocks.retryPreparation).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generated video preview and caption when changing destinations", async () => {
+    mocks.videoState = { videoUrl: "blob:house-video", manualVideoSelected: true };
+    renderScreen();
+    expect(screen.getByLabelText("Post video")).toHaveAttribute(
+      "src",
+      "blob:house-video",
+    );
+    expect(mocks.selectDelivery).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Instagram" }));
+    expect(mocks.selectDelivery).not.toHaveBeenCalled();
+    expect(mocks.usePostShare).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        channelId: "instagram_feed",
+        content: expect.objectContaining({ videoUrl: "blob:house-video" }),
+      }),
+    );
   });
 
   it("does not count a running video as a busy render for leaving", () => {

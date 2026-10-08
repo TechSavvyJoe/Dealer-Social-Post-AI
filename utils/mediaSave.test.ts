@@ -257,7 +257,7 @@ describe("savePreparedMediaToLibrary", () => {
 
     await vi.advanceTimersByTimeAsync(30_000);
     await expect(result).resolves.toEqual({
-      method: "photos-share",
+      method: "photos-share-pending",
       kind: "video",
     });
   });

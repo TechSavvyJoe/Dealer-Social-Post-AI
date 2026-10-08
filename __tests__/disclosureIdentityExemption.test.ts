@@ -507,6 +507,7 @@ const routeContext = (
 ) => {
   let handler: ((c: unknown) => RouteResult) | undefined;
   const moduleFor = (path: string) => {
+    if (path.endsWith("/revisionCompatibility.js")) return globals.revisionObservation;
     if (path.endsWith("/helpers.js")) return globals.helpers;
     if (path.endsWith("/requestPolicies.js")) return policies;
     if (path.endsWith("/websitePublications.js")) {
@@ -767,6 +768,7 @@ const runDraft = (
     source,
     {
       console: { error: vi.fn(), log, warn: vi.fn() },
+      revisionObservation: { recordLegacy: log },
       helpers: sessionHelpers(salespersonContext()),
       $app: {
         dao: () => ({
@@ -858,10 +860,7 @@ describe("PATCH /api/app/posts/:id/draft", () => {
     );
     expect(legacy.result.status).toBe(200);
     expect(legacy.saved).toHaveLength(1);
-    // Stage C's release gate counts these lines in the production log.
-    expect(legacy.log).toHaveBeenCalledWith(
-      "[revision-legacy-client] route=draft post=post-1",
-    );
+    expect(legacy.log).toHaveBeenCalledWith("draft");
 
     const stale = runDraft({
       expected_post_revision: "2026-09-21 09:00:00.000Z",
@@ -873,9 +872,7 @@ describe("PATCH /api/app/posts/:id/draft", () => {
       payload: { code: "POST_DRAFT_REVISION_CONFLICT" },
     });
     expect(stale.saved).toHaveLength(0);
-    expect(stale.log).not.toHaveBeenCalledWith(
-      expect.stringContaining("[revision-legacy-client]"),
-    );
+    expect(stale.log).not.toHaveBeenCalled();
   });
 
   it.each([

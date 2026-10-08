@@ -331,6 +331,7 @@ jobs:
           # secret can never override lower-precedence app configuration.
           flyctl secrets set --stage --app dealer-social-post-ai-production \
             RELEASE_SHA="$RELEASE_SHA" \
+            REVISION_OBSERVATION_EPOCH="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             TURNSTILE_SITE_KEY="$TURNSTILE_SITE_KEY" \
             TURNSTILE_ALLOWED_HOSTNAMES="$TURNSTILE_HOSTNAMES" \
             TURNSTILE_ENFORCEMENT_ENABLED="$TURNSTILE_ENFORCEMENT" \

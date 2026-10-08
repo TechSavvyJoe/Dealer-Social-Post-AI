@@ -72,6 +72,12 @@ const initialsFor = (name: string): string =>
     .map((part) => part[0]?.toUpperCase())
     .join("") || "DS";
 
+// Reserve room for the app header, destination choices, caption, and fixed
+// actions on short phones. Keep a usable preview in landscape and the larger
+// original cap on desktop, where the actions sit beside the preview.
+const mediaPreviewClass =
+  "block max-h-[clamp(120px,calc(100svh-470px),56svh)] w-full object-contain lg:max-h-[56svh]";
+
 const protectedLine = "whitespace-pre-wrap text-caption leading-[18px] text-ink-2";
 
 export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
@@ -128,15 +134,11 @@ export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
             controls
             muted
             playsInline
-            className="block max-h-[56svh] w-full object-contain"
+            className={mediaPreviewClass}
             aria-label="Post video"
           />
         ) : (
-          <img
-            src={image}
-            alt="Post image"
-            className="block max-h-[56svh] w-full object-contain"
-          />
+          <img src={image} alt="Post image" className={mediaPreviewClass} />
         )}
         {busyLabel ? (
           <div

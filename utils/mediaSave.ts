@@ -38,6 +38,7 @@ export interface ValidatedVideoMetadata {
 
 export type SaveMediaResult =
   | { method: "photos-share"; kind: SaveMediaKind }
+  | { method: "photos-share-pending"; kind: SaveMediaKind }
   | { method: "download"; kind: SaveMediaKind }
   | { method: "cancelled"; kind: SaveMediaKind }
   | { method: "error"; kind: SaveMediaKind; message: string };
@@ -413,9 +414,8 @@ export const savePreparedMediaToLibrary = async (
       if (canShareFiles) {
         // `invokeWebShareNow` calls navigator.share synchronously.
         const attempt = await invokeWebShareNow(shareData);
-        if (attempt.kind === "completed" || attempt.kind === "started") {
-          return { method: "photos-share", kind };
-        }
+        if (attempt.kind === "completed") return { method: "photos-share", kind };
+        if (attempt.kind === "started") return { method: "photos-share-pending", kind };
         if (attempt.kind === "cancelled") {
           return { method: "cancelled", kind };
         }
@@ -463,6 +463,8 @@ export const saveMediaToLibrary = async (options: {
 
 export const saveResultToastMessage = (result: SaveMediaResult): string => {
   switch (result.method) {
+    case "photos-share-pending":
+      return "The save sheet opened, but saving is not confirmed. Keep this screen open until your file is saved.";
     case "photos-share":
       return result.kind === "video"
         ? "Share sheet opened — tap Save Video to add it to your Photos library."

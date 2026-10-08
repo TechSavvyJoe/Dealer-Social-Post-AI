@@ -336,6 +336,23 @@ describe("useVideoJobs", () => {
     unmount();
   });
 
+  it("keeps the house clip selected for the single-preview studio", async () => {
+    const { result, unmount } = renderHook(() =>
+      useVideoJobs(options({ previewMode: "generated" })),
+    );
+    await act(async () => {
+      await result.current.startVideoJob(VideoStyle.GoldenRadiance, {
+        ...REEL,
+        durationSeconds: 6,
+        resolution: "720p",
+      });
+    });
+    expect(result.current.videoUrl).toBe("blob:clip-1");
+    expect(result.current.manualVideoSelected).toBe(true);
+    expect(result.current.videoJobForDelivery(reelDelivery)).toBeUndefined();
+    unmount();
+  });
+
   it("derives the house motion options from the dealership motion signature", () => {
     const { result, rerender, unmount } = renderHook(
       (props: UseVideoJobsOptions) => useVideoJobs(props),

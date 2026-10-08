@@ -1,0 +1,42 @@
+name: Observe revision compatibility
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 14 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: revision-compatibility-observation
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: Record a durable production observation
+        run: |
+          set -euo pipefail
+          observation_dir="$(mktemp -d)"
+          trap 'rm -rf "$observation_dir"' EXIT
+          curl --fail --silent --show-error --max-time 30 \
+            https://dealer-social-post-ai-production.fly.dev/api/app/health \
+            > "$observation_dir/health.json"
+          node scripts/revision-legacy-observation.mjs \
+            "$observation_dir/health.json" revision-observation.json
+      - name: Keep observation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: revision-observation-${{ github.run_id }}
+          path: revision-observation.json
+          if-no-files-found: warn
+          retention-days: 30

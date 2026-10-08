@@ -6,6 +6,8 @@ import {
   PUBLISH_TARGETS,
   preparePublishShare,
   sharePrepared,
+  copyTextToClipboard,
+  openPreparedTarget,
   type PreparedPublishShare,
 } from "./publishTargets";
 
@@ -28,11 +30,122 @@ afterEach(() => {
     if (descriptor) Object.defineProperty(navigator, key, descriptor);
     else Reflect.deleteProperty(navigator, key);
   }
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("publishTargets handoff strategy", () => {
+  it("distinguishes a pending OS handoff from a completed share", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => new Promise<void>(() => {}),
+    });
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: () => true,
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.resolve() },
+    });
+    const pending = sharePrepared({
+      target: PUBLISH_TARGETS[0],
+      content: { text: "Ready" },
+      caption: "Ready",
+      file: new File(["image"], "post.jpg", { type: "image/jpeg" }),
+      webUrl: null,
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(pending).resolves.toMatchObject({
+      kind: "started",
+      captionCopied: true,
+    });
+  });
+
+  it("starts copying before share consumes activation without waiting for the clipboard", async () => {
+    let activated = true;
+    const calls: string[] = [];
+    let finishCopy!: () => void;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: () => {
+          expect(activated).toBe(true);
+          calls.push("copy");
+          return new Promise<void>((resolve) => {
+            finishCopy = resolve;
+          });
+        },
+      },
+    });
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => {
+        activated = false;
+        calls.push("share");
+        return Promise.resolve();
+      },
+    });
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: () => true,
+    });
+    const result = sharePrepared({
+      target: PUBLISH_TARGETS[0],
+      content: { text: "Ready" },
+      caption: "Ready",
+      file: new File(["image"], "post.jpg", { type: "image/jpeg" }),
+      webUrl: null,
+    });
+    expect(calls).toEqual(["copy", "share"]);
+    finishCopy();
+    await expect(result).resolves.toMatchObject({
+      kind: "shared",
+      captionCopied: true,
+    });
+  });
+
+  it("removes its fallback textarea and restores focus when copy throws", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    const button = document.createElement("button");
+    document.body.appendChild(button);
+    button.focus();
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: () => {
+        throw new Error("Copy blocked");
+      },
+    });
+    try {
+      await expect(copyTextToClipboard("Private caption")).resolves.toBe(false);
+      expect(document.querySelector("textarea")).toBeNull();
+      expect(document.activeElement).toBe(button);
+    } finally {
+      button.remove();
+      Reflect.deleteProperty(document, "execCommand");
+    }
+  });
+
+  it.each(["gbp", "linkedin", "x_twitter"])(
+    "opens %s on phones when there is no app scheme",
+    (id) => {
+      vi.spyOn(navigator, "userAgent", "get").mockReturnValue("iPhone");
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      const target = PUBLISH_TARGETS.find((t) => t.id === id)!;
+      const content = { text: "Ready" };
+      const webUrl = target.webIntentUrl!(content)!;
+      expect(
+        openPreparedTarget({ target, content, caption: "Ready", file: null, webUrl }),
+      ).toBe("web");
+      expect(open).toHaveBeenCalledWith(webUrl, "_blank", "noopener,noreferrer");
+    },
+  );
+
   it("preserves a dealership mention when a long caption is fitted", () => {
     const fitted = fitPublishCaptionToBudget(
       {

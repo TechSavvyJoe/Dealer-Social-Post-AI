@@ -156,6 +156,7 @@ jobs:
             --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \
             --env POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA="$release_sha" \
             --env RELEASE_SHA="$release_sha" \
+            --env REVISION_OBSERVATION_EPOCH=ci-fresh \
             --env CUSTOMER_HUB_URL=https://customer-hub.example \
             --env CUSTOMER_HUB_SECRET=ci-customer-hub-secret-at-least-32-characters \
             --env CUSTOMER_HUB_DESTINATION_ID=joe_customer_hub \
@@ -182,6 +183,7 @@ jobs:
 
           grep --fixed-strings '"ok":true' /tmp/health.json
           grep --fixed-strings '"status":"verified"' /tmp/health.json
+          node -e 'const s=require("/tmp/health.json").revisionCompatibility; if (!s || s.coverage !== "durable-deployment-window" || s.ready !== false || !Number.isFinite(Date.parse(s.eligibleAfter))) process.exit(1)'
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:8090/api/app/session)" = "401"
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
