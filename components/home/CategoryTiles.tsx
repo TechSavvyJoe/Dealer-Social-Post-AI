@@ -1,5 +1,13 @@
 import React, { useEffect, useId, useRef, useState } from "react";
-import { CarFront, KeyRound, MapPin, Tag, UsersRound, Wrench } from "lucide-react";
+import {
+  CarFront,
+  ChevronRight,
+  KeyRound,
+  MapPin,
+  Tag,
+  UsersRound,
+  Wrench,
+} from "lucide-react";
 import type { BrandCategoryId } from "../../types";
 import type { HomeTile } from "../../services/storeDefaults";
 import { cn } from "../../utils/classNames";
@@ -61,7 +69,7 @@ const TilePhoto: React.FC<{ categoryId: BrandCategoryId }> = ({ categoryId }) =>
 
   return (
     <span
-      className="relative block h-[88px] shrink-0 overflow-hidden border-b border-hairline bg-panel md:h-[112px]"
+      className="absolute inset-0 block overflow-hidden bg-panel"
       aria-hidden="true"
     >
       {failed ? (
@@ -77,7 +85,7 @@ const TilePhoto: React.FC<{ categoryId: BrandCategoryId }> = ({ categoryId }) =>
           alt=""
           decoding="async"
           onError={() => setFailed(true)}
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
         />
       )}
     </span>
@@ -123,16 +131,20 @@ export const CategoryTiles: React.FC<CategoryTilesProps> = ({
       : "choose a photo";
 
   return (
-    <div
-      className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4"
-      aria-busy={disabled ? true : undefined}
-    >
+    <div className="grid grid-cols-2 gap-2.5" aria-busy={disabled ? true : undefined}>
       {tiles.map((tile, index) => {
         const usual = usualCategory === tile.categoryId;
         const blurbId = `${idPrefix}-blurb-${index}`;
         const usualId = `${idPrefix}-usual-${index}`;
         return (
-          <article key={tile.scenarioId} className="relative flex min-w-0">
+          <article
+            key={tile.scenarioId}
+            className={cn(
+              "relative flex min-w-0",
+              (tile.categoryId === "deliveries" || tile.categoryId === "team") &&
+                "col-span-2",
+            )}
+          >
             {/* Opened by the tile on phones. Kept out of the tab and screen-reader
                 order: the tile button is the one control. */}
             <input
@@ -174,20 +186,35 @@ export const CategoryTiles: React.FC<CategoryTilesProps> = ({
                 ]?.click();
               }}
               className={cn(
-                "flex min-h-[176px] w-full flex-1 flex-col items-stretch overflow-hidden text-left text-ink md:min-h-[214px]",
-                "rounded-md border border-hairline bg-panel-raised transition-colors duration-120 hover:border-strong",
+                "group relative flex min-h-[112px] w-full flex-1 flex-col justify-end overflow-hidden text-left text-photo-ink sm:min-h-[152px]",
+                tile.categoryId === "deliveries" && "min-h-[136px] sm:min-h-[220px]",
+                tile.categoryId === "team" && "min-h-[92px] sm:min-h-[140px]",
+                "rounded-lg border border-strong/60 bg-panel transition-colors duration-120 hover:border-brand-ink",
                 "disabled:cursor-wait disabled:opacity-50 disabled:hover:border-hairline",
               )}
             >
               <TilePhoto categoryId={tile.categoryId} />
-              <span className="flex flex-1 items-center gap-3 px-3.5 py-3">
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 bg-gradient-to-t from-photo-shade/95 via-photo-shade/25 to-transparent"
+              />
+              <span className="relative flex items-end gap-2 px-3.5 pb-3 pt-10">
                 <span className="min-w-0 flex-1">
-                  <span className="block break-words font-display text-[19px] font-semibold leading-[22px]">
+                  <span className="block break-words font-display text-[17px] font-semibold leading-[22px]">
                     {tile.label}
                   </span>
-                  <span id={blurbId} className="mt-0.5 block text-caption text-ink-3">
+                  <span
+                    id={blurbId}
+                    className="mt-1 block text-[12px] leading-4 text-photo-ink/85"
+                  >
                     {tile.blurb}
                   </span>
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-photo-ink/30 bg-photo-shade/25"
+                >
+                  <ChevronRight className="h-4 w-4" />
                 </span>
                 {usual ? (
                   <span

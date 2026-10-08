@@ -9,17 +9,10 @@ export default {
   ],
   theme: {
     extend: {
-      // LIGHT TABLE type (spec §4.2): Barlow for every UI string, Barlow
-      // Semi Condensed for screen titles, dialog titles and large numerals.
+      // The selected dark studio uses one readable type family across screens.
       fontFamily: {
-        sans: ["Barlow", "Helvetica Neue", "Arial", "sans-serif"],
-        display: [
-          "Barlow Semi Condensed",
-          "Barlow",
-          "Helvetica Neue",
-          "Arial",
-          "sans-serif",
-        ],
+        sans: ["Inter", "Helvetica Neue", "Arial", "sans-serif"],
+        display: ["Inter", "Helvetica Neue", "Arial", "sans-serif"],
       },
 
       // LIGHT TABLE palette (spec §4.1). The product is achromatic; the
@@ -35,6 +28,10 @@ export default {
         panel: "rgb(var(--panel) / <alpha-value>)",
         "panel-raised": "rgb(var(--panel-raised) / <alpha-value>)",
         overlay: "rgb(var(--overlay) / <alpha-value>)",
+        photo: {
+          ink: "rgb(var(--photo-ink) / <alpha-value>)",
+          shade: "rgb(var(--photo-shade) / <alpha-value>)",
+        },
         ink: {
           DEFAULT: "rgb(var(--ink) / <alpha-value>)",
           2: "rgb(var(--ink-2) / <alpha-value>)",

@@ -294,12 +294,12 @@ describe("v4 identity byte integrity", () => {
         releaseSha: RELEASE_SHA,
         fetchPath: async (path: string) => {
           const result = await serve(path);
-          if (path !== "/dealer-social-dsp-v4-512.png") return result;
+          if (path !== "/dealer-social-dsp-v5-512.png") return result;
           const bytes = Buffer.from("stale-icon-bytes");
           return { ...result, bytes, text: bytes.toString("utf8") };
         },
       }),
-    ).rejects.toThrow(/dealer-social-dsp-v4-512\.png served stale identity bytes/);
+    ).rejects.toThrow(/dealer-social-dsp-v5-512\.png served stale identity bytes/);
   });
 
   it("requires v4 identity content types and immutable caching", async () => {
@@ -330,7 +330,7 @@ describe("v4 identity byte integrity", () => {
         staticDirectory: fixture.directory,
         assets: [
           {
-            path: "/dealer-social-dsp-v4-192.png",
+            path: "/dealer-social-dsp-v5-192.png",
             contentType: "image/png",
             immutable: true,
           },

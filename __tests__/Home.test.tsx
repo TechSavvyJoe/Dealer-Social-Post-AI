@@ -68,9 +68,9 @@ describe("Home", () => {
   it("renders the approved six categories and exact mobile lead copy", () => {
     renderHome();
     expect(
-      screen.getByRole("heading", { name: "What are you posting?" }),
+      screen.getByRole("heading", { name: "Your next great post." }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Pick one and the camera opens.")).toBeInTheDocument();
+    expect(screen.getByText("A photo. A story. Ready to share.")).toBeInTheDocument();
     for (const label of [
       "Delivery",
       "New arrival",
@@ -85,23 +85,14 @@ describe("Home", () => {
     }
   });
 
-  it("shows only the heading, one line and the tiles: no eyebrows or decoration", () => {
+  it("puts the prominent library action before the category choices", () => {
     renderHome();
-    // Home's own column only; My work is a separate component.
-    const section = screen
-      .getByRole("heading", { name: "What are you posting?" })
-      .closest("section") as HTMLElement;
-
-    for (const gone of [
-      "Create a post",
-      "Choose a category",
-      "Photo first · AI next",
-      "Photo ready",
-    ]) {
-      expect(screen.queryByText(gone)).toBeNull();
-    }
-    expect(section.querySelector(".lucide-sparkles")).toBeNull();
-    expect(section.innerHTML).not.toMatch(/uppercase|tracking-|bg-brand-fill|text-2xs/);
+    const library = screen.getByRole("button", { name: "Choose from library" });
+    const delivery = screen.getByRole("button", { name: /^Delivery:/ });
+    expect(
+      library.compareDocumentPosition(delivery) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(library).toBeEnabled();
   });
 
   it("opens the matching tile camera input synchronously", () => {
@@ -159,7 +150,7 @@ describe("Home", () => {
       PHOTO_URL,
     );
     // The camera line no longer describes what a tap does.
-    expect(screen.queryByText("Pick one and the camera opens.")).toBeNull();
+    expect(screen.queryByText("A photo. A story. Ready to share.")).toBeNull();
     expect(onPhotoPicked).not.toHaveBeenCalled();
 
     const camera = screen.getByLabelText("Take a photo for Service");
@@ -176,12 +167,12 @@ describe("Home", () => {
     expect(screen.queryByText("Pick what this photo is for")).toBeNull();
   });
 
-  it("keeps the library row to phones; wider screens' tiles open the picker", () => {
+  it("keeps library intake available on every device", () => {
     renderHome();
-    // jsdom has no media queries, so pin the breakpoint class that hides it.
+    // The top-level picker works on phones and wider screens.
     const row = screen.getByRole("button", { name: "Choose from library" })
       .parentElement as HTMLElement;
-    expect(row).toHaveClass("md:hidden");
+    expect(row).not.toHaveClass("md:hidden");
     expect(row).toContainElement(
       screen.getByLabelText("Choose a photo from your library"),
     );
@@ -202,9 +193,9 @@ describe("Home", () => {
     expect(useAppStore.getState().pendingPhoto).toBeNull();
     // The focused button is gone, so focus lands on the page heading.
     expect(
-      screen.getByRole("heading", { name: "What are you posting?" }),
+      screen.getByRole("heading", { name: "Your next great post." }),
     ).toHaveFocus();
-    expect(screen.getByText("Pick one and the camera opens.")).toBeInTheDocument();
+    expect(screen.getByText("A photo. A story. Ready to share.")).toBeInTheDocument();
 
     const camera = screen.getByLabelText("Take a photo for Service");
     const cameraClick = vi.spyOn(camera, "click");
@@ -261,7 +252,7 @@ describe("Home", () => {
 
     const message = await screen.findByText("Getting your photo ready…");
     expect(status).toContainElement(message);
-    expect(screen.queryByText("Pick one and the camera opens.")).toBeNull();
+    expect(screen.queryByText("A photo. A story. Ready to share.")).toBeNull();
     expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
     expect(
       screen.getByRole("button", { name: "Delivery: take a photo" }),

@@ -90,7 +90,7 @@ export const Header: React.FC<HeaderProps> = ({
     <>
       <header
         className={cn(
-          "w-full z-40 relative h-14 shrink-0",
+          "w-full z-40 relative h-14 shrink-0 md:h-16",
 
           "bg-panel border-b border-hairline",
         )}
@@ -120,16 +120,14 @@ export const Header: React.FC<HeaderProps> = ({
                 )}
               />
             ) : (
-              <div
+              <img
+                src="/dealer-social-dsp-v5-192.png"
+                alt="Dealer Social"
                 className={cn(
-                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-md",
-                  "bg-brand-fill text-brand-foreground font-semibold text-xl",
+                  "h-10 w-10 shrink-0 rounded-md border border-hairline",
                   flowHeading && "max-md:hidden",
                 )}
-                aria-hidden="true"
-              >
-                {dealer.name.charAt(0)}
-              </div>
+              />
             )}
 
             <div className="flex min-w-0 flex-col">
@@ -145,7 +143,7 @@ export const Header: React.FC<HeaderProps> = ({
                     flowHeading && "max-md:hidden",
                   )}
                 >
-                  {dealer.name}
+                  Dealer Social
                 </span>
                 {/* On a phone flow screen the step title needs the room: at
                     320 px the badge would truncate "New arrival". Home and
@@ -162,6 +160,14 @@ export const Header: React.FC<HeaderProps> = ({
                   </Badge>
                 )}
               </div>
+              <span
+                className={cn(
+                  "mt-1 truncate text-xs text-ink-2",
+                  flowHeading && "max-md:hidden",
+                )}
+              >
+                {dealer.name}
+              </span>
               {person && (
                 <span className="mt-0.5 hidden truncate text-caption text-ink-2 md:inline">
                   Posting as {person.name}
@@ -277,7 +283,7 @@ export const Header: React.FC<HeaderProps> = ({
               <nav
                 id="account-menu"
                 aria-label="Account menu"
-                className="absolute right-4 top-14 z-50 w-60 rounded-md border border-strong bg-overlay p-2 shadow-dialog on-overlay"
+                className="absolute right-4 top-full z-50 w-60 rounded-md border border-strong bg-overlay p-2 shadow-dialog on-overlay"
               >
                 {person && (
                   <p className="border-b border-hairline px-3 py-3 text-sm text-ink-2">

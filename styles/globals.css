@@ -1,8 +1,7 @@
-@import "@fontsource/barlow/latin-400.css";
-@import "@fontsource/barlow/latin-500.css";
-@import "@fontsource/barlow/latin-600.css";
-@import "@fontsource/barlow-semi-condensed/latin-500.css";
-@import "@fontsource/barlow-semi-condensed/latin-600.css";
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
 
 @tailwind base;
 @tailwind components;
@@ -23,6 +22,9 @@
     --panel: 25 28 31; /* #191c1f sections, header, sheets */
     --panel-raised: 33 37 41; /* #212529 inputs, chips, rows */
     --overlay: 42 47 52; /* #2a2f34 dialogs, popovers, toasts */
+    /* Photo labels retain a dark scrim/light ink in either page theme. */
+    --photo-ink: 255 255 255;
+    --photo-shade: 0 0 0;
     --hairline: 47 52 57; /* #2f3439 1px dividers */
     --border-strong: 106 115 124; /* #6a737c control edges, ≥ 3:1 (WCAG 1.4.11) */
 
@@ -118,9 +120,8 @@
     --focus-ring-offset: rgb(var(--canvas));
 
     /* --- Type --- */
-    --font-ui: "Barlow", "Helvetica Neue", Arial, sans-serif;
-    --font-display:
-      "Barlow Semi Condensed", "Barlow", "Helvetica Neue", Arial, sans-serif;
+    --font-ui: "Inter", "Helvetica Neue", Arial, sans-serif;
+    --font-display: "Inter", "Helvetica Neue", Arial, sans-serif;
 
     /* --- Spacing — 4px base --- */
     --spacing-xs: 0.5rem;

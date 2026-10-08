@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Edit3, Loader2 } from "lucide-react";
+import { Edit3, Film, Image as ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { captionIncludesEmployeeDisclosure } from "../../utils/complianceDisclosures";
 
@@ -48,6 +48,9 @@ export interface PostPreviewCardProps {
   dealerName: string;
   image: string;
   videoUrl?: string | null;
+  availableVideoUrl?: string | null;
+  onSelectMedia?: (kind: "image" | "video") => void;
+  mediaSelectionDisabled?: boolean;
   /** The one editable caption body. */
   caption: string;
   /** The body that ships for the selected channel (attribution and compliance pass applied). */
@@ -85,6 +88,9 @@ export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
   dealerName,
   image,
   videoUrl,
+  availableVideoUrl,
+  onSelectMedia,
+  mediaSelectionDisabled = false,
   caption,
   outboundText,
   employeeDisclosure,
@@ -98,6 +104,27 @@ export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
 }) => {
   const showEditor = canEdit && editing;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mediaRailRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<HTMLVideoElement>(null);
+  const scrollSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clipUrl = availableVideoUrl || videoUrl;
+  const selectedMedia = videoUrl ? "video" : "image";
+  useEffect(() => {
+    const rail = mediaRailRef.current;
+    if (scrollSettleRef.current) clearTimeout(scrollSettleRef.current);
+    const align = () => {
+      if (rail && clipUrl) rail.scrollLeft = videoUrl ? 0 : rail.clientWidth;
+    };
+    align();
+    const observer =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(align) : null;
+    if (rail) observer?.observe(rail);
+    if (!videoUrl) playerRef.current?.pause();
+    return () => {
+      observer?.disconnect();
+      if (scrollSettleRef.current) clearTimeout(scrollSettleRef.current);
+    };
+  }, [clipUrl, videoUrl]);
   const parts = outboundPreviewParts(outboundText, employeeDisclosure, disclosures);
   // While editing, the body is the textarea, so the protected prefix is shown
   // whenever the dealership has one: the share adds it unless the edited body
@@ -128,15 +155,75 @@ export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
       </header>
 
       <div className="relative w-full overflow-hidden bg-canvas">
-        {videoUrl ? (
-          <video
-            src={videoUrl}
-            controls
-            muted
-            playsInline
-            className={mediaPreviewClass}
-            aria-label="Post video"
-          />
+        {clipUrl ? (
+          <>
+            <div className="flex items-center justify-between gap-2 border-y border-hairline bg-panel px-3 py-1.5">
+              <div className="flex gap-1" role="group" aria-label="Preview version">
+                {(["video", "image"] as const).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    aria-pressed={selectedMedia === kind}
+                    disabled={mediaSelectionDisabled}
+                    onClick={() => onSelectMedia?.(kind)}
+                    className={`flex min-h-11 items-center gap-2 rounded-sm px-3 text-sm font-medium disabled:opacity-50 ${selectedMedia === kind ? "bg-brand-fill text-brand-foreground" : "text-ink-2 hover:bg-panel-raised"}`}
+                  >
+                    {kind === "video" ? (
+                      <Film className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    {kind === "video" ? "Video" : "Image"}
+                  </button>
+                ))}
+              </div>
+              <span className="text-xs text-ink-2">Swipe to switch</span>
+            </div>
+            <div
+              ref={mediaRailRef}
+              tabIndex={0}
+              className={`flex snap-x snap-mandatory overscroll-x-contain [scrollbar-width:none] ${mediaSelectionDisabled ? "overflow-x-hidden" : "overflow-x-auto"}`}
+              role="group"
+              aria-label="Image and video previews"
+              onScroll={(event) => {
+                if (mediaSelectionDisabled) return;
+                const rail = event.currentTarget;
+                if (scrollSettleRef.current) clearTimeout(scrollSettleRef.current);
+                // Let the native swipe settle before selecting the delivery.
+                // Selecting mid-gesture would snap the rail under the finger.
+                scrollSettleRef.current = setTimeout(() => {
+                  if (!rail.clientWidth) return;
+                  const kind =
+                    rail.scrollLeft >= rail.clientWidth / 2 ? "image" : "video";
+                  if (kind !== selectedMedia) onSelectMedia?.(kind);
+                }, 120);
+              }}
+            >
+              <div
+                className="w-full shrink-0 snap-center"
+                aria-hidden={selectedMedia !== "video"}
+              >
+                <video
+                  ref={playerRef}
+                  src={clipUrl}
+                  poster={image}
+                  controls
+                  muted
+                  playsInline
+                  preload="metadata"
+                  tabIndex={selectedMedia === "video" ? 0 : -1}
+                  className={mediaPreviewClass}
+                  aria-label="Post video"
+                />
+              </div>
+              <div
+                className="w-full shrink-0 snap-center"
+                aria-hidden={selectedMedia !== "image"}
+              >
+                <img src={image} alt="Post image" className={mediaPreviewClass} />
+              </div>
+            </div>
+          </>
         ) : (
           <img src={image} alt="Post image" className={mediaPreviewClass} />
         )}

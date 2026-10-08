@@ -384,7 +384,7 @@ test("Facebook Instagram and TikTok recover from a closed sheet with save-and-co
   });
   await fixture(page);
   await expect(
-    page.getByRole("heading", { name: "What are you posting?" }),
+    page.getByRole("heading", { name: "Your next great post." }),
   ).toBeVisible();
   await seedRestoredPost(page, ["facebook_feed", "instagram_feed", "tiktok"]);
   await page.reload();
@@ -458,7 +458,7 @@ test("desktop save copies caption and opens the selected destination", async ({
   });
   await fixture(page);
   await expect(
-    page.getByRole("heading", { name: "What are you posting?" }),
+    page.getByRole("heading", { name: "Your next great post." }),
   ).toBeVisible();
   await seedRestoredPost(page, ["facebook_feed", "instagram_feed", "tiktok"]);
   await page.reload();
@@ -519,7 +519,7 @@ test("blocked clipboard exposes the complete outbound caption for manual copying
   });
   await fixture(page);
   await expect(
-    page.getByRole("heading", { name: "What are you posting?" }),
+    page.getByRole("heading", { name: "Your next great post." }),
   ).toBeVisible();
   await seedRestoredPost(page);
   await page.reload();
@@ -546,7 +546,7 @@ test("category capture opens Details directly, with a single signature sheet", a
 }, info) => {
   await fixture(page);
   await expect(
-    page.getByRole("heading", { name: "What are you posting?" }),
+    page.getByRole("heading", { name: "Your next great post." }),
   ).toBeVisible();
   await quality(page);
   await shot(page, "home", info.project.name);
@@ -752,7 +752,7 @@ test("restored Post prepares direct sharing and follows Sunlight preference", as
   test.setTimeout(60_000);
   const state = await fixture(page);
   await expect(
-    page.getByRole("heading", { name: "What are you posting?" }),
+    page.getByRole("heading", { name: "Your next great post." }),
   ).toBeVisible();
   await seedRestoredPost(page);
   await recordSharing(page);
@@ -826,7 +826,7 @@ test("restored Post prepares direct sharing and follows Sunlight preference", as
     await expect(page.getByRole("button", { name: "Done", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Done", exact: true }).click();
     await expect(
-      page.getByRole("heading", { name: "What are you posting?" }),
+      page.getByRole("heading", { name: "Your next great post." }),
     ).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
   } else {
@@ -891,7 +891,7 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
     return undefined;
   });
   await expect(
-    page.getByRole("heading", { name: "What are you posting?" }),
+    page.getByRole("heading", { name: "Your next great post." }),
   ).toBeVisible();
   await page.getByRole("button", { name: "See all" }).click();
   await page.getByRole("button", { name: /^Open Team/ }).click();

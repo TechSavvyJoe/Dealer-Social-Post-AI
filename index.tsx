@@ -4,6 +4,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { LazyMotion, MotionConfig } from "framer-motion";
 import App from "./App";
+import { installViewportShell } from "./utils/viewportShell";
 import { getQueryClient } from "./services/queryClient";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/ui/Toast";
@@ -42,6 +43,9 @@ const showReactQueryDevtools =
 // stays on, so `motion.*` still throws and only `m.*` is renderable.
 const loadMotionFeatures = () =>
   import("./utils/motionFeatures").then((mod) => mod.default);
+
+const disposeViewportShell = installViewportShell();
+if (import.meta.hot) import.meta.hot.dispose(disposeViewportShell);
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
