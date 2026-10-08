@@ -22,6 +22,13 @@ vi.mock("../services/salespeople", async (importOriginal) => ({
   listPeoplePage: mocks.listPeoplePage,
 }));
 
+vi.mock("../services/dealershipInvitations", () => ({
+  dealershipInvitation: vi
+    .fn()
+    .mockResolvedValue({ required: false, hasInvitation: false }),
+  dealershipInvitationLink: (token: string) => `https://example.test/join#${token}`,
+}));
+
 vi.mock("../components/SystemHealthPanel", () => ({
   SystemHealthPanel: () => <div>System health ready</div>,
 }));

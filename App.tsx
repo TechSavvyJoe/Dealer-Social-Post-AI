@@ -561,15 +561,20 @@ const LazyPublicSpin = React.lazy(() =>
     default: m.PublicVehicleSpin,
   })),
 );
+const LazyDealershipInvitation = React.lazy(() =>
+  import("./components/DealershipInvitation").then((m) => ({
+    default: m.DealershipInvitation,
+  })),
+);
 export default function App() {
-  const [publicToken, setPublicToken] = useState(() =>
-    window.location.hash.startsWith("#/spin/") ? window.location.hash.slice(7) : "",
-  );
+  const [route, setRoute] = useState(() => ({
+    path: window.location.pathname,
+    hash: window.location.hash,
+  }));
+  const publicToken = route.hash.startsWith("#/spin/") ? route.hash.slice(7) : "";
   useEffect(() => {
     const update = () =>
-      setPublicToken(
-        window.location.hash.startsWith("#/spin/") ? window.location.hash.slice(7) : "",
-      );
+      setRoute({ path: window.location.pathname, hash: window.location.hash });
     window.addEventListener("hashchange", update);
     window.addEventListener("popstate", update);
     return () => {
@@ -577,6 +582,18 @@ export default function App() {
       window.removeEventListener("popstate", update);
     };
   }, []);
+  if (route.path === "/join")
+    return (
+      <Suspense
+        fallback={
+          <p className="p-6 text-ink" role="status">
+            Opening dealership invitation…
+          </p>
+        }
+      >
+        <LazyDealershipInvitation key={route.hash} token={route.hash.slice(1)} />
+      </Suspense>
+    );
   return publicToken ? (
     <Suspense
       fallback={

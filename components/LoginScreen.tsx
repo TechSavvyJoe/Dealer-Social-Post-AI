@@ -1,3 +1,7 @@
+import {
+  currentInvitedDealer,
+  type InvitedDealer,
+} from "../services/dealershipInvitations";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { m, useReducedMotion } from "framer-motion";
 import { CheckCircle2, Delete, Eye, EyeOff, Loader2 } from "lucide-react";
@@ -91,6 +95,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [showManagerPassword, setShowManagerPassword] = useState(false);
   const [pendingAttempt, setPendingAttempt] = useState<EntryMode | null>(null);
   const [challengeNonce, setChallengeNonce] = useState(0);
+  const [invitedDealer, setInvitedDealer] = useState<InvitedDealer | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void currentInvitedDealer(controller.signal)
+      .then(setInvitedDealer)
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [personalCodeError, setPersonalCodeError] = useState("");
@@ -559,6 +571,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   Sign in
                 </h1>
                 <p className="text-[15px] leading-[22px] text-ink-2">{instruction}</p>
+                {entryMode === "personal" && (
+                  <p className="mt-2 text-sm text-ink-2">
+                    {invitedDealer?.name
+                      ? `This device is set up for ${invitedDealer.name}.`
+                      : "New to the team? Open your manager’s private dealership invitation first."}
+                  </p>
+                )}
               </div>
 
               {/* One segmented track, not three buttons sitting side by side. */}

@@ -211,7 +211,7 @@ const assertActiveProductionServiceWorker = async (page: Page) => {
 
   // A first visit may activate the worker without controlling that page. One
   // reload must put the production shell under the active worker's control.
-  if (!result.controlled) await page.reload({ waitUntil: "networkidle" });
+  if (!result.controlled) await page.reload({ waitUntil: "domcontentloaded" });
   await expect
     .poll(() =>
       page.evaluate(() => navigator.serviceWorker.controller?.scriptURL || ""),
@@ -235,7 +235,14 @@ test.describe("real PocketBase release flow", () => {
     expect(adminUsername).not.toBe("");
     expect(adminPassword.length).toBeGreaterThanOrEqual(8);
 
-    await page.goto("/", { waitUntil: "networkidle" });
+    // The installed shell and background device-context reads need not become
+    // network-idle together. Verify the actual entry screen and active worker.
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: "Sign in", exact: true }),
+    ).toBeVisible({
+      timeout: 15_000,
+    });
     if (browserName === "chromium") {
       await assertActiveProductionServiceWorker(page);
     }
@@ -380,7 +387,7 @@ test.describe("real PocketBase release flow", () => {
     // that cookie on loopback HTTP, so restore the equivalent loopback-only
     // shim before the reload that proves session restoration.
     await installLoopbackSessionCookie(context, page, adminCookie);
-    await page.reload({ waitUntil: "networkidle" });
+    await page.reload({ waitUntil: "domcontentloaded" });
 
     await expect(page.getByRole("heading", { name: "System admin" })).toBeVisible({
       timeout: 15_000,
@@ -430,6 +437,28 @@ test.describe("real PocketBase release flow", () => {
     expect(createDealerResponse.status()).toBe(200);
     const dealerId = String(((await createDealerResponse.json()) as JsonObject).id);
     expect(dealerId).toMatch(/^[a-z0-9]{15}$/);
+    const privateInviteResponse = await page.request.post(
+      `/api/app/dealers/${dealerId}/invitation`,
+      { data: { action: "issue" } },
+    );
+    expect(privateInviteResponse.status()).toBe(200);
+    const privateInvite = String((await privateInviteResponse.json()).token);
+    const installInvite = async (
+      context: import("@playwright/test").BrowserContext,
+    ) => {
+      await context.addCookies([
+        {
+          name: "dealer_invitation",
+          value: privateInvite,
+          domain: new URL(page.url()).hostname,
+          path: "/api",
+          httpOnly: true,
+          secure: false,
+          sameSite: "Strict",
+        },
+      ]);
+    };
+
     await expect(newDealerDialog).toBeHidden();
 
     // The setup board lists the store this spec just created, read back from
@@ -471,7 +500,7 @@ test.describe("real PocketBase release flow", () => {
     );
 
     await installLoopbackSessionCookie(context, page, adminCookie);
-    await page.reload({ waitUntil: "networkidle" });
+    await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "System admin" })).toBeVisible({
       timeout: 15_000,
     });
@@ -664,6 +693,7 @@ test.describe("real PocketBase release flow", () => {
       baseURL: new URL(page.url()).origin,
       viewport: testInfo.project.use.viewport,
     });
+    await installInvite(managerContext);
     const managerPage = await managerContext.newPage();
     await managerPage.goto("/");
     await managerPage
@@ -808,7 +838,7 @@ test.describe("real PocketBase release flow", () => {
     // production Secure refresh cookie. Restore the HTTP-only test shim before
     // the reload so WebKit can prove the same persisted session flow.
     await installLoopbackSessionCookie(managerContext, managerPage, managerCookie);
-    await managerPage.reload({ waitUntil: "networkidle" });
+    await managerPage.reload({ waitUntil: "domcontentloaded" });
     await expect(managerPage.getByText("Manager dashboard")).toBeVisible({
       timeout: 15_000,
     });
@@ -839,6 +869,7 @@ test.describe("real PocketBase release flow", () => {
       baseURL: new URL(page.url()).origin,
       viewport: testInfo.project.use.viewport,
     });
+    await installInvite(salespersonContext);
     const salespersonPage = await salespersonContext.newPage();
     await salespersonPage.goto("/");
     const salespersonLoginPromise = salespersonPage.waitForResponse(
@@ -1083,6 +1114,7 @@ test.describe("real PocketBase release flow", () => {
         baseURL: new URL(page.url()).origin,
         viewport: testInfo.project.use.viewport,
       });
+      await installInvite(lifecycleContext);
       const lifecyclePage = await lifecycleContext.newPage();
       const passwordReloginResponse = await lifecyclePage.request.post(
         "/api/app/session",

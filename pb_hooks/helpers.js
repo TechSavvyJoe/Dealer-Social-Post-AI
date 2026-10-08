@@ -54,17 +54,21 @@ function readSessionToken(c) {
 // Session row lookup
 // ---------------------------------------------------------------------------
 
-function findSessionByToken(token) {
+function findSessionByToken(token, daoOverride) {
   if (!token) return null;
   try {
     const tokenHash = hashSessionToken(token);
-    const record = $app.dao().findFirstRecordByFilter("sessions", "token_hash = {:h}", {
-      h: tokenHash,
-    });
+    const record = (daoOverride || $app.dao()).findFirstRecordByFilter(
+      "sessions",
+      "token_hash = {:h}",
+      {
+        h: tokenHash,
+      },
+    );
     if (!record) return null;
 
     if (sessionIsExpired(record)) {
-      deleteSessionRecord(record);
+      deleteSessionRecord(record, daoOverride);
       return null;
     }
     return record;
@@ -144,10 +148,10 @@ function throwSessionValidationUnavailable(err) {
     : new Error("Session validation is temporarily unavailable");
 }
 
-function deleteSessionRecord(record) {
+function deleteSessionRecord(record, daoOverride) {
   if (!record) return;
   try {
-    $app.dao().deleteRecord(record);
+    (daoOverride || $app.dao()).deleteRecord(record);
   } catch (_e) {
     /* authorization still fails when best-effort cleanup cannot run */
   }
@@ -633,10 +637,11 @@ function sourceHasActiveImpersonationChild(dao, sourceSessionId) {
  * activity, tenant, current role, admin-secret rotation, and impersonation
  * provenance are checked against the current database state.
  */
-function sessionContext(c) {
+function sessionContext(c, daoOverride) {
   const token = readSessionToken(c);
   if (!token) return null;
-  const session = findSessionByToken(token);
+  const dao = daoOverride || $app.dao();
+  const session = findSessionByToken(token, dao);
   if (!session) {
     try {
       c.response().header().add("Set-Cookie", buildClearCookie());
@@ -645,7 +650,7 @@ function sessionContext(c) {
   }
 
   const reject = function () {
-    deleteSessionRecord(session);
+    deleteSessionRecord(session, dao);
     try {
       c.response().header().add("Set-Cookie", buildClearCookie());
     } catch (_e) {}
@@ -654,9 +659,9 @@ function sessionContext(c) {
   const role = session.getString("role");
 
   if (role === "super_admin") {
-    const systemDealer = validateSuperAdminSession(session);
+    const systemDealer = validateSuperAdminSession(session, dao);
     if (!systemDealer) return reject();
-    if (sourceHasActiveImpersonationChild($app.dao(), session.id)) {
+    if (sourceHasActiveImpersonationChild(dao, session.id)) {
       // Do not delete the parked source: the child still needs it for
       // continuous authority checks and the atomic exit replacement.
       try {
@@ -682,8 +687,8 @@ function sessionContext(c) {
   let person = null;
   let dealer = null;
   try {
-    person = $app.dao().findRecordById("salespeople", personId);
-    dealer = $app.dao().findRecordById("dealers", session.getString("dealer"));
+    person = dao.findRecordById("salespeople", personId);
+    dealer = dao.findRecordById("dealers", session.getString("dealer"));
   } catch (err) {
     if (isNotFoundError(err)) return reject();
     throwSessionValidationUnavailable(err);
@@ -701,6 +706,13 @@ function sessionContext(c) {
   ) {
     return reject();
   }
+
+  if (
+    (recordBool(dealer, "invitation_required") ||
+      session.getString("invitation_fingerprint")) &&
+    !require(__hooks + "/dealershipInvitations.js").sessionAllowed(session, dealer)
+  )
+    return reject();
 
   const isImpersonating = recordBool(session, "is_impersonation");
   const sourceId = session.getString("impersonator_session");
@@ -720,7 +732,7 @@ function sessionContext(c) {
     }
     let account = null;
     try {
-      account = $app.dao().findRecordById("manager_accounts", managerAccountId);
+      account = dao.findRecordById("manager_accounts", managerAccountId);
     } catch (err) {
       if (isNotFoundError(err)) return reject();
       throwSessionValidationUnavailable(err);
@@ -739,7 +751,7 @@ function sessionContext(c) {
   if (isImpersonating) {
     if (!sourceId || sourceId === session.id) return reject();
     try {
-      source = $app.dao().findRecordById("sessions", sourceId);
+      source = dao.findRecordById("sessions", sourceId);
     } catch (err) {
       if (isNotFoundError(err)) {
         source = null;
@@ -747,8 +759,8 @@ function sessionContext(c) {
         throwSessionValidationUnavailable(err);
       }
     }
-    if (!validateSuperAdminSession(source)) {
-      if (source && sessionIsExpired(source)) deleteSessionRecord(source);
+    if (!validateSuperAdminSession(source, dao)) {
+      if (source && sessionIsExpired(source)) deleteSessionRecord(source, dao);
       return reject();
     }
   } else if (sourceId) {
@@ -830,7 +842,7 @@ function hashSessionToken(token) {
  * @param {string} role
  * @param {string} ip
  * @param {string} userAgent
- * @param {{ personId?: string, isImpersonation?: boolean, impersonatorSessionId?: string, expectedPersonPinFingerprint?: string, managerAccountId?: string, expectedManagerAuthFingerprint?: string }} [opts]
+ * @param {{ personId?: string, isImpersonation?: boolean, impersonatorSessionId?: string, expectedPersonPinFingerprint?: string, managerAccountId?: string, expectedManagerAuthFingerprint?: string, expectedInvitationFingerprint?: string }} [opts]
  */
 function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
   const sessions = dao.findCollectionByNameOrId("sessions");
@@ -957,6 +969,24 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
     }
   }
 
+  // Recheck the invitation in the same transaction that creates the session.
+  // A rotation between credential comparison and minting cannot revive access.
+  const invitationFingerprint = (
+    options.expectedInvitationFingerprint || ""
+  ).toString();
+  if (
+    !options.isImpersonation &&
+    !managerAccount &&
+    role !== "super_admin" &&
+    (recordBool(dealer, "invitation_required") || invitationFingerprint)
+  ) {
+    if (
+      !/^[a-f0-9]{64}$/.test(invitationFingerprint) ||
+      invitationFingerprint !== dealer.getString("invitation_hash")
+    )
+      throw new Error("Dealership invitation changed during sign-in");
+  }
+
   const token = mintSessionToken();
   const tokenHash = hashSessionToken(token);
   const now = new Date();
@@ -975,6 +1005,7 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
     user_agent: (userAgent || "").slice(0, 512),
     is_impersonation: !!options.isImpersonation,
   };
+  if (invitationFingerprint) payload.invitation_fingerprint = invitationFingerprint;
   if (person) payload.person = person.id;
   if (person) payload.person_pin_fingerprint = personPinFingerprint(person);
   if (managerAccount) payload.manager_account = managerAccount.id;
@@ -994,7 +1025,11 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
 }
 
 function createSession(dealerId, role, ip, userAgent, opts) {
-  return createSessionWithDao($app.dao(), dealerId, role, ip, userAgent, opts);
+  let created;
+  $app.dao().runInTransaction(function (tx) {
+    created = createSessionWithDao(tx, dealerId, role, ip, userAgent, opts);
+  });
+  return created;
 }
 
 /**
@@ -1240,22 +1275,19 @@ function findActivePersonByPin(pin, dealerId) {
     pinHash = "";
   }
   try {
-    // Primary: peppered hash. While idx_salespeople_pin_hash is globally
-    // unique (the whole compatibility bridge), a dealer-scoped pre-query
-    // would always resolve to the same single row as this global one, so the
-    // dealerId hint is accepted but deliberately unused until the release
-    // that requires dealer context at login swaps the index to
-    // (dealer, pin_hash) and this lookup becomes scoped for real.
+    // Only a verified invitation supplies dealerId on the new sign-in path.
+    // Global uniqueness stays in place while older stores migrate.
+    const scope = dealerId ? " && dealer = {:dealer}" : "";
     if (pinHash) {
       const records = $app
         .dao()
         .findRecordsByFilter(
           "salespeople",
-          "pin_hash = {:hash} && active = true",
+          "pin_hash = {:hash} && active = true" + scope,
           "created",
           1,
           0,
-          { hash: pinHash },
+          { hash: pinHash, dealer: dealerId || "" },
         );
       if (!records || typeof records.length !== "number") {
         return { status: "unavailable", person: null };
@@ -1270,11 +1302,11 @@ function findActivePersonByPin(pin, dealerId) {
       .dao()
       .findRecordsByFilter(
         "salespeople",
-        "pin = {:pin} && active = true",
+        "pin = {:pin} && active = true" + scope,
         "created",
         1,
         0,
-        { pin: normalized },
+        { pin: normalized, dealer: dealerId || "" },
       );
     if (!legacy || typeof legacy.length !== "number") {
       return { status: "unavailable", person: null };
@@ -3993,6 +4025,8 @@ function serializeDealer(record) {
     id: record.id,
     name: record.getString("name"),
     is_system: recordBool(record, "is_system"),
+    invitation_required: recordBool(record, "invitation_required"),
+    has_invitation: !!record.getString("invitation_hash"),
     logo: logoUrl,
     brand_voice: record.getString("brand_voice"),
     banned_phrases: record.getString("banned_phrases"),

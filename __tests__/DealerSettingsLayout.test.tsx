@@ -1,4 +1,5 @@
 import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DealerAdminDashboard } from "../components/DealerAdminDashboard";
@@ -19,6 +20,12 @@ vi.mock("../services/database", async (importOriginal) => ({
 }));
 vi.mock("../services/websitePublishing", () => ({
   listWebsiteDestinations: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("../services/dealershipInvitations", () => ({
+  dealershipInvitation: vi
+    .fn()
+    .mockResolvedValue({ required: false, hasInvitation: false }),
+  dealershipInvitationLink: (token: string) => `https://example.test/join#${token}`,
 }));
 vi.mock("../services/salespeople", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../services/salespeople")>()),
@@ -78,10 +85,12 @@ const renderDashboard = (record: Dealer = dealer) => {
   const onSettingsDirtyChange = vi.fn();
   const onOpenPost = vi.fn();
   render(
-    <DealerAdminDashboard
-      onSettingsDirtyChange={onSettingsDirtyChange}
-      onOpenPost={onOpenPost}
-    />,
+    <QueryClientProvider client={new QueryClient()}>
+      <DealerAdminDashboard
+        onSettingsDirtyChange={onSettingsDirtyChange}
+        onOpenPost={onOpenPost}
+      />
+    </QueryClientProvider>,
   );
   return { onSettingsDirtyChange, onOpenPost };
 };

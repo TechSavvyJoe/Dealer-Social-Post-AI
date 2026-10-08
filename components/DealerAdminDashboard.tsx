@@ -1,3 +1,4 @@
+import { DealerInvitationPanel } from "./DealerInvitationPanel";
 import React, { useEffect, useRef, useState } from "react";
 import { Loader2, Pencil, Check, Copy } from "lucide-react";
 import { PersonEditModal } from "./PersonEditModal";
@@ -759,6 +760,8 @@ export const DealerTeamCard: React.FC = () => {
           intact.
         </p>
       </div>
+
+      {dealer?.id && <DealerInvitationPanel key={dealer.id} dealerId={dealer.id} />}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
         <div className="min-w-0 flex-1">

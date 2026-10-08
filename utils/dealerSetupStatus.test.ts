@@ -304,7 +304,7 @@ describe("Google Business Profile is optional", () => {
 });
 
 describe("sections and reasons", () => {
-  const expectedSections: Record<SetupRowId, SettingsSectionId | null> = {
+  const expectedSections: Partial<Record<SetupRowId, SettingsSectionId | null>> = {
     profile: "profile",
     brand: "creative",
     facebook: "channels",

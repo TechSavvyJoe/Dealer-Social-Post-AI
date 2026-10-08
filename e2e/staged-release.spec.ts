@@ -143,6 +143,10 @@ test.describe("Hosted staged release", () => {
       expect(rootResponse.ok()).toBe(true);
       const html = await rootResponse.text();
       const csp = rootResponse.headers()["content-security-policy"] || "";
+      const invitationResponse = await getSameOrigin("/join");
+      expect(invitationResponse.status()).toBe(200);
+      expect(invitationResponse.headers()["content-type"]).toContain("text/html");
+      expect(invitationResponse.headers()["content-security-policy"]).toBe(csp);
       for (const directive of [
         "default-src 'self'",
         "script-src 'self' 'sha256-o+4kI1r0Dv6RDMKm3/VtsLMcE6aR+PGeatWcEpd9/uw=' 'wasm-unsafe-eval' https://challenges.cloudflare.com",
@@ -411,6 +415,14 @@ test.describe("Hosted staged release", () => {
         expect(serviceWorker?.scope).toBe(new URL("/", page.url()).href);
         expect(serviceWorker?.scriptUrl).toBe(new URL("/sw.js", page.url()).href);
       }
+      await page.goto("/join#invalid");
+      await expect(
+        page.getByRole("heading", { name: "Your dealership invitation" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Set up this device" }),
+      ).toBeDisabled();
+      await expectNoHorizontalOverflow(page);
       await page.waitForTimeout(250);
       expect(unsafeRequests).toEqual([]);
     } finally {
