@@ -454,7 +454,10 @@ describe("usePostShare", () => {
   });
 
   it.each([
-    [true, "Caption copied. Paste it into your Facebook post, then tap Post there."],
+    [
+      true,
+      "Caption copied. Check your Facebook caption and paste only if missing, then tap Post there.",
+    ],
     [false, "Tap Copy caption, then paste it into your Facebook post."],
   ])(
     "says whether the caption reached the clipboard after a share (copied: %s)",
@@ -480,7 +483,7 @@ describe("usePostShare", () => {
       });
       expect(result.current.feedback).toEqual({
         title: "Caption copied",
-        detail: "Paste it into your Facebook post.",
+        detail: "Check your Facebook caption and paste only if missing.",
         via: "copy",
       });
     },
@@ -516,7 +519,7 @@ describe("usePostShare", () => {
     });
     expect(result.current.feedback).toEqual({
       title: "Caption copied",
-      detail: "Paste it into Facebook with the image.",
+      detail: "Add the image in Facebook; paste the caption only if missing.",
       via: "copy",
     });
     expect(result.current.fallbackActive).toBe(true);
@@ -541,7 +544,7 @@ describe("usePostShare", () => {
     });
     expect(result.current.feedback).toEqual({
       title: "Caption copied",
-      detail: "Paste it into Instagram with the image.",
+      detail: "Add the image in Instagram; paste the caption only if missing.",
       via: "copy",
     });
   });
@@ -633,7 +636,9 @@ describe("usePostShare", () => {
     await act(async () => {
       await result.current.copyCaption();
     });
-    expect(result.current.feedback?.detail).toBe("Paste it into your Facebook post.");
+    expect(result.current.feedback?.detail).toBe(
+      "Check your Facebook caption and paste only if missing.",
+    );
 
     // A share to another channel says nothing about this one.
     const elsewhere: GeneratedPost = {
@@ -654,7 +659,7 @@ describe("usePostShare", () => {
       await other.result.current.copyCaption();
     });
     expect(other.result.current.feedback?.detail).toBe(
-      "Paste it into Facebook with the image.",
+      "Add the image in Facebook; paste the caption only if missing.",
     );
   });
 
@@ -677,7 +682,7 @@ describe("usePostShare", () => {
     });
     expect(result.current.feedback).toEqual({
       title: "Caption copied",
-      detail: "Paste it into Facebook with the image.",
+      detail: "Add the image in Facebook; paste the caption only if missing.",
       via: "copy",
     });
   });

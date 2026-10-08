@@ -1504,7 +1504,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
             </h1>
             <p className="mt-2 max-w-sm text-sm leading-6 text-ink-2">
               {isDesktopLayout
-                ? `Pick where it's going, download the ${mediaNoun} and copy the caption, then post it in ${selectedChannel.label}.`
+                ? `Download saves the ${mediaNoun} and copies your caption. Open ${selectedChannel.label} to finish your post.`
                 : `Pick where it's going, then share it to ${selectedChannel.label}.`}
             </p>
           </header>

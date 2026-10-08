@@ -731,7 +731,7 @@ describe("PostScreen", () => {
       feedback: {
         title: "Shared · Facebook",
         detail:
-          "Caption copied. Paste it into your Facebook post, then tap Post there.",
+          "Caption copied. Check your Facebook caption and paste only if missing, then tap Post there.",
         via: "share_sheet",
       },
     };

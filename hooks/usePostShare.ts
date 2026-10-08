@@ -295,7 +295,7 @@ export const usePostShare = ({
           // Facebook drops shared text, so the caption only arrives if the
           // clipboard has it. Say which, and how to get it if it does not.
           detail: result.captionCopied
-            ? `Caption copied. Paste it into your ${channelLabel} post, then tap Post there.`
+            ? `Caption copied. Check your ${channelLabel} caption and paste only if missing, then tap Post there.`
             : `Tap Copy caption, then paste it into your ${channelLabel} post.`,
           via: "share_sheet",
         });
@@ -356,8 +356,8 @@ export const usePostShare = ({
         title: "Caption copied",
         detail:
           sharedViaSheetRef.current || mediaAlreadyInPost
-            ? `Paste it into your ${channelLabel} post.`
-            : `Paste it into ${channelLabel} with the ${mediaNoun}.`,
+            ? `Check your ${channelLabel} caption and paste only if missing.`
+            : `Add the ${mediaNoun} in ${channelLabel}; paste the caption only if missing.`,
         via: "copy",
       });
       void record("copy");
@@ -428,7 +428,7 @@ export const usePostShare = ({
         : "File not downloaded",
       detail: downloaded
         ? copied
-          ? `Caption copied. Open ${channelLabel}, add the ${mediaNoun}, then paste the caption and post.`
+          ? `Caption copied. Open ${channelLabel}, add the ${mediaNoun}, and check the caption. Paste only if missing, then post.`
           : "Tap Copy caption again, or select the full caption below and copy it manually."
         : "Try saving the file again. Your post is still here.",
       via: downloaded ? "download" : "copy",
@@ -492,7 +492,7 @@ export const usePostShare = ({
     setFeedback({
       title:
         saved.method === "photos-share" ? "Save to Photos opened" : "File downloaded",
-      detail: `${copied ? "Caption copied. " : ""}${saveInstruction}${copied ? " Paste the caption before posting." : " Tap Copy caption before posting."}`,
+      detail: `${copied ? "Caption copied. " : ""}${saveInstruction}${copied ? " Paste the caption only if missing." : " Tap Copy caption before posting."}`,
       via: "copy",
       manualCopy: !copied,
       fallback: !copied,
