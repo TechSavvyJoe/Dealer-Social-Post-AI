@@ -27,8 +27,10 @@ if (/x-dealer-proxy-secret['"]?\s*:\s*['"][^$]/i.test(source)) {
 const { config, contentSecurityPolicy } = await import(
   new URL("../vercel.ts", import.meta.url)
 );
-if (!Array.isArray(config.routes) || config.routes.length !== 5) {
-  throw new Error("Vercel config must compile the proxy and four header routes.");
+if (!Array.isArray(config.routes) || config.routes.length !== 6) {
+  throw new Error(
+    "Vercel config must compile the proxy, invitation shell, and four header routes.",
+  );
 }
 if ("rewrites" in config || "headers" in config || "redirects" in config) {
   throw new Error(
@@ -149,6 +151,16 @@ for (const route of [assetRoute, identityRoute, workerRoute, securityRoute]) {
     throw new Error(
       "Static response headers must use native continuing route headers, not transforms.",
     );
+  }
+}
+
+const invitationRoute = headerRule("^/join$");
+if (invitationRoute?.dest !== "/index.html" || invitationRoute?.continue) {
+  throw new Error("Private invitation direct navigation must serve the app shell.");
+}
+for (const [key, value] of requiredSecurityHeaders) {
+  if (headerMap(invitationRoute).get(key) !== value) {
+    throw new Error(`Invitation shell security header is missing: ${key}`);
   }
 }
 

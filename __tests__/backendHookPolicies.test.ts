@@ -1772,7 +1772,7 @@ describe("PocketBase authentication and people migration wiring", () => {
     const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
 
     expect(helpersSource).toContain("admin_secret_fingerprint");
-    expect(helpersSource).toContain("validateSuperAdminSession(source)");
+    expect(helpersSource).toContain("validateSuperAdminSession(source, dao)");
     expect(helpersSource).toContain(
       'personRoleToSessionRole(person.getString("role"))',
     );

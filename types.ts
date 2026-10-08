@@ -317,6 +317,9 @@ export interface TemplateOption {
 
 // New types for the database and user authentication
 export interface Dealer {
+  /** Non-secret invitation setup status; absent on older backends. */
+  invitation_required?: boolean;
+  has_invitation?: boolean;
   id: string; // unique identifier
   name: string;
   logo?: string; // base64 data URL

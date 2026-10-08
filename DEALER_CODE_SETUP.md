@@ -8,8 +8,8 @@ substitute one for the other:
   `ADMIN_LOGIN_USERNAME` and `ADMIN_LOGIN_PASSWORD` deployment secrets.
 - Dealership managers sign in with a dealer-scoped username and an exact
   8–128 character password configured by the system administrator.
-- Salespeople sign in with personal, unique four-digit PINs. Manager PINs
-  remain available as a temporary compatibility fallback.
+- Personal-code sign-in uses a private dealership invitation plus a unique
+  four-digit PIN. Manager password sign-in remains available for recovery.
 
 Treat each credential as sensitive. Distribute credentials out of band and never place
 real values in source control, screenshots, logs, support tickets, or release
@@ -34,6 +34,42 @@ evidence.
   required for login and must not be enabled.
 - New schema changes are forward-only migrations in `pb_migrations/`; do not
   mutate production schemas with one-off scripts.
+
+## Set up private dealership invitations
+
+New dealerships require an invitation before any personal code can sign in.
+Existing dealerships keep their current access until the manager distributes a
+link and explicitly activates the requirement.
+
+1. In the system-admin **Dealers** setup board, expand the store and open
+   **Private dealership access**. A manager finds the same panel under **Team**.
+2. Choose **Create private invitation**. Copy the one-time link and distribute it
+   privately to the team. The normal dealer list never reveals it again.
+3. Each person opens the link on their own device, chooses **Set up this device**,
+   then signs in with their personal code. Repeat on each device/browser. Installed
+   iPhone web apps may have separate browser storage; open the invitation there too.
+4. For an existing store, only after distribution choose **Require invitation for
+   sign-in**. Uninvited personal-code sessions end. The manager performing the
+   action stays signed in; manager passwords and authorized admin impersonation
+   remain available for recovery.
+5. Use **Replace private invitation** if a link is lost or exposed. Previous links,
+   invited devices and personal-code sessions become invalid, except the manager
+   performing the replacement. Distribute the new link. Deactivate a departing
+   person separately to revoke that individual's access.
+
+The link puts its 256-bit random token in `/join#<token>`, never a query parameter.
+Explicit redemption removes it from the address and stores an HttpOnly, Secure,
+SameSite=Strict cookie for 90 days at `/api`. SQLite stores only a domain-separated
+SHA-256 verifier. The invitation selects a dealership; the personal code selects
+the individual. Invitation/session checks and manager mutations fail closed, and
+rotation is rechecked during session creation. No invitation is sent automatically.
+After any store enables invitations, rollback must retain these invitation-aware
+backend hooks. A pre-invitation application image would ignore this policy; roll
+forward or use an invitation-aware rollback image instead. The additive schema
+is deliberately not removed by a down migration.
+
+A manager who loses both device access and the link uses their password or contacts
+the system administrator for a replacement.
 
 ## Create or rotate a personal PIN
 

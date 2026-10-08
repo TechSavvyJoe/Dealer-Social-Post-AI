@@ -1625,13 +1625,6 @@ routerAdd("POST", "/api/app/session", (c) => {
       body.dealerCode === undefined || body.dealerCode === null
         ? ""
         : body.dealerCode.toString();
-    // Optional store hint remembered by the device after a prior login. It only
-    // scopes the personal-code lookup — the PIN itself remains the credential.
-    const rememberedDealerId = /^[a-z0-9]{15}$/.test(
-      (body.dealerId || "").toString().trim(),
-    )
-      ? (body.dealerId || "").toString().trim()
-      : "";
     const managerUsername = helpers.normalizeManagerUsername(body.username);
     // Passwords are exact credentials. Never trim, normalize, case-fold, log,
     // or persist the submitted value outside PocketBase's password verifier.
@@ -1741,6 +1734,7 @@ routerAdd("POST", "/api/app/session", (c) => {
     let record;
     let personRecord = null;
     let verifiedPersonPinFingerprint = "";
+    let verifiedInvitationFingerprint = "";
     let managerAccount = null;
     let verifiedManagerAuthFingerprint = "";
     let adminAccount = null;
@@ -1855,8 +1849,14 @@ routerAdd("POST", "/api/app/session", (c) => {
     } else {
       // Personal 4-digit codes on the people roster (managers + salespeople).
       // Shared dealer/admin codes are no longer accepted for store login.
+      const invitedDealer = require(__hooks + "/dealershipInvitations.js").deviceDealer(
+        c,
+      );
       const pinLookup = helpers.isValidPersonPin(dealerCode)
-        ? helpers.findActivePersonByPin(dealerCode, rememberedDealerId)
+        ? helpers.findActivePersonByPin(
+            dealerCode,
+            invitedDealer ? invitedDealer.id : "",
+          )
         : { status: "not_found", person: null };
       if (pinLookup.status === "unavailable") {
         cancelReservedAttempt();
@@ -1870,6 +1870,14 @@ routerAdd("POST", "/api/app/session", (c) => {
           record = $app
             .dao()
             .findRecordById("dealers", personRecord.getString("dealer"));
+          if (invitedDealer && invitedDealer.id === record.id) {
+            verifiedInvitationFingerprint = invitedDealer.getString("invitation_hash");
+          } else if (record.getBool("invitation_required")) {
+            return rejectInvalidCredential(
+              "credential not recognized",
+              credentialPresent,
+            );
+          }
         } catch (_e) {
           cancelReservedAttempt();
           return unavailableResponse();
@@ -1895,6 +1903,8 @@ routerAdd("POST", "/api/app/session", (c) => {
     let sessionId = "";
     try {
       const sessionOpts = {};
+      if (verifiedInvitationFingerprint)
+        sessionOpts.expectedInvitationFingerprint = verifiedInvitationFingerprint;
       if (personRecord) {
         sessionOpts.personId = personRecord.id;
         sessionOpts.expectedPersonPinFingerprint = verifiedPersonPinFingerprint;
@@ -5752,6 +5762,7 @@ routerAdd("POST", "/api/app/dealers", (c) => {
     // Super-admin creates stores by name/brand only. Personal access codes live
     // on the people roster (managers / users), not on the dealer record.
     const data = helpers.dealerMutationData(body, false, false);
+    data.invitation_required = true;
     if (!data.name) return c.json(400, { error: "Dealer name is required" });
 
     const record = new Record(dealers);

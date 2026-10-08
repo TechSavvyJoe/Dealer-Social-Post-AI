@@ -90,6 +90,9 @@ export const config: VercelConfig = {
   // response-header transforms do not reliably apply to static Vite files.
   routes: [
     apiProxyRoute,
+    // Private invitation links use a real navigation path so leaving unsaved
+    // work still triggers beforeunload. Serve the app shell on direct opens.
+    { src: "^/join$", dest: "/index.html", headers: securityHeaderRecord },
     continuingHeaderRoute("^/assets/(.*)$", [
       {
         key: "Cache-Control",

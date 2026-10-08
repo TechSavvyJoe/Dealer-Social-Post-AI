@@ -62,8 +62,10 @@ SchemaField(...))` to add, and `collection.schema.removeField(field.id)` — the
   `ADMIN_LOGIN_PASSWORD` credentials → multi-dealer
   hub (`AdminDashboard`) with tabs **Dealers | Admins | Users**. Use **Open as** to
   impersonate any manager or salesperson.
-- Store access uses **personal 4-digit codes** on the people roster (`salespeople`
+- New store access requires a **private dealership invitation** from the setup
+  board or manager Team panel, then a **personal 4-digit code** on the people roster (`salespeople`
   collection with `role` = `manager` | `salesperson`), not shared dealer codes.
   Create people from the hub (or Team tab for salespeople only as a manager).
 - Example seed (after migrations): create a dealer via the hub UI, then add a manager
-  and a salesperson with unique 4-digit pins. Login with those pins on **Personal code**.
+  and a salesperson with unique 4-digit pins. Issue/open the private invitation,
+  then log in with those pins on **Personal code**.
