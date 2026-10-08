@@ -130,8 +130,10 @@ this gate. All three conditions must hold:
 2. Production health's `revisionCompatibility.ready` is true. Both legacy
    draft saves and share receipts persist an observation before being accepted.
    Seven full days must pass without either route receiving a missing revision.
-   Every server restart resets this conservative window, including deployments,
-   restores and rollbacks: time on an uninstrumented backend never counts.
+   Routine restarts preserve it, including nightly backup-secret refreshes. Each
+   deliberate deploy rotates `REVISION_OBSERVATION_EPOCH`; recovery/rollback must
+   also rotate that external value before starting traffic. A changed epoch or
+   release resets coverage, so restored database state cannot authorize stage C.
 3. The stage C change is the only change in its `main` commit and merges after
    stage B's whole pipeline has finished.
 
@@ -318,6 +320,16 @@ Monitor health, recent redacted client-error aggregates, generation fallback rat
   ```
 
   Boot that scrubbed copy only with the current `ADMIN_LOGIN_USERNAME` / `ADMIN_LOGIN_PASSWORD` supplied from Fly secrets, rerun the exact-case and prior-session rejection proofs, then take and verify a new sanitized archive before switching the production volume. Never restore a rotated credential or a pre-hardening session row.
+
+Before booting a restored production volume, stage a fresh observation epoch:
+
+```bash
+flyctl secrets set --stage --app dealer-social-post-ai-production \
+  REVISION_OBSERVATION_EPOCH="recovery-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+Apply it during the recovery deploy. Never reuse the pre-recovery epoch. Confirm
+`revisionCompatibility.ready` is false and `observedSince` is the recovery time.
 
 Record the authentication-hardening minimum SHA, Fly release/image digest, compatible Vercel deployment URL, immutable backup object manifest, restore-drill run, canary results, cutover evidence, and rollback targets together. A local backup canary proves tooling; only the source-bound off-box workflow proves production recovery.
 

@@ -14,7 +14,7 @@ export function summarizeObservation(health, observedAt = new Date().toISOString
   const clear = Date.parse(state?.clearSince);
   const eligible = Date.parse(state?.eligibleAfter);
   if (
-    state?.coverage !== "continuous-since-server-start" ||
+    state?.coverage !== "durable-deployment-window" ||
     ![now, started, clear, eligible].every(Number.isFinite) ||
     started > clear ||
     clear > now ||

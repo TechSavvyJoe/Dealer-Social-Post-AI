@@ -14,7 +14,7 @@ const health = {
   ok: true,
   releaseSha: "a".repeat(40),
   revisionCompatibility: {
-    coverage: "continuous-since-server-start",
+    coverage: "durable-deployment-window",
     observedSince: date(now - 8 * DAY),
     clearSince: date(now - 7 * DAY),
     eligibleAfter: date(now),
@@ -56,16 +56,16 @@ describe("durable revision observation", () => {
       summarizeObservation({ ...health, releaseSha: "unknown" }, date(now)),
     ).toThrow();
   });
-  it("persists both legacy paths, resets on restart, and supports migration rollback", () => {
+  it("persists both legacy paths, preserves routine restarts and resets on deployment, and supports migration rollback", () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     const sqlite = new DatabaseSync(":memory:");
     const db = {
       newQuery(sql: string) {
-        let params: Record<string, number> = {};
+        let params: Record<string, number | string> = {};
         const statement = () => sqlite.prepare(sql.replace(/\{:(\w+)\}/g, ":$1"));
         return {
-          bind(values: Record<string, number>) {
+          bind(values: Record<string, number | string>) {
             params = values;
             return this;
           },
@@ -90,6 +90,7 @@ describe("durable revision observation", () => {
       down = backward;
     });
     up(db);
+    let epoch = "deployment-one";
     const module = {
       exports: {} as {
         beginWindow(): void;
@@ -99,12 +100,14 @@ describe("durable revision observation", () => {
     };
     new Function(
       "$app",
+      "$os",
       "DynamicModel",
       "module",
       "exports",
       readFileSync("pb_hooks/revisionCompatibility.js", "utf8"),
     )(
       { dao: () => ({ db: () => db }) },
+      { getenv: (name: string) => (name === "RELEASE_SHA" ? "a".repeat(40) : epoch) },
       function (this: object, values: object) {
         Object.assign(this, values);
       },
@@ -132,6 +135,10 @@ describe("durable revision observation", () => {
     ).toEqual({ draft_requests: 1, share_requests: 2 });
     vi.setSystemTime(now + 14 * DAY);
     expect(observer.snapshot().ready).toBe(true);
+    observer.beginWindow();
+    expect(observer.snapshot().ready).toBe(true);
+    epoch = "deployment-two";
+    expect(() => observer.snapshot()).toThrow();
     observer.beginWindow();
     expect(observer.snapshot()).toMatchObject({
       ready: false,
