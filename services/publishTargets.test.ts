@@ -30,11 +30,40 @@ afterEach(() => {
     if (descriptor) Object.defineProperty(navigator, key, descriptor);
     else Reflect.deleteProperty(navigator, key);
   }
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("publishTargets handoff strategy", () => {
+  it("distinguishes a pending OS handoff from a completed share", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: () => new Promise<void>(() => {}),
+    });
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: () => true,
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.resolve() },
+    });
+    const pending = sharePrepared({
+      target: PUBLISH_TARGETS[0],
+      content: { text: "Ready" },
+      caption: "Ready",
+      file: new File(["image"], "post.jpg", { type: "image/jpeg" }),
+      webUrl: null,
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(pending).resolves.toMatchObject({
+      kind: "started",
+      captionCopied: true,
+    });
+  });
+
   it("starts copying before share consumes activation without waiting for the clipboard", async () => {
     let activated = true;
     const calls: string[] = [];

@@ -48,6 +48,7 @@ export type PublishStatus =
       message: string;
       pasteRequired: boolean;
     }
+  | { kind: "started"; captionCopied: boolean; message: string }
   | { kind: "cancelled"; pasteRequired: boolean; message?: string }
   | { kind: "error"; message: string };
 
@@ -701,6 +702,13 @@ export const sharePrepared = async (
       };
     }
     const copied = await clipboardPromise;
+    if (attempt.kind === "started") {
+      return {
+        kind: "started",
+        captionCopied: copied,
+        message: "The share sheet opened, but the handoff is not confirmed.",
+      };
+    }
     return {
       kind: "shared",
       via: "web-share",

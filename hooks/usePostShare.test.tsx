@@ -221,6 +221,52 @@ describe("usePostShare", () => {
     ]);
   });
 
+  it("does not turn a timed-out social sheet into a completed delivery", async () => {
+    mocks.sharePrepared.mockResolvedValue({
+      kind: "started",
+      captionCopied: true,
+      message: "Handoff not confirmed",
+    });
+    const delivered = vi.fn();
+    const { result } = renderHook(() =>
+      usePostShare({ ...options(), onMediaDelivered: delivered }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      await result.current.share();
+    });
+    expect(delivered).not.toHaveBeenCalled();
+    expect(mocks.recordPostShared).not.toHaveBeenCalled();
+    expect(result.current.feedback).toMatchObject({
+      title: "Share sheet opened",
+      via: "copy",
+    });
+  });
+
+  it("keeps an unconfirmed Photos handoff at risk without recording a delivery", async () => {
+    mocks.savePreparedMediaToLibrary.mockResolvedValue({
+      method: "photos-share-pending",
+      kind: "video",
+    });
+    const delivered = vi.fn();
+    const { result } = renderHook(() =>
+      usePostShare({ ...options(), onMediaDelivered: delivered }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await act(async () => {
+      expect(await result.current.saveToPhotos()).toBe(false);
+    });
+    expect(delivered).not.toHaveBeenCalled();
+    expect(result.current.feedback?.title).toBe("Save not confirmed");
+    expect(
+      mocks.recordPostShared.mock.calls.every((call) => call[1].via === "copy"),
+    ).toBe(true);
+  });
+
   it("keeps the media at risk when the Photos save is cancelled", async () => {
     mocks.savePreparedMediaToLibrary.mockResolvedValue({
       method: "cancelled",

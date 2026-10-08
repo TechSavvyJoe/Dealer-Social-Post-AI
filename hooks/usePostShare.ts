@@ -301,6 +301,12 @@ export const usePostShare = ({
         });
         onMediaDelivered?.(content);
         void record("share_sheet");
+      } else if (result.kind === "started") {
+        setFeedback({
+          title: "Share sheet opened",
+          detail: `${result.captionCopied ? "Caption copied. " : ""}The handoff is not confirmed. Keep this screen open until your ${mediaNoun} is saved or shared.`,
+          via: "copy",
+        });
       } else if (result.kind === "fallback") {
         setFallbackActive(true);
         setFeedback({
@@ -478,6 +484,15 @@ export const usePostShare = ({
         detail: saved.message,
         via: "copy",
         fallback: true,
+      });
+      return false;
+    }
+    if (saved.method === "photos-share-pending") {
+      setFeedback({
+        title: "Save not confirmed",
+        detail: `${copied ? "Caption copied. " : ""}The save sheet opened, but saving is not confirmed. Keep this screen open until your ${mediaNoun} is saved.`,
+        via: "copy",
+        manualCopy: !copied,
       });
       return false;
     }
