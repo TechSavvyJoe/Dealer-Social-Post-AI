@@ -13,6 +13,7 @@
 # Dependencies and generated artifacts
 node_modules/
 dist/
+public/vehicle-spin-v1/
 coverage/
 playwright-report/
 test-results/
@@ -22,7 +23,8 @@ deploy_output.txt
 # Tests and local-only tooling (not used by the production image build)
 __tests__/
 e2e/
-scripts/
+scripts/*
+!scripts/prepare-vehicle-spin.mjs
 vitest.config.ts
 vitest.setup.ts
 playwright.config.ts
