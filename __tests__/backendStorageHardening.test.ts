@@ -82,30 +82,30 @@ describe("PocketBase sensitive-storage hardening", () => {
         savedData = data;
       }
     };
-    runtime.$app = {
-      dao: () => ({
-        findCollectionByNameOrId: () => ({ id: "sessions" }),
-        findRecordById: (collection: string) =>
-          collection === "dealers"
-            ? {
-                id: "dealer-id",
-                getBool: () => false,
-              }
-            : {
-                id: "person-id",
-                getBool: (field: string) => field === "active",
-                getString: (field: string) =>
-                  field === "dealer"
-                    ? "dealer-id"
-                    : field === "role"
-                      ? "salesperson"
-                      : field === "pin"
-                        ? "1234"
-                        : "",
-              },
-        saveRecord: () => undefined,
-      }),
+    const dao = {
+      findCollectionByNameOrId: () => ({ id: "sessions" }),
+      findRecordById: (collection: string) =>
+        collection === "dealers"
+          ? {
+              id: "dealer-id",
+              getBool: () => false,
+            }
+          : {
+              id: "person-id",
+              getBool: (field: string) => field === "active",
+              getString: (field: string) =>
+                field === "dealer"
+                  ? "dealer-id"
+                  : field === "role"
+                    ? "salesperson"
+                    : field === "pin"
+                      ? "1234"
+                      : "",
+            },
+      saveRecord: () => undefined,
+      runInTransaction: (callback: (tx: unknown) => void) => callback(dao),
     };
+    runtime.$app = { dao: () => dao };
 
     const created = helpers.createSession(
       "dealer-id",

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Logo } from "./Logo";
 import { Button } from "./ui/Button";
+import { toUiMessage } from "../utils/errorMessages";
 import {
   acceptDealershipInvitation,
   type InvitedDealer,
@@ -25,11 +26,7 @@ export function DealershipInvitation({ token }: { token: string }) {
       setDealer(result);
     } catch (reason) {
       if (controller.signal.aborted) return;
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "The invitation could not be opened.",
-      );
+      setError(toUiMessage(reason, "The invitation could not be opened."));
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }

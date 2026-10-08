@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "./ui/Button";
+import { toUiMessage } from "../utils/errorMessages";
 import {
   dealershipInvitation,
   dealershipInvitationLink,
@@ -27,7 +28,7 @@ export function DealerInvitationPanel({ dealerId }: { dealerId: string }) {
       .then(setStatus)
       .catch((reason) => {
         if (!controller.signal.aborted)
-          setError(reason.message || "Access settings are unavailable.");
+          setError(toUiMessage(reason, "Access settings are unavailable."));
       });
     return () => {
       controller.abort();
@@ -54,9 +55,7 @@ export function DealerInvitationPanel({ dealerId }: { dealerId: string }) {
       );
     } catch (reason) {
       if (controller.signal.aborted) return;
-      setError(
-        reason instanceof Error ? reason.message : "Access could not be updated.",
-      );
+      setError(toUiMessage(reason, "Access could not be updated."));
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }

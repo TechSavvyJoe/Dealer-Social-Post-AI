@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DealerTeamCard } from "../components/DealerAdminDashboard";
@@ -19,6 +20,13 @@ const serviceMocks = vi.hoisted(() => ({
 vi.mock("../services/salespeople", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../services/salespeople")>()),
   ...serviceMocks,
+}));
+
+vi.mock("../services/dealershipInvitations", () => ({
+  dealershipInvitation: vi
+    .fn()
+    .mockResolvedValue({ required: false, hasInvitation: false }),
+  dealershipInvitationLink: (token: string) => `https://example.test/join#${token}`,
 }));
 
 const person: Person = {
@@ -167,7 +175,11 @@ describe("secure credential handoff", () => {
       pinNeedsDistribution: false,
     });
 
-    render(<DealerTeamCard />);
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <DealerTeamCard />
+      </QueryClientProvider>,
+    );
     expect(await screen.findByText("Code to share")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("e.g. Sarah Chen"), {
