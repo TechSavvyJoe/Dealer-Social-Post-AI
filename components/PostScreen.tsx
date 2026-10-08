@@ -286,6 +286,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     dealerId,
     motion: defaults.motion,
     onGenerateVideo,
+    previewMode: "generated",
   });
 
   const website = useWebsiteHandoff({
@@ -452,6 +453,9 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   ) || { id: selectedChannelId, label: "Facebook" };
 
   useEffect(() => {
+    // A house clip is a valid generated asset even when the optional exact
+    // delivery profile calls for a different duration, resolution or aspect.
+    if (video.manualVideoSelected && video.videoUrl) return;
     preparedDelivery.selectDelivery(selectedChannelId, deliveryKind);
     // selectDelivery is intentionally keyed by destination/media. The hook's
     // function identity follows its live plan and must not restart this effect.
@@ -459,6 +463,8 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   }, [
     selectedChannelId,
     deliveryKind,
+    video.manualVideoSelected,
+    video.videoUrl,
     availableChannels.map((channel) => channel.id).join(","),
   ]);
 
@@ -516,10 +522,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
         selectedCaption?.disclosures || captionSetAnalysis.disclosures || undefined,
       requiredPrefix: employeeDisclosure || undefined,
       imageDataUrl: post.image,
-      videoUrl:
-        preparedDelivery.selectedDelivery?.mediaKind === "video"
-          ? video.videoUrl || undefined
-          : undefined,
+      videoUrl: video.videoUrl || undefined,
       preparedFile: preparedDelivery.activePreparedSave?.file,
     }),
     [
@@ -623,10 +626,13 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   const selectChannel = useCallback(
     (channel: { id: string }) => {
       if (!isPlatformDestinationId(channel.id)) return;
-      if (preparedDelivery.selectDelivery(channel.id, deliveryKind))
+      if (
+        (video.manualVideoSelected && video.videoUrl) ||
+        preparedDelivery.selectDelivery(channel.id, deliveryKind)
+      )
         setSelectedChannelId(channel.id);
     },
-    [preparedDelivery, deliveryKind],
+    [preparedDelivery, deliveryKind, video.manualVideoSelected, video.videoUrl],
   );
 
   const sendWebsite = useCallback(
@@ -696,8 +702,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   const isSaved = Boolean(post.postId);
   const approvalPending =
     approval.reviewRequired && approval.approvalStatus === "pending";
-  const mediaNoun =
-    preparedDelivery.selectedDelivery?.mediaKind === "video" ? "video" : "image";
+  const mediaNoun = deliveryKind === "video" ? "video" : "image";
 
   const missingRevisionReason =
     post.postId && !expectedPostRevision

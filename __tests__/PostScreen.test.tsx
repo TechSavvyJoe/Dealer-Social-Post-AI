@@ -83,7 +83,11 @@ const mocks = vi.hoisted(() => ({
     busy?: boolean;
     tryAnotherUsed?: boolean;
   },
-  videoState: {} as { isVideoLoading?: boolean },
+  videoState: {} as {
+    isVideoLoading?: boolean;
+    videoUrl?: string;
+    manualVideoSelected?: boolean;
+  },
   defaultsOverrides: {} as Record<string, unknown>,
 }));
 
@@ -195,9 +199,9 @@ vi.mock("../hooks/useWebsiteHandoff", () => ({
 vi.mock("../hooks/useVideoJobs", () => ({
   useVideoJobs: () => ({
     videoJobs: [],
-    videoUrl: null,
+    videoUrl: mocks.videoState.videoUrl || null,
     adoptVideoUrl: vi.fn(),
-    manualVideoSelected: false,
+    manualVideoSelected: mocks.videoState.manualVideoSelected || false,
     setManualVideoSelected: vi.fn(),
     isVideoLoading: mocks.videoState.isVideoLoading ?? false,
     videoLoadingMessage: "",
@@ -227,7 +231,7 @@ vi.mock("../hooks/usePreparedDelivery", () => ({
   usePreparedDelivery: ({ post }: { post: GeneratedPost }) => ({
     deliveryPlan: derivePlatformDeliveryPlan(
       post.platformIds ?? ["instagram_feed"],
-      "photo",
+      mocks.videoState.videoUrl ? "both" : "photo",
       "test",
     ),
     websiteOnly: mocks.preparedState.websiteOnly ?? false,
@@ -819,6 +823,24 @@ describe("PostScreen", () => {
     await user.click(within(banner).getByRole("button", { name: "Dismiss" }));
     expect(useAppStore.getState().error).toBeNull();
     expect(mocks.retryPreparation).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generated video preview and caption when changing destinations", async () => {
+    mocks.videoState = { videoUrl: "blob:house-video", manualVideoSelected: true };
+    renderScreen();
+    expect(screen.getByLabelText("Post video")).toHaveAttribute(
+      "src",
+      "blob:house-video",
+    );
+    expect(mocks.selectDelivery).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Instagram" }));
+    expect(mocks.selectDelivery).not.toHaveBeenCalled();
+    expect(mocks.usePostShare).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        channelId: "instagram_feed",
+        content: expect.objectContaining({ videoUrl: "blob:house-video" }),
+      }),
+    );
   });
 
   it("does not count a running video as a busy render for leaving", () => {

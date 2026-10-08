@@ -127,6 +127,11 @@ export const usePreparedDelivery = ({
     selectedDelivery?.mediaKind === "video"
       ? videoJobForDelivery(selectedDelivery)
       : undefined;
+  const generatedVideoJob = videoJobs.find(
+    (candidate) =>
+      candidate.url === videoUrl &&
+      candidate.sourceCreativeKey === currentVideoCreativeKey,
+  );
   const preparationKeyForDelivery = useCallback(
     (delivery: PlannedPlatformDelivery) => {
       const job =
@@ -136,7 +141,7 @@ export const usePreparedDelivery = ({
     [videoJobForDelivery],
   );
   const selectedPreparationKey = manualVideoSelected
-    ? `manual-video:${videoUrl || "pending"}`
+    ? `manual-video:${currentVideoCreativeKey}:${videoUrl || "pending"}`
     : selectedDelivery
       ? preparationKeyForDelivery(selectedDelivery)
       : `primary:${resultIdentity}`;
@@ -243,6 +248,26 @@ export const usePreparedDelivery = ({
           durationSeconds: selectedDelivery.profile.preparation.durationSeconds,
         });
       }
+      if (isVideo && manualVideoSelected) {
+        const job = generatedVideoJob;
+        if (
+          !job ||
+          job.status !== "completed" ||
+          !["9:16", "16:9"].includes(job.aspectPreference)
+        ) {
+          throw new Error("Select a finished video for the current image.");
+        }
+        const shortEdge = job.resolution === "1080p" ? 1080 : 720;
+        const longEdge = job.resolution === "1080p" ? 1920 : 1280;
+        const portrait = job.aspectPreference === "9:16";
+        // Validate the clip's actual generation contract, not the optional
+        // eight-second 1080p delivery preset. Never substitute the still.
+        await validateVideoMetadata(sourceUrl, {
+          width: portrait ? shortEdge : longEdge,
+          height: portrait ? longEdge : shortEdge,
+          durationSeconds: job.duration,
+        });
+      }
       const basename = isVideo
         ? (!manualVideoSelected && selectedDelivery?.mediaKind === "video"
             ? selectedDelivery.filename.replace(/\.[^.]+$/, "")
@@ -283,8 +308,15 @@ export const usePreparedDelivery = ({
     mediaPreparationNonce,
     selectedDelivery,
     selectedPreparationKey,
-    selectedVideoJob,
+    selectedVideoJob?.status,
+    selectedVideoJob?.url,
     videoUrl,
+    generatedVideoJob?.status,
+    generatedVideoJob?.url,
+    generatedVideoJob?.duration,
+    generatedVideoJob?.resolution,
+    generatedVideoJob?.aspectPreference,
+    currentVideoCreativeKey,
   ]);
 
   useEffect(() => {
