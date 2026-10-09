@@ -2606,6 +2606,12 @@ routerAdd("POST", "/api/app/posts", (c) => {
           creativeMime = String(header.header.get("Content-Type") || "").toLowerCase();
         }
       } catch (_e) {}
+      if (
+        creativeFile &&
+        Number(creativeFile.size) >
+          require(__hooks + "/mediaStorage.js").MEDIA_BYTES.creative
+      )
+        return respond(413, { error: "Choose a post image under 8 MB." });
       const payloadDigest = operationId
         ? operations.fingerprint(body, creativeFile, creativeMime)
         : "";
@@ -3457,7 +3463,8 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
       form.setDao(txDao);
       form.loadData(draftData);
       if (creativeFile) {
-        require(__hooks + "/mediaStorage.js").ensureStorageRoom(8 * 1024 * 1024);
+        const storage = require(__hooks + "/mediaStorage.js");
+        storage.ensureStorageRoom(storage.MEDIA_BYTES.creative);
         form.addFiles("creative_image", creativeFile);
       }
       form.submit();

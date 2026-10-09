@@ -173,6 +173,9 @@ describe("PostDetails", () => {
     const onGenerate = vi.fn().mockResolvedValue(undefined);
     useAppStore.setState({ pendingRelease });
     renderDetails({ onGenerate });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Create post" })).toBeEnabled(),
@@ -415,6 +418,9 @@ describe("PostDetails", () => {
       },
     });
     renderDetails({ onGenerate: vi.fn().mockRejectedValue(new Error("network")) });
+    await act(async () => {
+      await Promise.resolve();
+    });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Create post" })).toBeEnabled(),
     );

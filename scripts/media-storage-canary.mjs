@@ -474,7 +474,6 @@ exec ${shellQuote(duPath)} "$@"
         GEMINI_API_KEY: "synthetic-never-used",
         MEDIA_PROBE_SECRET: probeSecret,
         VERCEL_TO_FLY_PROXY_SECRET: randomBytes(32).toString("hex"),
-        HOME: scratch,
         TMPDIR: scratch,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -512,6 +511,24 @@ exec ${shellQuote(duPath)} "$@"
     await new Promise((done) => setTimeout(done, 250));
   }
   assert(ready, "Isolated PocketBase 0.22.55 did not become healthy in time.");
+
+  const schemaDb = new DatabaseSync(join(dataDir, "data.db"), { readOnly: true });
+  try {
+    const row = schemaDb
+      .prepare("SELECT schema FROM _collections WHERE name = 'posts'")
+      .get();
+    const creative = JSON.parse(String(row.schema)).find(
+      (field) => field.name === "creative_image",
+    );
+    assert.equal(
+      creative?.options?.maxSize,
+      8 * 1024 * 1024,
+      "The mounted creative schema must match the reviewed storage reserve.",
+    );
+    checks.push("The mounted 8 MiB creative limit matches the storage reserve.");
+  } finally {
+    schemaDb.close();
+  }
 
   const admin = (
     await api("/api/app/session", {

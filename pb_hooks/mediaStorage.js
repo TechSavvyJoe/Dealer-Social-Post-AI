@@ -2,6 +2,7 @@
 // A record quota is not physical capacity: keep room for a full local backup
 // archive as well as a fixed working buffer on the existing data volume.
 const BUFFER_BYTES = 256 * 1024 * 1024;
+// Match the posts creative_image schema's maximum accepted file size.
 const MEDIA_BYTES = { creative: 8 * 1024 * 1024, signature: 512000 };
 
 function storageHasRoom(dfOutput, duOutput, incomingBytes) {

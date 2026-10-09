@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 type Storage = {
+  MEDIA_BYTES: { creative: number; signature: number };
   storageHasRoom: (df: string, du: string, incoming: number) => boolean;
   ensureStorageRoom: (incoming: number) => void;
   withMediaWrite: (
@@ -35,6 +36,18 @@ const df = (available: number) =>
 const buffer = 256 * 1024 * 1024;
 
 describe("shared private-media recovery reserve", () => {
+  it("covers a maximum 8 MiB creative and its backup before accepting an upload", () => {
+    const storage = load();
+    const existing = 100 * 1024 * 1024;
+    expect(storage.MEDIA_BYTES.creative).toBe(8 * 1024 * 1024);
+    expect(
+      storage.storageHasRoom(
+        df(existing + buffer + 12 * 1024 * 1024),
+        `${existing / 1024} /isolated/data`,
+        storage.MEDIA_BYTES.creative,
+      ),
+    ).toBe(false);
+  });
   it("reserves incoming media in both live storage and the next full backup", () => {
     const storage = load();
     const existing = 100 * 1024 * 1024;
