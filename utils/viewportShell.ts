@@ -24,6 +24,7 @@ export const installViewportShell = (): (() => void) => {
       Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
     const root = document.documentElement;
     root.dataset.appDisplay = installed ? "standalone" : "browser";
+    root.dataset.appleStandalone = String(installed && appleInstalled);
     // Pinch zoom must retain its enlarged canvas and normal accessibility behavior.
     if (!installed) {
       root.style.removeProperty("--app-viewport-height");

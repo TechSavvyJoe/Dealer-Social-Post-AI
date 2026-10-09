@@ -11,6 +11,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   document.documentElement.style.removeProperty("--app-viewport-height");
   delete document.documentElement.dataset.appDisplay;
+  delete document.documentElement.dataset.appleStandalone;
 });
 
 function setup(installed = true, apple = false) {
@@ -37,6 +38,7 @@ describe("installed viewport shell", () => {
     viewport.height = 751;
     viewport.dispatchEvent(new Event("resize"));
     expect(height()).toBe("844px");
+    expect(document.documentElement.dataset.appleStandalone).toBe("true");
     window.dispatchEvent(new Event("pageshow"));
     document.dispatchEvent(new Event("visibilitychange"));
     expect(height()).toBe("844px");
@@ -71,6 +73,7 @@ describe("installed viewport shell", () => {
   it("follows visible height through keyboard and rotation, then restores it", () => {
     const { viewport } = setup();
     expect(height()).toBe("844px");
+    expect(document.documentElement.dataset.appleStandalone).toBe("false");
     for (const next of [410, 390, 844]) {
       viewport.height = next;
       viewport.dispatchEvent(new Event("resize"));
@@ -96,6 +99,7 @@ describe("installed viewport shell", () => {
     display.dispatchEvent(new Event("change"));
     expect(height()).toBe("");
     expect(document.documentElement.dataset.appDisplay).toBe("browser");
+    expect(document.documentElement.dataset.appleStandalone).toBe("false");
   });
 
   it("removes resize listeners on cleanup", () => {

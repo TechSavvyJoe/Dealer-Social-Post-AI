@@ -80,7 +80,7 @@
         --sar: env(safe-area-inset-right, 0px);
         --sab: env(safe-area-inset-bottom, 0px);
         --sal: env(safe-area-inset-left, 0px);
-        /* Minimum top spacing for notch devices - 44px is Apple's recommended touch target */
+        /* Keep browser content clear of the device's reported safe area. */
         --header-safe-top: max(var(--sat), 12px);
       }
 
@@ -238,6 +238,15 @@
         padding-bottom: max(var(--sab), 8px);
         padding-left: var(--sal);
         padding-right: var(--sar);
+      }
+      /* Recent iOS Home Screen apps blur a strip below the status-bar safe
+         area, even over an opaque header. Leave that strip free of identity
+         and controls. Keep browser/Android layouts and compact landscape
+         unchanged; do not rely on Safari version tokens in installed apps. */
+      @media (orientation: portrait) and (max-width: 767px) {
+        html[data-apple-standalone="true"] {
+          --header-safe-top: calc(max(var(--sat), 12px) + 20px);
+        }
       }
       html[data-app-display="standalone"] .modal-viewport {
         position: absolute;
