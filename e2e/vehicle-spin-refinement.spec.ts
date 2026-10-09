@@ -23,6 +23,7 @@ const traceDecoder = async (page: Page) => {
       previewLayout?: { width: number; height: number };
     };
     const history: Sample[] = [];
+    const previewLayouts: Sample[] = [];
     const videos = new Map<HTMLVideoElement, number>();
     const finite = (value: number) => (Number.isFinite(value) ? value : null);
     const sample = (event: string, video: HTMLVideoElement) => ({
@@ -48,6 +49,12 @@ const traceDecoder = async (page: Page) => {
     const record = (value: Sample) => {
       history.push(value);
       if (history.length > 512) history.shift();
+      if (
+        value.previewLayout &&
+        ["attached", "loadeddata"].includes(value.event) &&
+        previewLayouts.length < 8
+      )
+        previewLayouts.push(value);
     };
     const track = (video: HTMLVideoElement) => {
       if (videos.has(video)) return;
@@ -102,6 +109,7 @@ const traceDecoder = async (page: Page) => {
     Object.assign(window, {
       studioDecoderDiagnostic: () => ({
         history,
+        previewLayouts,
         latest: Array.from(videos.keys(), (video) => ({
           ...sample("latest", video),
           connected: video.isConnected,
@@ -315,7 +323,7 @@ for (const fixture of [
           const inspect = (
             window as typeof window & {
               studioDecoderDiagnostic: () => {
-                history: {
+                previewLayouts: {
                   event: string;
                   readyState: number;
                   previewLayout?: { width: number; height: number };
@@ -323,7 +331,7 @@ for (const fixture of [
               };
             }
           ).studioDecoderDiagnostic;
-          return inspect().history.filter((entry) => entry.previewLayout);
+          return inspect().previewLayouts;
         });
         const initial = layouts.find((entry) => entry.event === "attached")!;
         const decoded = layouts.find((entry) => entry.event === "loadeddata")!;
