@@ -112,12 +112,22 @@ export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
   useEffect(() => {
     const rail = mediaRailRef.current;
     if (scrollSettleRef.current) clearTimeout(scrollSettleRef.current);
+    let alignedWidth = rail?.clientWidth ?? 0;
     const align = () => {
-      if (rail && clipUrl) rail.scrollLeft = videoUrl ? 0 : rail.clientWidth;
+      if (rail && clipUrl) {
+        alignedWidth = rail.clientWidth;
+        rail.scrollLeft = videoUrl ? 0 : alignedWidth;
+      }
     };
     align();
     const observer =
-      typeof ResizeObserver !== "undefined" ? new ResizeObserver(align) : null;
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            // Media decoding can change only the rail's height during a swipe.
+            // Align again only when its slide width changes, as on rotation.
+            if (rail && rail.clientWidth !== alignedWidth) align();
+          })
+        : null;
     if (rail) observer?.observe(rail);
     if (!videoUrl) playerRef.current?.pause();
     return () => {
