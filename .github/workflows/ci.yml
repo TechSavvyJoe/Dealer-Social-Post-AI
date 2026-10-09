@@ -146,6 +146,13 @@ jobs:
         env:
           CI: true
           # Frontend-only smoke tests stub API routes; PocketBase is not required.
+      - name: Retain browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-${{ matrix.browser }}-test-results
+          path: test-results/
+          retention-days: 7
 
   vehicle-spin-editor:
     name: Full 48-angle background editor

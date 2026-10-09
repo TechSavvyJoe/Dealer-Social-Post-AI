@@ -34,6 +34,98 @@ const decodingVideo = () => {
 };
 
 describe("walkaround decoded frame boundary", () => {
+  it.each(["between paints", "at seeked", "same time"])(
+    "recovers from delayed target data %s without requiring another seeked event",
+    async (phase) => {
+      vi.useFakeTimers();
+      const { video } = decodingVideo();
+      const target = 1.25;
+      if (phase === "same time") video.currentTime = target;
+      const readyState = (state: number) =>
+        Object.defineProperty(video, "readyState", {
+          value: state,
+          configurable: true,
+        });
+      if (phase !== "between paints") readyState(HTMLMediaElement.HAVE_METADATA);
+      const controller = new AbortController();
+      const finished = vi.fn();
+      const waiting = waitForSpinFrame(video, controller.signal, target).then(finished);
+      void waiting.catch(() => {});
+      try {
+        if (phase !== "same time") video.dispatchEvent(new Event("seeked"));
+        await vi.advanceTimersByTimeAsync(17);
+        readyState(HTMLMediaElement.HAVE_METADATA);
+        await vi.advanceTimersByTimeAsync(20);
+        expect(finished).not.toHaveBeenCalled();
+        readyState(HTMLMediaElement.HAVE_CURRENT_DATA);
+        await vi.advanceTimersByTimeAsync(40);
+        expect(finished).toHaveBeenCalledOnce();
+        expect(video.play).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        controller.abort();
+        await waiting.catch(() => {});
+      }
+    },
+  );
+  it("does not reassign an unchanged target while waiting for its decoded data", async () => {
+    vi.useFakeTimers();
+    const { video } = decodingVideo();
+    const target = 1.25;
+    const assign = vi.fn();
+    Object.defineProperty(video, "currentTime", { get: () => target, set: assign });
+    Object.defineProperty(video, "readyState", {
+      value: HTMLMediaElement.HAVE_METADATA,
+      configurable: true,
+    });
+    const controller = new AbortController();
+    const waiting = waitForSpinFrame(video, controller.signal, target);
+    void waiting.catch(() => {});
+    try {
+      expect(assign).not.toHaveBeenCalled();
+      Object.defineProperty(video, "readyState", {
+        value: HTMLMediaElement.HAVE_CURRENT_DATA,
+      });
+      await vi.advanceTimersByTimeAsync(40);
+      await waiting;
+    } finally {
+      controller.abort();
+      await waiting.catch(() => {});
+    }
+  });
+  it("resets consecutive readiness when the target changes during paint observation", async () => {
+    vi.useFakeTimers();
+    const { video } = decodingVideo();
+    const finished = vi.fn();
+    const waiting = waitForSpinFrame(video, undefined, 1.25).then(finished);
+    video.dispatchEvent(new Event("seeked"));
+    await vi.advanceTimersByTimeAsync(17);
+    video.currentTime = 2;
+    await vi.advanceTimersByTimeAsync(20);
+    expect(finished).not.toHaveBeenCalled();
+    video.currentTime = 1.25;
+    await vi.advanceTimersByTimeAsync(15);
+    expect(finished).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(20);
+    await waiting;
+    expect(finished).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("retains the original deadline and cancels readiness polling when data never arrives", async () => {
+    vi.useFakeTimers();
+    const { video } = decodingVideo();
+    Object.defineProperty(video, "readyState", {
+      value: HTMLMediaElement.HAVE_METADATA,
+    });
+    const waiting = waitForSpinFrame(video, undefined, 1.25);
+    const rejected = expect(waiting).rejects.toThrow("too long");
+    video.dispatchEvent(new Event("seeked"));
+    await vi.advanceTimersByTimeAsync(20000);
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
+    video.dispatchEvent(new Event("seeked"));
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it("rejects queued old presentations while priming a drawable surface", async () => {
     const { video, present } = decodingVideo();
     const finished = vi.fn();

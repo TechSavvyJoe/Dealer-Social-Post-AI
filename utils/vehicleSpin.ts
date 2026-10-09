@@ -195,19 +195,28 @@ export const waitForSpinFrame = (
     const afterPaint = (ready: () => boolean) => {
       if (settled) return;
       if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
-      animationFrame = requestAnimationFrame(() => {
+      let readyPaints = 0;
+      const paint = () => {
         if (settled) return;
-        animationFrame = requestAnimationFrame(() => {
-          if (!settled && ready()) done();
-        });
-      });
+        readyPaints = ready() ? readyPaints + 1 : 0;
+        if (readyPaints === 2) {
+          done();
+          return;
+        }
+        // Target data may become available after a paint without another media
+        // event. Keep observing within the same deadline, rather than stranding
+        // a drawable frame until the watchdog rejects it.
+        animationFrame = requestAnimationFrame(paint);
+      };
+      animationFrame = requestAnimationFrame(paint);
     };
-    const atTarget = () =>
-      drawable() &&
-      targetTime !== undefined &&
-      Math.abs(video.currentTime - targetTime) <= 0.001;
+    const targetSelected = () =>
+      targetTime !== undefined && Math.abs(video.currentTime - targetTime) <= 0.001;
+    const atTarget = () => drawable() && targetSelected();
     const seeked = () => {
-      if (atTarget()) afterPaint(atTarget);
+      // A changed target still needs its completed seek boundary. Transiently
+      // missing data may then recover while the paint observer is active.
+      if (!video.seeking && targetSelected()) afterPaint(atTarget);
     };
     // The seeking algorithm waits for target data and decoding before seeked.
     // Once the surface is primed, paused seek + paint handles quantized/VFR
@@ -226,7 +235,9 @@ export const waitForSpinFrame = (
     try {
       if (targetTime !== undefined) {
         video.addEventListener("seeked", seeked);
-        if (atTarget()) afterPaint(atTarget);
+        // Do not reassign the same timestamp just because decoding is pending.
+        // Poll the primed surface, checking seeking/readiness on every paint.
+        if (targetSelected()) afterPaint(atTarget);
         else video.currentTime = targetTime;
         return;
       }
