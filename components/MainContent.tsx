@@ -230,6 +230,7 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
       content = (
         <LazyWork
           onBack={props.onBackFromWork || props.onReset}
+          headerHasNavigation
           onOpenPost={openPost}
           onReusePhoto={props.onReusePhoto || props.onImageSelected}
         />

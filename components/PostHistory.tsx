@@ -245,7 +245,13 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
             <p className="text-xs text-surface-400">
               {filtered.length} visible · {items.length}{" "}
               {items.length === 1 ? "post" : "posts"} loaded
-              {nextCursor ? " · older posts available" : " · archive up to date"}
+              {error
+                ? " · archive could not be checked"
+                : nextCursor
+                  ? " · older posts available"
+                  : loading
+                    ? " · checking archive…"
+                    : " · archive up to date"}
             </p>
           </div>
         </div>
@@ -283,9 +289,11 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.key}
+              type="button"
+              aria-pressed={statusFilter === f.key}
               onClick={() => setStatusFilter(f.key)}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap",
+                "min-h-11 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap",
                 statusFilter === f.key
                   ? "bg-primary-500/30 text-primary-100 [.theme-light_&]:text-primary-950"
                   : "text-surface-400 hover:text-surface-200",
@@ -328,14 +336,14 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
               </div>
             ))}
           </m.div>
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 && error ? null : filtered.length === 0 ? (
           <m.div
             key="empty"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            {items.length === 0 ? (
+            {items.length === 0 && !query.trim() && statusFilter === "all" ? (
               <EmptyState
                 icon={History}
                 title="No posts logged yet"
@@ -349,7 +357,16 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
               <EmptyState
                 icon={Search}
                 title="No matches"
-                description={`Nothing matches “${query}”. Try a different name, VIN, or style.`}
+                description={
+                  nextCursor
+                    ? "No matching posts in the loaded results. Load older posts to search further, or clear your filters."
+                    : "No posts match your search and review filters. Try another search or clear your filters."
+                }
+                actionLabel="Clear filters"
+                onAction={() => {
+                  setQuery("");
+                  setStatusFilter("all");
+                }}
               />
             )}
           </m.div>
@@ -690,28 +707,29 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                 </tbody>
               </table>
             </div>
-            {nextCursor ? (
-              <div className="flex justify-center pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void load(nextCursor)}
-                  disabled={loadingMore}
-                  leftIcon={
-                    loadingMore ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <History className="h-4 w-4" />
-                    )
-                  }
-                >
-                  {loadingMore ? "Loading older posts…" : "Load older posts"}
-                </Button>
-              </div>
-            ) : null}
           </m.div>
         )}
       </AnimatePresence>
+
+      {nextCursor ? (
+        <div className="flex justify-center pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void load(nextCursor)}
+            disabled={loading || loadingMore}
+            leftIcon={
+              loadingMore ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <History className="h-4 w-4" />
+              )
+            }
+          >
+            {loadingMore ? "Loading older posts…" : "Load older posts"}
+          </Button>
+        </div>
+      ) : null}
 
       <p className="text-[11px] text-surface-400 leading-relaxed flex items-start gap-1.5">
         <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />

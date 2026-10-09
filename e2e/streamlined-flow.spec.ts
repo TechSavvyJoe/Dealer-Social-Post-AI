@@ -1126,6 +1126,116 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
   }
 });
 
+test("saved work searches older pages and retries without losing loaded posts", async ({
+  page,
+}, info) => {
+  const newer = {
+    id: "qa-newer-post",
+    dealer: dealer.id,
+    salesperson_id: person.id,
+    salesperson_name: person.name,
+    scenario_id: "team_anniversary",
+    caption: "A great year on the Northline Motors team.",
+    approval_status: "n_a",
+    release_required: false,
+    image_review_required: false,
+    creative_image_url: "/api/files/posts/qa-newer-post/creative.jpg",
+    generated_at: "2026-10-05 15:00:00.000Z",
+    updated: SEEDED_REVISION,
+  };
+  const older = {
+    ...newer,
+    id: "qa-older-post",
+    scenario_id: "new_arrival",
+    vin: "1FTFW1E50PFA00001",
+    caption: "A fresh arrival at Northline Motors.",
+    approval_status: "pending",
+    creative_image_url: "/api/files/posts/qa-older-post/creative.jpg",
+    generated_at: "2026-10-01 15:00:00.000Z",
+  };
+  const cursor = `${newer.generated_at}|${newer.id}`;
+  let olderAttempts = 0;
+  const messages: string[] = [];
+  page.on("pageerror", (error) => messages.push(error.message));
+  const state = await fixture(page, "salesperson", (request, path) => {
+    if (request.method() === "GET" && path === "/api/app/posts") {
+      const params = new URL(request.url()).searchParams;
+      if (params.get("approval_status") === "pending")
+        return { json: { items: [older], nextCursor: null } };
+      if (params.get("approval_status") === "approved")
+        return { json: { items: [], nextCursor: null } };
+      if (params.get("cursor") === cursor) {
+        olderAttempts += 1;
+        if (olderAttempts === 1)
+          return { status: 503, json: { error: "Could not load your posts." } };
+        return { json: { items: [older], nextCursor: null } };
+      }
+      return { json: { items: [newer], nextCursor: cursor } };
+    }
+    if (request.method() === "GET" && /\/creative\.jpg$/.test(path))
+      return { body: photo, contentType: "image/jpeg" };
+    return undefined;
+  });
+  await page.getByRole("button", { name: "See all" }).click();
+  const search = page.getByRole("searchbox", { name: "Search saved posts" });
+  await expect(page.getByRole("button", { name: "Go back", exact: true })).toHaveCount(
+    1,
+  );
+  await expect(page.getByRole("button", { name: "Back", exact: true })).toHaveCount(0);
+  await search.fill(older.vin);
+  await expect(page.getByText("No matching posts", { exact: true })).toBeVisible();
+  const olderButton = page.getByRole("button", { name: "Show older posts" });
+  await expect(olderButton).toBeVisible();
+  await olderButton.click();
+  await expect(page.getByRole("alert")).toContainText("Could not load your posts");
+  await expect(page.getByText("0 of 1 loaded posts", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page.getByRole("button", { name: /^Open New arrival/ })).toBeVisible();
+  expect(olderAttempts).toBe(2);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText("1 of 2 loaded posts", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clear search", exact: true }).click();
+  await expect(page.getByRole("button", { name: /^Open Team/ })).toBeVisible();
+  await expect(page.getByText("2 of 2 loaded posts", { exact: true })).toBeVisible();
+  const review = page.getByRole("combobox", { name: "Review", exact: true });
+  expect((await review.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await review.selectOption("approved");
+  await expect(page.getByText("No matching posts", { exact: true })).toBeVisible();
+  await expect(page.getByText("No posts yet", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(review).toHaveValue("all");
+  await review.selectOption("pending");
+  await expect(page.getByRole("button", { name: /^Open New arrival/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Open Team/ })).toHaveCount(0);
+  await expect(
+    page.getByText("Waiting for approval", { exact: true }).last(),
+  ).toBeVisible();
+  const metrics = await page.evaluate(() => ({
+    title: document.title,
+    overflow: document.documentElement.scrollWidth > window.innerWidth,
+    overlay: Boolean(document.querySelector("vite-error-overlay")),
+  }));
+  expect(metrics.title).toContain("Dealer Social");
+  expect(metrics.overflow).toBe(false);
+  expect(metrics.overlay).toBe(false);
+  expect(messages).toEqual([]);
+  expect(state.unknown).toEqual([]);
+  if (process.env.E2E_SCREENSHOT_DIR) {
+    mkdirSync(process.env.E2E_SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({
+      path: resolve(
+        process.env.E2E_SCREENSHOT_DIR,
+        `saved-work-${info.project.name}.png`,
+      ),
+      fullPage: false,
+    });
+  }
+  await page.getByRole("button", { name: "Go back", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Your next great post." }),
+  ).toBeVisible();
+});
+
 test("system admin sees AI connections and setup guidance", async ({ page }, info) => {
   // The axe scan of the long Connections page (setup steps open) passes 30 s
   // on CI's phone projects; the settings test below needs the same room.
