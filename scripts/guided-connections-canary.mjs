@@ -215,6 +215,18 @@ try {
       data: { name: "Synthetic Other Store", requires_approval: true },
     })
   ).value;
+  await api("/api/app/connections/website", {
+    cookie: admin,
+    method: "PATCH",
+    data: {
+      dealerId: secondDealer.id,
+      expectedRevision: 0,
+      enabled: true,
+      confirmApply: true,
+      settings: {},
+      credentials: {},
+    },
+  });
   const website = (
     await api("/api/app/connections/website", {
       cookie: admin,
@@ -263,12 +275,13 @@ try {
   checks.push(
     "real website setup uses canonical origin and rejects unknown fields",
     "website configuration stays isolated to selected dealership",
+    "incomplete first website candidate does not hide configured second destination",
   );
   const probe = (await api("/__connections/probe")).value;
   assert.equal(probe.redirectBlocked, true);
   assert.equal(redirectedRequests, 0);
   assert.equal(probe.audit.ok, true);
-  assert.equal(probe.audit.count, 2);
+  assert.equal(probe.audit.count, 3);
   assert.equal(probe.websiteConfigured, true);
   assert.equal(probe.echo.authorization, "Bearer synthetic");
   assert.match(probe.echo.body, /café/);
@@ -389,7 +402,7 @@ sys.exit(os.waitstatus_to_exitcode(status))`,
   // insufficient for restore acceptance.
   await startBackend(randomBytes(24).toString("base64"));
   const wrongKey = (await api("/__connections/probe")).value;
-  assert.deepEqual(wrongKey.audit, { ok: false, count: 2 });
+  assert.deepEqual(wrongKey.audit, { ok: false, count: 3 });
   assert.equal(wrongKey.runtimeBlocked, true);
   assert.equal(wrongKey.websiteConfigured, false);
   const wrongConfig = (
@@ -404,10 +417,10 @@ sys.exit(os.waitstatus_to_exitcode(status))`,
   await startBackend(key);
   assert.deepEqual((await api("/__connections/probe")).value.audit, {
     ok: true,
-    count: 2,
+    count: 3,
   });
   const tampered = (await api("/__connections/tamper", { method: "POST" })).value;
-  assert.deepEqual(tampered.audit, { ok: false, count: 2 });
+  assert.deepEqual(tampered.audit, { ok: false, count: 3 });
   assert.equal(tampered.blocked, true);
   checks.push("authenticated tampered envelope rejects restore and runtime fallback");
   console.log(JSON.stringify({ status: "passed", pocketbase: "0.22.55", checks }));

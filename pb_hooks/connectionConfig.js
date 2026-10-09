@@ -896,9 +896,9 @@ function finalizeVerification(ticket, proof) {
   });
   return getPublicConfig(ticket.service, ticket.dealerId);
 }
-// Health must not enumerate dealership rosters or decrypt every destination.
-// A legacy target or one indexed, enabled managed target is sufficient here;
-// actual draft delivery and each dealership's readiness remain receipt-gated.
+// Health reads managed destination candidates in small pages, never dealership
+// rosters. Incomplete or retired setup for one store cannot hide a healthy
+// destination for another. The launch/admin surface supports up to 200 stores.
 function hasConfiguredWebsite() {
   const legacyDealer = String($os.getenv("CUSTOMER_HUB_DEALER_ID") || "").trim();
   if (legacyDealer) {
@@ -909,18 +909,27 @@ function hasConfiguredWebsite() {
   }
   try {
     const dao = $app.dao();
-    const row = dao.findFirstRecordByFilter(
-      CONFIG_COLLECTION,
-      "scope = 'dealer' && service = 'website' && enabled = true",
-    );
-    const dealerId = row.getString("dealer");
-    const dealer = dao.findRecordById("dealers", dealerId);
-    if (dealer.getBool("is_system")) return false;
-    const current = runtimeSnapshot("website", dealerId);
-    return !!(current.enabled && current.configured && !current.error);
-  } catch (_e) {
-    return false;
-  }
+    for (let offset = 0; offset < 200; offset += 10) {
+      const rows = dao.findRecordsByFilter(
+        CONFIG_COLLECTION,
+        "scope = 'dealer' && service = 'website' && enabled = true",
+        "+created,+id",
+        10,
+        offset,
+      );
+      for (let i = 0; i < rows.length; i++) {
+        try {
+          const dealerId = rows[i].getString("dealer");
+          const dealer = dao.findRecordById("dealers", dealerId);
+          if (dealer.getBool("is_system")) continue;
+          const current = runtimeSnapshot("website", dealerId);
+          if (current.enabled && current.configured && !current.error) return true;
+        } catch (_e) {} // A deleted or corrupt store does not represent other stores.
+      }
+      if (rows.length < 10) break;
+    }
+  } catch (_e) {}
+  return false;
 }
 function verifyStoredEncryption() {
   let count = 0;

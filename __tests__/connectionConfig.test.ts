@@ -72,6 +72,18 @@ function harness() {
       if (storageFailure) throw new Error("synthetic secret in storage error");
       if (!filter || filter === 'id != ""')
         return rows.filter((row) => row.collection === collection).slice(0, 5001);
+      if (filter === "scope = 'dealer' && service = 'website' && enabled = true") {
+        expect(_limit).toBe(10);
+        return rows
+          .filter(
+            (row) =>
+              row.collection === collection &&
+              row.getString("scope") === "dealer" &&
+              row.getString("service") === "website" &&
+              row.getBool("enabled"),
+          )
+          .slice(_offset, _offset + _limit);
+      }
       const found = rows.filter(
         (row) =>
           row.collection === collection &&
@@ -197,6 +209,54 @@ describe("encrypted managed connection config", () => {
     );
     expect(JSON.stringify(h.rows[0].values)).not.toContain("synthetic-new-credential");
     expect(h.api.runtimeValue("GEMINI_API_KEY")).toBe("synthetic-new-credential");
+  });
+  it("finds a healthy destination after incomplete, corrupt or deleted store candidates", () => {
+    const h = harness();
+    for (const id of ["dealer-a", "dealer-b"]) {
+      const dealer = new Row("dealers");
+      dealer.id = id;
+      h.rows.push(dealer);
+    }
+    h.save("website", 0);
+    h.api.saveConfig(
+      "website",
+      "dealer-b",
+      {
+        confirmApply: true,
+        expectedRevision: 0,
+        enabled: true,
+        settings: {
+          origin: "https://approved.example",
+          destinationId: "dealer-b-destination",
+        },
+        credentials: {
+          sharedSecret: "synthetic-website-secret-at-least-32-characters",
+        },
+      },
+      0,
+      admin,
+    );
+    expect(h.api.hasConfiguredWebsite()).toBe(true);
+    const broken = h.rows.find(
+      (row) =>
+        row.collection === "managed_connections" &&
+        row.getString("dealer") === "dealer-a",
+    )!;
+    broken.set("ciphertext", "corrupt");
+    expect(h.api.hasConfiguredWebsite()).toBe(true);
+    h.rows.splice(
+      h.rows.findIndex((row) => row.collection === "dealers" && row.id === "dealer-a"),
+      1,
+    );
+    expect(h.api.hasConfiguredWebsite()).toBe(true);
+    h.api.saveConfig(
+      "website",
+      "dealer-b",
+      { confirmApply: true, expectedRevision: 1, enabled: false },
+      1,
+      admin,
+    );
+    expect(h.api.hasConfiguredWebsite()).toBe(false);
   });
   it("requires dedicated encryption key, explicit apply and current revision", () => {
     const h = harness();
