@@ -88,7 +88,7 @@ try {
     const http=require(__hooks+"/safeHttp.js");
     const response=http.send({url:"http://127.0.0.1:${receiverPort}/echo",method:"POST",headers:{Authorization:"Bearer synthetic"},body:JSON.stringify({text:"Unicode café · quote \\\" and slash \\\\"}),timeout:3});
     let redirectBlocked=false;try{http.send({url:"http://127.0.0.1:${receiverPort}/redirect",method:"GET",timeout:3})}catch(_e){redirectBlocked=true}
-    const config=require(__hooks+"/connectionConfig.js");return c.json(200,{echo:response.json,redirectBlocked,audit:config.verifyStoredEncryption(),runtimeBlocked:config.runtimeValue("GEMINI_API_KEY")===""});
+    const config=require(__hooks+"/connectionConfig.js");return c.json(200,{echo:response.json,redirectBlocked,audit:config.verifyStoredEncryption(),websiteConfigured:config.hasConfiguredWebsite(),runtimeBlocked:config.runtimeValue("GEMINI_API_KEY")===""});
   });
   routerAdd("POST", "/__connections/tamper", (c) => {
     if(c.request().header.get("X-Dealer-Proxy-Secret")!==$os.getenv("VERCEL_TO_FLY_PROXY_SECRET"))return c.noContent(404);
@@ -269,6 +269,7 @@ try {
   assert.equal(redirectedRequests, 0);
   assert.equal(probe.audit.ok, true);
   assert.equal(probe.audit.count, 2);
+  assert.equal(probe.websiteConfigured, true);
   assert.equal(probe.echo.authorization, "Bearer synthetic");
   assert.match(probe.echo.body, /café/);
   // Search the actual SQLite file, not merely the status DTO, for plaintext.
@@ -390,6 +391,7 @@ sys.exit(os.waitstatus_to_exitcode(status))`,
   const wrongKey = (await api("/__connections/probe")).value;
   assert.deepEqual(wrongKey.audit, { ok: false, count: 2 });
   assert.equal(wrongKey.runtimeBlocked, true);
+  assert.equal(wrongKey.websiteConfigured, false);
   const wrongConfig = (
     await api("/api/app/connections", { cookie: admin })
   ).value.services.find((row) => row.service === "gemini");

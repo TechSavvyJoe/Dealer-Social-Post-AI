@@ -1371,17 +1371,9 @@ routerAdd("GET", "/api/app/health", (c) => {
   checks.off_box_backup_configured = backupEnabled;
   checks.off_box_restore_ready = backupRestoreReady;
   try {
-    const websitePublications = require(__hooks + "/websitePublications.js");
-    const configuredDealerId = ($os.getenv("CUSTOMER_HUB_DEALER_ID") || "").trim();
-    const configuredDealers = $app
-      .dao()
-      .findRecordsByFilter("dealers", "is_system = false", "+id", 200, 0);
-    checks.website_integration_configured =
-      configuredDealers.some(function (dealer) {
-        return websitePublications.destinationConfiguration(dealer.id).enabled;
-      }) ||
-      (!!configuredDealerId &&
-        websitePublications.destinationConfiguration(configuredDealerId).enabled);
+    checks.website_integration_configured = require(
+      __hooks + "/connectionConfig.js",
+    ).hasConfiguredWebsite();
   } catch (_e) {
     checks.website_integration_configured = false;
   }

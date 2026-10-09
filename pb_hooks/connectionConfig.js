@@ -896,6 +896,32 @@ function finalizeVerification(ticket, proof) {
   });
   return getPublicConfig(ticket.service, ticket.dealerId);
 }
+// Health must not enumerate dealership rosters or decrypt every destination.
+// A legacy target or one indexed, enabled managed target is sufficient here;
+// actual draft delivery and each dealership's readiness remain receipt-gated.
+function hasConfiguredWebsite() {
+  const legacyDealer = String($os.getenv("CUSTOMER_HUB_DEALER_ID") || "").trim();
+  if (legacyDealer) {
+    try {
+      const current = runtimeSnapshot("website", legacyDealer);
+      if (current.enabled && current.configured && !current.error) return true;
+    } catch (_e) {}
+  }
+  try {
+    const dao = $app.dao();
+    const row = dao.findFirstRecordByFilter(
+      CONFIG_COLLECTION,
+      "scope = 'dealer' && service = 'website' && enabled = true",
+    );
+    const dealerId = row.getString("dealer");
+    const dealer = dao.findRecordById("dealers", dealerId);
+    if (dealer.getBool("is_system")) return false;
+    const current = runtimeSnapshot("website", dealerId);
+    return !!(current.enabled && current.configured && !current.error);
+  } catch (_e) {
+    return false;
+  }
+}
 function verifyStoredEncryption() {
   let count = 0;
   try {
@@ -923,6 +949,7 @@ module.exports = {
   verifyStoredEncryption: verifyStoredEncryption,
   runtimeValue: runtimeValue,
   runtimeSnapshot: runtimeSnapshot,
+  hasConfiguredWebsite: hasConfiguredWebsite,
   getPublicConfig: getPublicConfig,
   saveConfig: saveConfig,
   inventory: inventory,
