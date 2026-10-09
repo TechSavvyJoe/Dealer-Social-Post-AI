@@ -1198,6 +1198,7 @@ test("saved work searches older pages and retries without losing loaded posts", 
   await expect(page.getByRole("button", { name: /^Open Team/ })).toBeVisible();
   await expect(page.getByText("2 of 2 loaded posts", { exact: true })).toBeVisible();
   const review = page.getByRole("combobox", { name: "Review", exact: true });
+  expect((await review.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   await review.selectOption("approved");
   await expect(page.getByText("No matching posts", { exact: true })).toBeVisible();
   await expect(page.getByText("No posts yet", { exact: true })).toHaveCount(0);

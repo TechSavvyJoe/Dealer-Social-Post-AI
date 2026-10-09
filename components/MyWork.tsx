@@ -208,20 +208,26 @@ export const MyWork: React.FC<MyWorkProps> = ({
             <label htmlFor="saved-post-review" className="shrink-0 text-sm text-ink-2">
               Review
             </label>
-            <select
-              id="saved-post-review"
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value as typeof statusFilter)
-              }
-              className="min-h-11 min-w-0 flex-1 rounded-sm border border-strong bg-panel-raised px-3 text-base text-ink"
-            >
-              <option value="all">All posts</option>
-              <option value="pending">Waiting for approval</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Changes requested</option>
-              <option value="n_a">No review needed</option>
-            </select>
+            <div className="relative min-w-0 flex-1">
+              <select
+                id="saved-post-review"
+                value={statusFilter}
+                onChange={(event) =>
+                  setStatusFilter(event.target.value as typeof statusFilter)
+                }
+                className="block min-h-11 w-full appearance-none rounded-sm border border-strong bg-panel-raised pl-3 pr-10 text-base text-ink"
+              >
+                <option value="all">All posts</option>
+                <option value="pending">Waiting for approval</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Changes requested</option>
+                <option value="n_a">No review needed</option>
+              </select>
+              <ChevronDown
+                className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-2"
+                aria-hidden="true"
+              />
+            </div>
           </div>
           <p id="saved-post-search-scope" className="text-caption text-ink-2">
             {loading
