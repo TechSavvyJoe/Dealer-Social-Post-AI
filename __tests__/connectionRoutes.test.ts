@@ -82,6 +82,18 @@ describe("guided connection route boundaries", () => {
     const result = h.api.inventory(h.c);
     expect(result.status).toBe(200);
     expect(result.payload.scope).toBe("guided_setup");
+    expect(result.payload.providers.gemini).toEqual({
+      configured: true,
+      enabled: true,
+      verification: "not_tested",
+    });
+    expect(result.payload.automation.customer_hub).toEqual({
+      configured: false,
+      enabled: false,
+      verification: "not_tested",
+      dealerId: "",
+    });
+    expect(result.payload.automation.walkaround.verification).toBe("not_tested");
     expect(result.payload.services[0]).toMatchObject({
       configured: true,
       state: "needs_test",

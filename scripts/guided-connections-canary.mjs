@@ -166,6 +166,11 @@ try {
   assert(admin);
   const before = (await api("/api/app/connections", { cookie: admin })).value;
   assert.equal(before.scope, "guided_setup");
+  assert.equal(before.providers.gemini.verification, "not_tested");
+  assert.equal(before.automation.customer_hub.verification, "not_tested");
+  checks.push(
+    "cached admin inventory remains readable without claiming delivery proof",
+  );
   assert.equal(before.secureStorageAvailable, true);
   assert.equal(
     before.services.find((row) => row.service === "gemini").state,

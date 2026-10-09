@@ -139,9 +139,36 @@ function inventory(c) {
     dealers.forEach(function (dealer) {
       services.push(dto(cfg.getPublicConfig("website", dealer.id)));
     });
+    // Backend deploys before frontend promotion; keep older cached admin
+    // clients readable without exposing secrets or claiming delivery proof.
+    function legacyState(service, dealerId) {
+      const row = services.find(function (item) {
+        return (
+          item.service === service &&
+          (service !== "website" || item.dealerId === dealerId)
+        );
+      });
+      return {
+        configured: !!(row && row.configured),
+        enabled: !!(row && row.enabled && row.configured),
+        verification: "not_tested",
+      };
+    }
+    const legacyDealerId = String($os.getenv("CUSTOMER_HUB_DEALER_ID") || "").trim();
     const policy = require(__hooks + "/requestPolicies.js").geminiModelPolicySnapshot();
     return c.json(200, {
       scope: "guided_setup",
+      providers: {
+        gemini: legacyState("gemini"),
+        anthropic: legacyState("anthropic"),
+        openai: legacyState("openai"),
+      },
+      automation: {
+        customer_hub: Object.assign(legacyState("website", legacyDealerId), {
+          dealerId: legacyDealerId,
+        }),
+        walkaround: legacyState("walkaround"),
+      },
       services: services,
       dealers: dealers,
       secureStorageAvailable: cfg.getPublicConfig("gemini").storageReady,
