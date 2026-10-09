@@ -75,6 +75,8 @@ export interface MainContentProps {
   onBackFromWork?: () => void;
   /** Same-photo remix — keep capture, re-open CUSTOMIZE. */
   onRemix: () => void;
+  onRetrySaveGeneratedPost?: () => Promise<boolean>;
+  savingGeneratedPost?: boolean;
   onDismissError: () => void;
   onGenerate: (
     style: StyleOption,
@@ -245,6 +247,8 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
           post={generatedPost}
           onStartOver={props.onReset}
           onRemix={props.onRemix}
+          onRetrySaveGeneratedPost={props.onRetrySaveGeneratedPost}
+          savingGeneratedPost={props.savingGeneratedPost}
           onRegenerateImage={props.onRegenerateImage}
           onEditImage={props.onEditImage}
           onRegenerateText={props.onRegenerateText}

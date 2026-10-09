@@ -470,11 +470,42 @@ describe("PostDetails", () => {
     await act(async () => {
       reject(new Error("offline"));
     });
-    expect(create).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create social post" })).toBeEnabled();
+    expect(screen.getByText(/Website destinations are unavailable/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Retry destinations" }));
     await waitFor(() => expect(create).toBeEnabled());
     fireEvent.click(create);
     expect(onGenerate).toHaveBeenCalledOnce();
+  });
+
+  it("can create only social output when website discovery is unavailable", async () => {
+    const { listWebsiteDestinations } = await import("../services/websitePublishing");
+    vi.mocked(listWebsiteDestinations).mockRejectedValueOnce(new Error("offline"));
+    useAppStore.setState({
+      postDraft: { categoryId: "inventory", scenarioId: "new_arrival" },
+    });
+    const onGenerate = vi.fn();
+    renderDetails({ onGenerate });
+    const create = await screen.findByRole("button", { name: "Create social post" });
+    fireEvent.click(create);
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledOnce());
+    expect(onGenerate.mock.calls[0][5].websiteEnabled).toBe(false);
+    expect(onGenerate.mock.calls[0][6].length).toBeGreaterThan(0);
+  });
+
+  it("does not bypass missing social destinations after website discovery fails", async () => {
+    const { listWebsiteDestinations } = await import("../services/websitePublishing");
+    vi.mocked(listWebsiteDestinations).mockRejectedValueOnce(new Error("offline"));
+    gate.override = { ok: false, reason: "no_destination" };
+    useAppStore.setState({
+      postDraft: { categoryId: "inventory", scenarioId: "new_arrival" },
+    });
+    const onGenerate = vi.fn();
+    renderDetails({ onGenerate });
+    await screen.findByRole("button", { name: "Retry destinations" });
+    expect(screen.getByRole("button", { name: "Create post" })).toBeDisabled();
+    fireEvent.keyDown(window, { key: "Enter", metaKey: true });
+    expect(onGenerate).not.toHaveBeenCalled();
   });
 
   it.each([false, true])(

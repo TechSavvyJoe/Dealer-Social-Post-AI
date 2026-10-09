@@ -10,6 +10,8 @@
  */
 
 import { dataUrlToBlob } from "../utils/imageUtils";
+import { withRequestDeadline } from "../utils/requestDeadline";
+import { postSaveFingerprint } from "../utils/postSaveFingerprint";
 import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
 import type {
   ImageAspectRatio,
@@ -39,6 +41,8 @@ import { stripCanonicalDisclosures } from "../utils/complianceDisclosures";
 export type ApprovalStatus = "n_a" | "pending" | "approved" | "rejected";
 
 export interface LogPostInput {
+  /** One immutable generated save, reused only for exact outcome recovery. */
+  saveOperationId?: string;
   /** Kept for backwards compat; ignored — the server uses the session dealer. */
   dealerId?: string;
   salespersonName?: string;
@@ -601,6 +605,124 @@ const jsonRequest = async <T>(url: string, init: RequestInit = {}): Promise<T> =
   return body;
 };
 
+const buildPostSaveForm = async (input: LogPostInput): Promise<FormData> => {
+  const form = new FormData();
+  form.append("salesperson_name", input.salespersonName || "");
+  form.append("salesperson_id", input.salespersonId || "");
+  form.append("style", input.style || "");
+  form.append("tone", input.tone || "");
+  form.append("customer_name", input.customerName || "");
+  form.append("scenario_id", input.scenarioId || "");
+  form.append("vin", input.vin || "");
+  form.append("has_release", input.hasRelease ? "true" : "false");
+  form.append("has_video", input.hasVideo ? "true" : "false");
+  if (input.captionSource) {
+    form.append("caption_source", input.captionSource);
+  }
+  if (input.generationTier) {
+    form.append("generation_tier", input.generationTier);
+  }
+  if (input.generationModel) {
+    form.append("generation_model", input.generationModel);
+  }
+  if (typeof input.generationFallbackCount === "number") {
+    form.append("generation_fallback_count", String(input.generationFallbackCount));
+  }
+  if (input.generationLastSuccessAt) {
+    form.append("generation_last_success_at", input.generationLastSuccessAt);
+  }
+  if (input.modelPolicyVersion) {
+    form.append("model_policy_version", input.modelPolicyVersion);
+  }
+  if (input.captionAttemptId) {
+    form.append("caption_attempt_id", input.captionAttemptId);
+  }
+  if (input.imageAttemptId) {
+    form.append("image_attempt_id", input.imageAttemptId);
+  }
+  if (Array.isArray(input.platformIds)) {
+    form.append("platform_ids", JSON.stringify(input.platformIds));
+  }
+  if (input.mediaOutputMode) {
+    form.append("media_output_mode", input.mediaOutputMode);
+  }
+  if (input.platformCaptions && Object.keys(input.platformCaptions).length > 0) {
+    form.append("platform_captions", JSON.stringify(input.platformCaptions));
+  }
+  if (input.primaryFormatId) {
+    form.append("primary_format_id", input.primaryFormatId);
+  }
+  if (input.imageAspectRatio) {
+    form.append("image_aspect_ratio", input.imageAspectRatio);
+  }
+  if (input.scheduledFor) {
+    form.append("scheduled_for", input.scheduledFor);
+  }
+  if (input.websiteDraft?.enabled) {
+    form.append("website_draft", JSON.stringify(input.websiteDraft));
+  }
+
+  // Persist caption + creative whenever available so History can reopen
+  // for re-share/export without regenerating. Approval-gated posts still
+  // require both fields (server enforces).
+  if (input.caption?.trim()) {
+    form.append("caption", input.caption.trim());
+  }
+  if (input.disclosures?.trim()) {
+    form.append("disclosures", input.disclosures.trim());
+  }
+  if (input.imageDataUrl) {
+    const image = await dataUrlToBlob(input.imageDataUrl);
+    const extension =
+      image.type === "image/png" ? "png" : image.type === "image/webp" ? "webp" : "jpg";
+    form.append("creative_image", image, `post-creative.${extension}`);
+  } else if (input.requiresApproval) {
+    throw new Error("Approval submission is missing its creative");
+  }
+  if (input.requiresApproval && !input.caption?.trim()) {
+    throw new Error("Approval submission is missing its creative");
+  }
+
+  if (input.saveOperationId) {
+    form.append("save_operation_id", input.saveOperationId);
+    form.append("save_payload_digest", await postSaveFingerprint(form));
+  }
+  return form;
+};
+
+/** Reconcile an unknown first write before retrying its identical operation. */
+export const reconcilePostSave = async (
+  input: LogPostInput,
+  requestAuthEpoch: number = captureAuthEpoch(),
+): Promise<PostRecord | null> => {
+  if (!input.saveOperationId)
+    throw new Error("This generated result has no recovery operation.");
+  assertAuthEpoch(requestAuthEpoch);
+  const form = await buildPostSaveForm(input);
+  assertAuthEpoch(requestAuthEpoch);
+  return withRequestDeadline(undefined, async (signal) => {
+    const res = await fetch(
+      `/api/app/post-operations/${encodeURIComponent(input.saveOperationId!)}?payload_digest=${encodeURIComponent(String(form.get("save_payload_digest")))}`,
+      {
+        credentials: "include",
+        cache: "no-store",
+        signal,
+      },
+    );
+    assertAuthEpoch(requestAuthEpoch);
+    if (res.status === 404) {
+      const error = await readApiError(res, { requestAuthEpoch });
+      if (error.code === "POST_SAVE_NOT_FOUND") return null;
+      throw error;
+    }
+    if (!res.ok) throw await readApiError(res, { requestAuthEpoch });
+    const post = (await res.json()) as PostRecord;
+    signal.throwIfAborted();
+    assertAuthEpoch(requestAuthEpoch);
+    return projectPostRecordForUi(post, input.grounding);
+  });
+};
+
 export const logPost = async (
   input: LogPostInput,
   requestAuthEpoch: number = captureAuthEpoch(),
@@ -616,103 +738,25 @@ export const logPost = async (
   });
   assertAuthEpoch(requestAuthEpoch);
   try {
-    const form = new FormData();
-    form.append("salesperson_name", input.salespersonName || "");
-    form.append("salesperson_id", input.salespersonId || "");
-    form.append("style", input.style || "");
-    form.append("tone", input.tone || "");
-    form.append("customer_name", input.customerName || "");
-    form.append("scenario_id", input.scenarioId || "");
-    form.append("vin", input.vin || "");
-    form.append("has_release", input.hasRelease ? "true" : "false");
-    form.append("has_video", input.hasVideo ? "true" : "false");
-    if (input.captionSource) {
-      form.append("caption_source", input.captionSource);
-    }
-    if (input.generationTier) {
-      form.append("generation_tier", input.generationTier);
-    }
-    if (input.generationModel) {
-      form.append("generation_model", input.generationModel);
-    }
-    if (typeof input.generationFallbackCount === "number") {
-      form.append("generation_fallback_count", String(input.generationFallbackCount));
-    }
-    if (input.generationLastSuccessAt) {
-      form.append("generation_last_success_at", input.generationLastSuccessAt);
-    }
-    if (input.modelPolicyVersion) {
-      form.append("model_policy_version", input.modelPolicyVersion);
-    }
-    if (input.captionAttemptId) {
-      form.append("caption_attempt_id", input.captionAttemptId);
-    }
-    if (input.imageAttemptId) {
-      form.append("image_attempt_id", input.imageAttemptId);
-    }
-    if (Array.isArray(input.platformIds)) {
-      form.append("platform_ids", JSON.stringify(input.platformIds));
-    }
-    if (input.mediaOutputMode) {
-      form.append("media_output_mode", input.mediaOutputMode);
-    }
-    if (input.platformCaptions && Object.keys(input.platformCaptions).length > 0) {
-      form.append("platform_captions", JSON.stringify(input.platformCaptions));
-    }
-    if (input.primaryFormatId) {
-      form.append("primary_format_id", input.primaryFormatId);
-    }
-    if (input.imageAspectRatio) {
-      form.append("image_aspect_ratio", input.imageAspectRatio);
-    }
-    if (input.scheduledFor) {
-      form.append("scheduled_for", input.scheduledFor);
-    }
-    if (input.websiteDraft?.enabled) {
-      form.append("website_draft", JSON.stringify(input.websiteDraft));
-    }
-
-    // Persist caption + creative whenever available so History can reopen
-    // for re-share/export without regenerating. Approval-gated posts still
-    // require both fields (server enforces).
-    if (input.caption?.trim()) {
-      form.append("caption", input.caption.trim());
-    }
-    if (input.disclosures?.trim()) {
-      form.append("disclosures", input.disclosures.trim());
-    }
-    if (input.imageDataUrl) {
-      const image = await dataUrlToBlob(input.imageDataUrl);
-      const extension =
-        image.type === "image/png"
-          ? "png"
-          : image.type === "image/webp"
-            ? "webp"
-            : "jpg";
-      form.append("creative_image", image, `post-creative.${extension}`);
-    } else if (input.requiresApproval) {
-      throw new Error("Approval submission is missing its creative");
-    }
-    if (input.requiresApproval && !input.caption?.trim()) {
-      throw new Error("Approval submission is missing its creative");
-    }
-
+    const form = await buildPostSaveForm(input);
     assertAuthEpoch(requestAuthEpoch);
-    const res = await fetch("/api/app/posts", {
-      method: "POST",
-      credentials: "include",
-      body: form,
+    return await withRequestDeadline(undefined, async (signal) => {
+      const res = await fetch("/api/app/posts", {
+        method: "POST",
+        credentials: "include",
+        body: form,
+        signal,
+      });
+      if (!res.ok) throw await readApiError(res, { requestAuthEpoch });
+      const post = (await res.json()) as PostRecord;
+      signal.throwIfAborted();
+      assertAuthEpoch(requestAuthEpoch);
+      return projectPostRecordForUi(post, input.grounding);
     });
-    if (!res.ok) {
-      throw await readApiError(res, { requestAuthEpoch });
-    }
-    const post = (await res.json()) as PostRecord;
-    assertAuthEpoch(requestAuthEpoch);
-    return projectPostRecordForUi(post, input.grounding);
   } catch (err) {
     // For approval-gated posts, a failed persist means the manager has nothing
     // to review — the caller MUST know so it can lock share/save and alert.
-    if (input.requiresApproval) throw err;
+    if (input.requiresApproval || input.saveOperationId) throw err;
     // Non-approval posts: preserve the user's flow but log clearly.
     console.warn("[posts.logPost] non-fatal persist failure", err);
     return null;
@@ -773,25 +817,29 @@ export const updatePostDraft = async (
     form.append("creative_image", image, `post-creative.${extension}`);
   }
   assertAuthEpoch(requestAuthEpoch);
-  const res = await fetch(`/api/app/posts/${encodeURIComponent(postId)}/draft`, {
-    method: "PATCH",
-    credentials: "include",
-    cache: "no-store",
-    body: form,
+  return withRequestDeadline(undefined, async (signal) => {
+    const res = await fetch(`/api/app/posts/${encodeURIComponent(postId)}/draft`, {
+      method: "PATCH",
+      credentials: "include",
+      cache: "no-store",
+      body: form,
+      signal,
+    });
+    if (!res.ok) {
+      throw await readApiError(res, { requestAuthEpoch });
+    }
+    const updated = (await res.json()) as {
+      id: string;
+      updated: true;
+      post_revision: string;
+    };
+    signal.throwIfAborted();
+    if (!updated.post_revision) {
+      throw new Error("Saved draft response did not include its server revision");
+    }
+    assertAuthEpoch(requestAuthEpoch);
+    return updated;
   });
-  if (!res.ok) {
-    throw await readApiError(res, { requestAuthEpoch });
-  }
-  const updated = (await res.json()) as {
-    id: string;
-    updated: true;
-    post_revision: string;
-  };
-  if (!updated.post_revision) {
-    throw new Error("Saved draft response did not include its server revision");
-  }
-  assertAuthEpoch(requestAuthEpoch);
-  return updated;
 };
 
 export interface RecordPostSharedInput {

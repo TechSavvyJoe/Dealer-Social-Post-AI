@@ -57,6 +57,7 @@ export const VehicleSpinStudio: React.FC<{
   const dealer = useAppStore((state) => state.currentDealer);
   const [vehicle, setVehicle] = useState<SpinVehicle>({ ...EMPTY_VEHICLE });
   const [file, setFile] = useState<File | null>(null);
+  const [projectKey, setProjectKey] = useState(0);
   const [sourceUrl, setSourceUrl] = useState("");
   const [duration, setDuration] = useState(0);
   const [start, setStart] = useState(0);
@@ -165,6 +166,7 @@ export const VehicleSpinStudio: React.FC<{
     }
   };
   const reset = () => {
+    setProjectKey((current) => current + 1);
     setFile(null);
     setFrames([]);
     setOriginals([]);
@@ -192,6 +194,13 @@ export const VehicleSpinStudio: React.FC<{
       const source = await openSpinVideo(chosen, signal);
       try {
         if (signal.aborted) return;
+        if (
+          (file || frames.length > 0) &&
+          !window.confirm(
+            "Replace this recording and discard its unsaved angles and background edits?",
+          )
+        )
+          return;
         reset();
         setVehicle(vehicle);
         setFile(chosen);
@@ -397,6 +406,7 @@ export const VehicleSpinStudio: React.FC<{
             <VehicleSpinViewer
               frames={urls}
               title={vehicle.title || "Your vehicle"}
+              projectKey={projectKey}
               onAngleChange={setAngle}
               selectionLabel={
                 correction === "keep"
@@ -469,6 +479,15 @@ export const VehicleSpinStudio: React.FC<{
                 aria-label="Choose a walkaround video"
                 onChange={chooseVideo}
               />
+              {capacity?.storageAvailable === false ? (
+                <p
+                  role="status"
+                  className="rounded-sm border border-warning-ink/30 bg-warning-fill px-4 py-3 text-sm leading-5 text-ink"
+                >
+                  Saving new vehicle views is paused because archive storage is limited.
+                  Ask your administrator before recording for upload.
+                </p>
+              ) : null}
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   variant="primary"
@@ -493,8 +512,25 @@ export const VehicleSpinStudio: React.FC<{
                     Choose one complete turn
                   </h2>
                   <p className="mt-1 text-sm text-ink-2">
-                    Preview the video and enter the start and end of one full circle.
+                    Keep one complete circle, ending where you started. A steady walking
+                    pace gives a smoother spin; missing angles cannot be added.
                   </p>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm tabular-nums text-ink-2" role="status">
+                      {Math.max(0, end - start).toFixed(1)} seconds selected of{" "}
+                      {duration.toFixed(1)}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      disabled={Boolean(busy)}
+                      onClick={() => {
+                        setStart(0);
+                        setEnd(duration);
+                      }}
+                    >
+                      Use full walkaround
+                    </Button>
+                  </div>
                   <div className="mt-3 grid grid-cols-2 gap-3">
                     <label className="text-sm text-ink-2">
                       Start (seconds)
@@ -502,11 +538,15 @@ export const VehicleSpinStudio: React.FC<{
                         className={fieldClass}
                         type="number"
                         min={0}
-                        max={end - 4}
+                        max={Math.max(0, end - 4)}
                         step={0.1}
                         value={start}
                         disabled={Boolean(busy)}
-                        onChange={(event) => setStart(Number(event.target.value))}
+                        onChange={(event) =>
+                          setStart(
+                            Math.max(0, Math.min(end - 4, Number(event.target.value))),
+                          )
+                        }
                       />
                     </label>
                     <label className="text-sm text-ink-2">
@@ -519,10 +559,47 @@ export const VehicleSpinStudio: React.FC<{
                         step={0.1}
                         value={Number(end.toFixed(1))}
                         disabled={Boolean(busy)}
-                        onChange={(event) => setEnd(Number(event.target.value))}
+                        onChange={(event) =>
+                          setEnd(
+                            Math.min(
+                              duration,
+                              Math.max(start + 4, Number(event.target.value)),
+                            ),
+                          )
+                        }
                       />
                     </label>
                   </div>
+                  <label className="mt-3 block text-xs text-ink-2">
+                    Trim start
+                    <input
+                      type="range"
+                      className="mt-2 min-h-11 w-full accent-brand-ink"
+                      min={0}
+                      max={Math.max(0, duration - 4)}
+                      step={0.1}
+                      value={start}
+                      disabled={Boolean(busy)}
+                      onChange={(event) =>
+                        setStart(Math.min(end - 4, Number(event.target.value)))
+                      }
+                    />
+                  </label>
+                  <label className="mt-3 block text-xs text-ink-2">
+                    Trim end
+                    <input
+                      type="range"
+                      className="mt-2 min-h-11 w-full accent-brand-ink"
+                      min={4}
+                      max={duration}
+                      step={0.1}
+                      value={end}
+                      disabled={Boolean(busy)}
+                      onChange={(event) =>
+                        setEnd(Math.max(start + 4, Number(event.target.value)))
+                      }
+                    />
+                  </label>
                   <Button
                     className="mt-4"
                     fullWidth
@@ -535,6 +612,7 @@ export const VehicleSpinStudio: React.FC<{
                           { signal, onProgress: setProgress },
                         );
                         if (!signal.aborted) {
+                          setProjectKey((current) => current + 1);
                           setFrames(result);
                           setOriginals(result);
                           setCutouts(null);
@@ -908,7 +986,11 @@ export const VehicleSpinStudio: React.FC<{
                 fullWidth
                 leftIcon={<Upload />}
                 disabled={
-                  Boolean(busy) || !reviewed || !vehicleOnly || !vehicle.title.trim()
+                  Boolean(busy) ||
+                  !reviewed ||
+                  !vehicleOnly ||
+                  !vehicle.title.trim() ||
+                  (!spin && capacity?.canCreate === false)
                 }
                 onClick={() =>
                   void run("Saving your spin", async (signal) => {
@@ -940,6 +1022,13 @@ export const VehicleSpinStudio: React.FC<{
               >
                 {spin ? "Resume upload" : "Save for sharing"}
               </Button>
+            )}
+            {!spin && frames.length > 0 && capacity?.canCreate === false && (
+              <p role="status" className="mt-3 text-sm leading-6 text-ink-2">
+                {capacity.storageAvailable === false
+                  ? "Archive storage is limited. Keep this page open; this recording has not been saved. Ask your administrator before saving."
+                  : "Your record allowance is full. Remove an older saved view before saving another."}
+              </p>
             )}
           </section>
           {spin?.canDeliver && (
@@ -1132,12 +1221,15 @@ export const VehicleSpinStudio: React.FC<{
         </h2>
         {capacity && (
           <p className="mt-2 text-sm text-ink-2" role="status">
-            {capacity.personalUsed} of {capacity.personalLimit} personal spaces used
+            Personal record allowance: {capacity.personalUsed} of{" "}
+            {capacity.personalLimit} used
             {" · "}
-            {capacity.dealershipUsed} of {capacity.dealershipLimit} dealership spaces
-            used.
+            Dealership record allowance: {capacity.dealershipUsed} of{" "}
+            {capacity.dealershipLimit} used.
             {!capacity.canCreate &&
-              " The library is full. Remove an older view or contact your administrator before creating another."}
+              (capacity.storageAvailable === false
+                ? " Archive storage is limited. Ask your administrator before saving another view."
+                : " The record allowance is full. Remove an older saved view before saving another.")}
           </p>
         )}
         {!library.length ? (

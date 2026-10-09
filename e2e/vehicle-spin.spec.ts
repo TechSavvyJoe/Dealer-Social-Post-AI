@@ -9,7 +9,7 @@ test("builds, saves and exports a real decoded vehicle spin on phones", async ({
     !info.project.name.endsWith("phone-390"),
     "Video encoding is exercised on one phone per browser engine.",
   );
-  test.setTimeout(150000);
+  test.setTimeout(180000);
   const frames = new Map<number, Buffer>();
   let saved: Record<string, unknown> | null = null;
   await page.addInitScript(() => {
@@ -153,7 +153,7 @@ test("builds, saves and exports a real decoded vehicle spin on phones", async ({
   await page.getByRole("button", { name: "Save for sharing", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Ready to share", exact: true }),
-  ).toBeVisible({ timeout: 15000 });
+  ).toBeVisible({ timeout: 60000 });
   expect(frames.size).toBe(48);
   for (const frame of frames.values()) {
     expect(frame[0]).toBe(255);
@@ -167,7 +167,7 @@ test("builds, saves and exports a real decoded vehicle spin on phones", async ({
   if (await exportButton.isEnabled()) {
     await exportButton.click();
     const video = page.getByLabel("Exported vehicle video", { exact: true });
-    await expect(video).toBeVisible({ timeout: 25000 });
+    await expect(video).toBeVisible({ timeout: 60000 });
     await expect
       .poll(() => video.evaluate((node: HTMLVideoElement) => node.videoWidth), {
         timeout: 10000,

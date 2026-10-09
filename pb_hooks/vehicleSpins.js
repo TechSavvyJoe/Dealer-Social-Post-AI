@@ -201,33 +201,14 @@ function sendFrame(c, record, angle) {
   }
 }
 function storageHasRoom(dfOutput, duOutput, incomingBytes) {
-  const lines = String(dfOutput).trim().split(/\r?\n/);
-  const fields = lines[lines.length - 1].trim().split(/\s+/);
-  const available = Number(fields[3]) * 1024;
-  const dataSize = Number(String(duOutput).trim().split(/\s+/)[0]) * 1024;
-  // Preserve enough space for an off-box backup's local archive plus a buffer.
-  return (
-    Number.isFinite(available) &&
-    Number.isFinite(dataSize) &&
-    dataSize >= 0 &&
-    available > dataSize + incomingBytes * 2 + 256 * 1024 * 1024
+  return require(__hooks + "/mediaStorage.js").storageHasRoom(
+    dfOutput,
+    duOutput,
+    incomingBytes,
   );
 }
 function ensureStorageRoom(incomingBytes) {
-  try {
-    const path = $app.dataDir();
-    if (
-      storageHasRoom(
-        toString($os.cmd("df", "-Pk", path).output()),
-        toString($os.cmd("du", "-sk", path).output()),
-        incomingBytes,
-      )
-    )
-      return;
-  } catch (_e) {
-    /* Fail closed if capacity cannot be measured. */
-  }
-  throw new Error("STORAGE");
+  require(__hooks + "/mediaStorage.js").ensureStorageRoom(incomingBytes);
 }
 // 25-dealership launch envelope: each store retains its own 30-spin ceiling.
 // The filesystem guard still reserves backup room before every upload.
@@ -250,13 +231,20 @@ function capacity(dao, dealerId, personId) {
         : row.total >= SPIN_LIMITS.total
           ? "FLEET_QUOTA"
           : "";
+  let storageAvailable = true;
+  try {
+    ensureStorageRoom(72 * 500000);
+  } catch (_e) {
+    storageAvailable = false;
+  }
   return {
     personalUsed: Number(row.person),
     personalLimit: SPIN_LIMITS.person,
     dealershipUsed: Number(row.dealer),
     dealershipLimit: SPIN_LIMITS.dealer,
-    canCreate: !reason,
-    reason: reason,
+    canCreate: !reason && storageAvailable,
+    storageAvailable: storageAvailable,
+    reason: reason || (storageAvailable ? "" : "STORAGE"),
   };
 }
 function adminCapacity() {
@@ -346,7 +334,6 @@ function handle(c, action) {
           error:
             "Use verified vehicle facts here. Offers requiring disclosures belong in the standard post flow.",
         });
-      ensureStorageRoom(count * 500000);
       let record;
       dao.runInTransaction(function (tx) {
         // Obtain a write lock before counting, so concurrent creates cannot
@@ -355,6 +342,7 @@ function handle(c, action) {
           .newQuery("UPDATE dealers SET updated = updated WHERE id = {:id}")
           .bind({ id: context.dealer.id })
           .execute();
+        ensureStorageRoom(count * 500000);
         const space = capacity(tx, context.dealer.id, context.person.id);
         if (!space.canCreate) throw new Error(space.reason);
         record = new Record(tx.findCollectionByNameOrId("vehicle_spins"), {
@@ -380,12 +368,12 @@ function handle(c, action) {
         angle >= record.getInt("frame_count")
       )
         return c.json(400, { error: "Invalid angle" });
-      ensureStorageRoom(500000);
       const file = $filesystem.fileFromMultipart(c.formFile("image"));
       dao.runInTransaction(function (tx) {
         lock(tx, record.id);
         const current = findOwned(c, context, tx);
         if (current.getString("state") !== "uploading") throw new Error("IMMUTABLE");
+        ensureStorageRoom(500000);
         const frame = new Record(tx.findCollectionByNameOrId("vehicle_spin_frames"), {
           spin: record.id,
           angle: angle,
@@ -451,6 +439,7 @@ function handle(c, action) {
       serialize(dao.findRecordById("vehicle_spins", record.id), context.dealer, true),
     );
   } catch (error) {
+    if (require(__hooks + "/mediaStorage.js").respondIfLimited(c, error)) return;
     const message = (error && error.message) || "";
     const messages = {
       STORAGE:

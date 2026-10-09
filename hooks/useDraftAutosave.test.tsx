@@ -46,6 +46,7 @@ const emptySetAnalysis: CaptionSetDeliveryAnalysis = {
   matches: [],
   prohibited: [],
 };
+const emptyGrounding = {};
 
 // A fresh, but STABLE (not re-created per render), options object — matching
 // how the real caller (components/PostResult.tsx) passes memoized values.
@@ -59,7 +60,7 @@ const baseOptions = (
   captionSetAnalysis: emptySetAnalysis,
   effectivePack: undefined,
   identityLocked: false,
-  grounding: {},
+  grounding: emptyGrounding,
   ...overrides,
 });
 
@@ -81,6 +82,176 @@ describe("useDraftAutosave", () => {
       await Promise.resolve();
     });
     expect(mocks.updatePostDraft).not.toHaveBeenCalled();
+  });
+
+  it("cancels an edit undone before the debounce and does not save it on leave", async () => {
+    vi.useFakeTimers();
+    const { result, rerender, unmount } = renderHook(
+      (props: UseDraftAutosaveOptions) => useDraftAutosave(props),
+      { initialProps: baseOptions() },
+    );
+    rerender(
+      baseOptions({
+        primaryCaption: "Unwanted caption",
+        captionAnalysis: analysisFor("Unwanted caption"),
+      }),
+    );
+    rerender(baseOptions());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    expect(result.current.status).toBe("idle");
+    unmount();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.updatePostDraft).not.toHaveBeenCalled();
+  });
+
+  it.each(["empty", "prohibited", "identity"])(
+    "discards the queued valid caption when the visible caption becomes %s",
+    async (kind) => {
+      vi.useFakeTimers();
+      const { result, rerender } = renderHook(
+        (props: UseDraftAutosaveOptions) => useDraftAutosave(props),
+        { initialProps: baseOptions() },
+      );
+      rerender(
+        baseOptions({
+          primaryCaption: "Earlier caption",
+          captionAnalysis: analysisFor("Earlier caption"),
+        }),
+      );
+      const next = analysisFor(kind === "empty" ? "" : "Latest caption");
+      if (kind === "prohibited")
+        next.compliance.prohibited = [{ prohibited: true } as never];
+      rerender(
+        baseOptions({
+          primaryCaption: next.caption,
+          captionAnalysis: next,
+          identityLocked: kind === "identity",
+        }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+        await result.current.retry();
+      });
+      expect(mocks.updatePostDraft).not.toHaveBeenCalled();
+      expect(result.current.status).toBe("idle");
+    },
+  );
+
+  it("saves an undo after the earlier edit has already started saving", async () => {
+    vi.useFakeTimers();
+    let resolveFirst!: (value: { post_revision: string }) => void;
+    mocks.updatePostDraft
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ post_revision: "rev-2" });
+    const { result, rerender } = renderHook(
+      (props: UseDraftAutosaveOptions) => useDraftAutosave(props),
+      { initialProps: baseOptions() },
+    );
+    rerender(
+      baseOptions({
+        primaryCaption: "Unwanted caption",
+        captionAnalysis: analysisFor("Unwanted caption"),
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    rerender(baseOptions());
+    resolveFirst({ post_revision: "rev-1" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(useAppStore.getState().generatedPost?.text).toBe("Original caption");
+    expect(result.current.status).toBe("saving");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    expect(mocks.updatePostDraft).toHaveBeenLastCalledWith(
+      "post-1",
+      expect.objectContaining({
+        caption: "Original caption",
+        expectedPostRevision: "rev-1",
+      }),
+    );
+    expect(result.current.status).toBe("saved");
+  });
+
+  it("does not mark an invalid visible caption saved when an older in-flight save finishes", async () => {
+    vi.useFakeTimers();
+    let resolveSave!: (value: { post_revision: string }) => void;
+    mocks.updatePostDraft.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(
+      (props: UseDraftAutosaveOptions) => useDraftAutosave(props),
+      { initialProps: baseOptions() },
+    );
+    rerender(
+      baseOptions({
+        primaryCaption: "Earlier caption",
+        captionAnalysis: analysisFor("Earlier caption"),
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    rerender(baseOptions({ primaryCaption: "", captionAnalysis: analysisFor("") }));
+    resolveSave({ post_revision: "rev-1" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe("idle");
+    expect(useAppStore.getState().generatedPost?.text).toBe("Original caption");
+    expect(result.current.lastRevisionRef.current).toBe("rev-1");
+  });
+
+  it("drops queued work after the signed-in workspace changes", async () => {
+    const { result } = renderHook(() => useDraftAutosave(baseOptions()));
+    act(() => {
+      result.current.stage({ caption: "Earlier workspace caption", disclosures: "" });
+    });
+    const saving = result.current.flush();
+    useAppStore.setState({ authEpoch: useAppStore.getState().authEpoch + 1 });
+    await act(async () => {
+      await expect(saving).resolves.toBe(false);
+    });
+    expect(mocks.updatePostDraft).not.toHaveBeenCalled();
+  });
+
+  it("discards every queued predecessor when the latest visible caption is emptied", async () => {
+    const { result, rerender } = renderHook(
+      (props: UseDraftAutosaveOptions) => useDraftAutosave(props),
+      { initialProps: baseOptions() },
+    );
+    let first!: Promise<boolean>;
+    let second!: Promise<boolean>;
+    act(() => {
+      result.current.stage({ caption: "First queued edit", disclosures: "" });
+      first = result.current.flush();
+      result.current.stage({ caption: "Second queued edit", disclosures: "" });
+      second = result.current.flush();
+    });
+    rerender(baseOptions({ primaryCaption: "", captionAnalysis: analysisFor("") }));
+    await act(async () => {
+      await expect(first).resolves.toBe(false);
+      await expect(second).resolves.toBe(false);
+    });
+    expect(mocks.updatePostDraft).not.toHaveBeenCalled();
+    expect(result.current.status).toBe("idle");
   });
 
   it("debounces 600ms after a caption change before saving", async () => {

@@ -110,10 +110,18 @@ export const openSpinVideo = async (file: File, signal?: AbortSignal) => {
   video.muted = true;
   video.playsInline = true;
   video.preload = "auto";
+  // WebKit may report loadeddata for a detached video while its drawable
+  // surface is still empty. Keep the decoder attached while preparing frames.
+  video.setAttribute("aria-hidden", "true");
+  video.tabIndex = -1;
+  video.style.cssText =
+    "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0.001;pointer-events:none";
+  document.body.appendChild(video);
   const close = () => {
     video.pause();
     video.removeAttribute("src");
     video.load();
+    video.remove();
     URL.revokeObjectURL(url);
   };
   try {
@@ -149,6 +157,86 @@ export const openSpinVideo = async (file: File, signal?: AbortSignal) => {
   }
 };
 
+/** Wait for a presented decoded frame, including the initial frame at time 0. */
+export const waitForSpinFrame = (
+  video: HTMLVideoElement,
+  signal?: AbortSignal,
+  targetTime?: number,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    checkSpinAbort(signal);
+    let settled = false;
+    let frameCallback: number | undefined;
+    let animationFrame: number | undefined;
+    const done = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (frameCallback !== undefined) video.cancelVideoFrameCallback(frameCallback);
+      if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
+      video.removeEventListener("error", failed);
+      video.removeEventListener("playing", playing);
+      video.removeEventListener("seeked", play);
+      signal?.removeEventListener("abort", aborted);
+      video.pause();
+      if (error) reject(error);
+      else resolve();
+    };
+    const failed = () =>
+      done(
+        new Error(
+          "This video could not be decoded. Try a camera recording saved as MP4.",
+        ),
+      );
+    const aborted = () => done(abortError());
+    const play = () => {
+      void video.play().catch(failed);
+    };
+    // Older browsers have no frame callback. The playing event establishes
+    // decoded data; two paint turns let their media surface catch up.
+    const playing = () => {
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = requestAnimationFrame(() => done());
+      });
+    };
+    const timer = setTimeout(
+      () =>
+        done(
+          new Error("The video picture took too long to decode. Try a shorter clip."),
+        ),
+      20000,
+    );
+    video.addEventListener("error", failed, { once: true });
+    signal?.addEventListener("abort", aborted, { once: true });
+    const frameCallbacks = typeof video.requestVideoFrameCallback === "function";
+    const seeking =
+      targetTime !== undefined && Math.abs(video.currentTime - targetTime) > 0.001;
+    const presented: VideoFrameRequestCallback = (_now, metadata) => {
+      if (settled) return;
+      // A delayed callback for the previous angle must not satisfy this seek.
+      // This allows neighboring camera frames, within the shortest angle
+      // spacing (4 seconds / 48 samples), so adjacent samples cannot alias.
+      if (
+        targetTime !== undefined &&
+        (!Number.isFinite(metadata.mediaTime) ||
+          Math.abs(metadata.mediaTime - targetTime) > 0.05)
+      ) {
+        frameCallback = video.requestVideoFrameCallback(presented);
+        return;
+      }
+      done();
+    };
+    if (frameCallbacks) frameCallback = video.requestVideoFrameCallback(presented);
+    else video.addEventListener("playing", playing, { once: true });
+    // Register before seeking: Safari presents paused seek frames, but a
+    // callback registered after seeked would wait for subsequent playback.
+    // Only the initial unpresented frame needs muted playback to prime decoding.
+    if (seeking) {
+      if (!frameCallbacks) video.addEventListener("seeked", play, { once: true });
+      video.currentTime = targetTime;
+    } else play();
+  });
+
 export const canvasJpeg = (canvas: HTMLCanvasElement, quality = 0.86): Promise<Blob> =>
   new Promise((resolve, reject) =>
     canvas.toBlob(
@@ -180,15 +268,7 @@ export const extractSpinFrames = async (
     const frames: Blob[] = [];
     for (let index = 0; index < times.length; index++) {
       checkSpinAbort(options.signal);
-      if (Math.abs(source.video.currentTime - times[index]) > 0.001)
-        await mediaEvent(
-          source.video,
-          "seeked",
-          () => {
-            source.video.currentTime = times[index];
-          },
-          options.signal,
-        );
+      await waitForSpinFrame(source.video, options.signal, times[index]);
       context.drawImage(source.video, 0, 0, canvas.width, canvas.height);
       let frame = await canvasJpeg(canvas);
       if (frame.size > 450000) frame = await canvasJpeg(canvas, 0.65);

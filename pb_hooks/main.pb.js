@@ -2274,7 +2274,16 @@ routerAdd("POST", "/api/app/photo_releases", (c) => {
     };
     form.loadData(data);
     form.addFiles("signature_png", signatureFile);
-    form.submit();
+    const storage = require(__hooks + "/mediaStorage.js");
+    storage.withMediaWrite(
+      $app.dao(),
+      dealer.id,
+      storage.MEDIA_BYTES.signature,
+      function (tx) {
+        form.setDao(tx);
+        form.submit();
+      },
+    );
 
     return c.json(200, {
       id: record.id,
@@ -2283,6 +2292,7 @@ routerAdd("POST", "/api/app/photo_releases", (c) => {
       vin: record.getString("vin"),
     });
   } catch (err) {
+    if (require(__hooks + "/mediaStorage.js").respondIfLimited(c, err)) return;
     console.error("[/api/app/photo_releases] error", err);
     return c.json(400, { error: helpers.safePhotoReleaseError(err) });
   }
@@ -2481,6 +2491,49 @@ routerAdd("GET", "/api/app/website-destinations", (c) => {
 });
 
 // ---- Posts (log + leaderboard + approval) ------------------------------
+routerAdd("GET", "/api/app/post-operations/:operation", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const operations = require(__hooks + "/postSaveOperations.js");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const operation = c.pathParam("operation");
+  const digest = String(c.queryParam("payload_digest") || "");
+  if (!operations.validOperation(operation) || !/^[a-f0-9]{64}$/.test(digest))
+    return c.json(400, { error: "Invalid saved-result lookup" });
+  const token = helpers.readSessionToken(c);
+  const owner = token ? helpers.hashSessionToken(token) : "";
+  try {
+    const result = operations.withFence(
+      $app.dao(),
+      context.dealer.id,
+      function (txDao) {
+        const record = operations.find(
+          txDao,
+          context.dealer.id,
+          owner,
+          operation,
+          digest,
+        );
+        return record ? operations.response(record, context.dealer) : null;
+      },
+    );
+    c.response().header().set("Cache-Control", "private, no-store");
+    return result
+      ? c.json(200, result)
+      : c.json(404, {
+          code: "POST_SAVE_NOT_FOUND",
+          error: "This generated result has not been saved",
+        });
+  } catch (err) {
+    if (err && err.postSaveCode)
+      return c.json(err.postSaveStatus, { code: err.postSaveCode, error: err.message });
+    return c.json(503, {
+      code: "POST_SAVE_RECONCILIATION_UNAVAILABLE",
+      error: "The saved result could not be checked. Keep this post open and retry.",
+    });
+  }
+});
+
 routerAdd("POST", "/api/app/posts", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const policies = require(__hooks + "/requestPolicies.js");
@@ -2517,615 +2570,674 @@ routerAdd("POST", "/api/app/posts", (c) => {
       retry_after_seconds: retryAfter,
     });
   }
+  const operations = require(__hooks + "/postSaveOperations.js");
   let generationClaimToken = "";
   let generationClaimOwner = "";
   let generationClaimCount = 0;
   let createdPostRecord = null;
 
   try {
-    const posts = $app.dao().findCollectionByNameOrId("posts");
-    if (!posts) return c.json(500, { error: "posts collection missing" });
+    const outcome = operations.withFence($app.dao(), dealer.id, function (txDao) {
+      const respond = function (status, body) {
+        return { status: status, body: body };
+      };
+      const posts = txDao.findCollectionByNameOrId("posts");
+      if (!posts) return respond(500, { error: "posts collection missing" });
 
-    const record = new Record(posts);
-    const form = new RecordUpsertForm($app, record);
-    form.setFullManageAccess(true);
-    const body = $apis.requestInfo(c).data || {};
-    const protectedCustomerName = helpers.assertString(
-      (body.customer_name || "").toString().trim(),
-      120,
-    );
-    const websitePublications = require(__hooks + "/websitePublications.js");
-    const parsedWebsiteDraft = websitePublications.parseWebsiteDraft(
-      body.website_draft,
-    );
-    if (!parsedWebsiteDraft.ok) {
-      return c.json(400, { error: parsedWebsiteDraft.error });
-    }
-    let websiteDraft = parsedWebsiteDraft.value;
-    let websiteDraftSerialized = parsedWebsiteDraft.serialized;
-    if (websiteDraft && websiteDraft.enabled) {
-      if (websiteDraft.customerDisplayName && !protectedCustomerName) {
-        return c.json(400, {
-          error: "A customer identity is required before using a public customer label",
+      const record = new Record(posts);
+      record.refreshId();
+      const form = new RecordUpsertForm($app, record);
+      form.setFullManageAccess(true);
+      const body = $apis.requestInfo(c).data || {};
+      const tokenForSave = helpers.readSessionToken(c);
+      const ownerForSave = tokenForSave ? helpers.hashSessionToken(tokenForSave) : "";
+      const operationId = String(body.save_operation_id || "");
+      if (operationId && !operations.validOperation(operationId))
+        return respond(400, {
+          code: "POST_SAVE_OPERATION_INVALID",
+          error: "Invalid save operation",
         });
+      let creativeFile = null;
+      let creativeMime = "";
+      try {
+        const header = c.formFile("creative_image");
+        if (header) {
+          creativeFile = $filesystem.fileFromMultipart(header);
+          creativeMime = String(header.header.get("Content-Type") || "").toLowerCase();
+        }
+      } catch (_e) {}
+      const payloadDigest = operationId
+        ? operations.fingerprint(body, creativeFile, creativeMime)
+        : "";
+      if (operationId && payloadDigest !== String(body.save_payload_digest || ""))
+        return respond(400, {
+          code: "POST_SAVE_PAYLOAD_INVALID",
+          error: "Generated save payload did not match its digest",
+        });
+      if (operationId) {
+        const replay = operations.find(
+          txDao,
+          dealer.id,
+          ownerForSave,
+          operationId,
+          payloadDigest,
+        );
+        if (replay) return respond(200, operations.response(replay, dealer));
       }
-    }
-    const scenarioId = helpers.assertString(
-      (body.scenario_id || "").toString().trim(),
-      80,
-    );
-    const scenarioPolicy = helpers.resolvePostScenarioPolicy(
-      scenarioId,
-      dealer.getString("custom_scenarios"),
-      protectedCustomerName ||
-        (websiteDraft && websiteDraft.enabled
-          ? websiteDraft.customerDisplayName || ""
-          : ""),
-    );
-    if (!scenarioPolicy.ok) {
-      return c.json(400, { error: "Invalid post scenario" });
-    }
-    if (
-      websiteDraft &&
-      websiteDraft.enabled &&
-      !websitePublications.websiteDraftMatchesScenario(
+
+      const protectedCustomerName = helpers.assertString(
+        (body.customer_name || "").toString().trim(),
+        120,
+      );
+      const websitePublications = require(__hooks + "/websitePublications.js");
+      const parsedWebsiteDraft = websitePublications.parseWebsiteDraft(
+        body.website_draft,
+      );
+      if (!parsedWebsiteDraft.ok) {
+        return respond(400, { error: parsedWebsiteDraft.error });
+      }
+      let websiteDraft = parsedWebsiteDraft.value;
+      let websiteDraftSerialized = parsedWebsiteDraft.serialized;
+      if (websiteDraft && websiteDraft.enabled) {
+        if (websiteDraft.customerDisplayName && !protectedCustomerName) {
+          return respond(400, {
+            error:
+              "A customer identity is required before using a public customer label",
+          });
+        }
+      }
+      const scenarioId = helpers.assertString(
+        (body.scenario_id || "").toString().trim(),
+        80,
+      );
+      const scenarioPolicy = helpers.resolvePostScenarioPolicy(
         scenarioId,
         dealer.getString("custom_scenarios"),
-        websiteDraft,
-      )
-    ) {
-      return c.json(400, {
-        error: "Website draft does not match the selected post type",
-        code: "WEBSITE_MAPPING_CONFLICT",
-      });
-    }
-    const releaseRequired = scenarioPolicy.releaseRequired;
-    const allowedPlatformIds = helpers.allowedPostPlatformIds();
-    const allowedPrimaryFormatIds = [
-      "feed_portrait",
-      "feed_square",
-      "story_vertical",
-      "marketplace",
-      "gbp",
-    ];
-    const allowedImageAspectRatios = ["1:1", "4:5", "9:16", "16:9", "4:3"];
-    const allowedMediaOutputModes = ["photo", "video", "both"];
-
-    // Preserve the exact destination mix and generated master canvas so a
-    // History reopen uses the same sizing workflow. Multipart values arrive
-    // as strings; reject malformed/unknown values rather than storing
-    // arbitrary client metadata alongside customer creatives.
-    const rawPlatformIds = helpers.assertString(
-      (body.platform_ids || "").toString(),
-      400,
-    );
-    let parsedPlatformIds = [];
-    if (rawPlatformIds) {
-      try {
-        parsedPlatformIds = JSON.parse(rawPlatformIds);
-      } catch (_e) {
-        return c.json(400, { error: "Invalid platform selection" });
+        protectedCustomerName ||
+          (websiteDraft && websiteDraft.enabled
+            ? websiteDraft.customerDisplayName || ""
+            : ""),
+      );
+      if (!scenarioPolicy.ok) {
+        return respond(400, { error: "Invalid post scenario" });
       }
-      if (!Array.isArray(parsedPlatformIds)) {
-        return c.json(400, { error: "Invalid platform selection" });
-      }
-    }
-    if (parsedPlatformIds.length > allowedPlatformIds.length) {
-      return c.json(400, { error: "Too many platform selections" });
-    }
-    const platformIds = [];
-    for (let i = 0; i < parsedPlatformIds.length; i++) {
-      const platformId = parsedPlatformIds[i];
       if (
-        typeof platformId !== "string" ||
-        allowedPlatformIds.indexOf(platformId) === -1
+        websiteDraft &&
+        websiteDraft.enabled &&
+        !websitePublications.websiteDraftMatchesScenario(
+          scenarioId,
+          dealer.getString("custom_scenarios"),
+          websiteDraft,
+        )
       ) {
-        return c.json(400, { error: "Invalid platform selection" });
-      }
-      if (platformIds.indexOf(platformId) === -1) {
-        platformIds.push(platformId);
-      }
-    }
-    const primaryFormatId = helpers.assertString(
-      (body.primary_format_id || "").toString(),
-      40,
-    );
-    if (primaryFormatId && allowedPrimaryFormatIds.indexOf(primaryFormatId) === -1) {
-      return c.json(400, { error: "Invalid primary image format" });
-    }
-    const imageAspectRatio = helpers.assertString(
-      (body.image_aspect_ratio || "").toString(),
-      10,
-    );
-    if (imageAspectRatio && allowedImageAspectRatios.indexOf(imageAspectRatio) === -1) {
-      return c.json(400, { error: "Invalid image aspect ratio" });
-    }
-    const expectedAspectByFormat = {
-      feed_portrait: "4:5",
-      feed_square: "1:1",
-      story_vertical: "9:16",
-      marketplace: "16:9",
-      gbp: "4:3",
-    };
-    if (
-      !!primaryFormatId !== !!imageAspectRatio ||
-      (primaryFormatId && expectedAspectByFormat[primaryFormatId] !== imageAspectRatio)
-    ) {
-      return c.json(400, { error: "Output format and aspect ratio do not match" });
-    }
-    const mediaOutputMode =
-      helpers.assertString((body.media_output_mode || "photo").toString(), 10) ||
-      "photo";
-    if (allowedMediaOutputModes.indexOf(mediaOutputMode) === -1) {
-      return c.json(400, { error: "Invalid media output mode" });
-    }
-    const parsedPlatformCaptions = helpers.parsePostPlatformCaptions(
-      body.platform_captions,
-      allowedPlatformIds,
-      platformIds,
-    );
-    if (!parsedPlatformCaptions.ok) {
-      return c.json(400, { error: parsedPlatformCaptions.error });
-    }
-
-    // Attribution comes exclusively from the centrally validated session.
-    // Legacy client fields are ignored so a browser cannot credit another
-    // salesperson or inject a free-text identity into history/leaderboards.
-    const salespersonId = context.person ? context.person.id : "";
-    const salespersonName = context.person
-      ? context.person.getString("name")
-      : "System Admin";
-
-    // A store's approval policy is applied only from server-resolved facts:
-    // the scenario's brand category, whether the post involves a customer, and
-    // how many of the author's posts a manager has approved. Anything unknown
-    // is reviewed (see policies.initialApprovalStatus).
-    const approvalMapping = websitePublications.resolveWebsiteMapping(
-      scenarioId,
-      dealer.getString("custom_scenarios"),
-    );
-    const approvalStatus = policies.initialApprovalStatus(dealer, {
-      category: approvalMapping ? approvalMapping.category : "",
-      involvesCustomer:
-        releaseRequired ||
-        !approvalMapping ||
-        approvalMapping.kind === "customer_story",
-      countApprovedPosts: function () {
-        if (!salespersonId) return NaN;
-        const row = new DynamicModel({ total: 0 });
-        $app
-          .dao()
-          .db()
-          .newQuery(
-            "SELECT COUNT(*) AS total FROM posts " +
-              "WHERE dealer = {:dealer} AND salesperson_id = {:person} " +
-              "AND approval_status = 'approved'",
-          )
-          .bind({ dealer: dealer.id, person: salespersonId })
-          .one(row);
-        return Number(row.total);
-      },
-    });
-    let caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
-    let disclosures = helpers.assertString(
-      (body.disclosures || "").toString().trim(),
-      12000,
-    );
-    if (approvalStatus === "pending" && !caption) {
-      return c.json(400, { error: "Review caption is required" });
-    }
-    const publicCustomerName =
-      websitePublications.publicCustomerLabel(protectedCustomerName);
-    if (
-      websiteDraft &&
-      websiteDraft.enabled &&
-      websiteDraft.customerDisplayName &&
-      !websitePublications.releaseAuthorizesPublicCustomerLabel(
-        protectedCustomerName,
-        websiteDraft.customerDisplayName,
-      )
-    ) {
-      return c.json(400, {
-        error:
-          "The website customer label must be the exact approved public first name",
-        code: "CUSTOMER_IDENTITY_CONFLICT",
-      });
-    }
-    const platformCaptionIds = Object.keys(parsedPlatformCaptions.value);
-    const identityValues = [caption, disclosures].concat(
-      platformCaptionIds.map(function (platformId) {
-        return parsedPlatformCaptions.value[platformId];
-      }),
-    );
-    const websiteIdentityOffset = identityValues.length;
-    if (websiteDraft && websiteDraft.enabled) {
-      identityValues.push(
-        websiteDraft.title || "",
-        websiteDraft.body || "",
-        websiteDraft.altText || "",
-      );
-    }
-    // Canonical disclosure material is stripped before the customer-name guard
-    // reads anything (policies.reviewCustomerIdentityExcludingDisclosures).
-    const identityReview = policies.reviewCustomerIdentityExcludingDisclosures(
-      websitePublications.reviewPostCustomerIdentity,
-      protectedCustomerName,
-      identityValues,
-      [
-        websitePublications.groundedIdentityPhrase(dealer.getString("name")),
-        websitePublications.groundedIdentityPhrase(dealer.getString("oem_affiliation")),
-        salespersonName,
-        websitePublications.publicCustomerLabel(salespersonName),
-        websitePublications.groundedIdentityPhrase(
-          websiteDraft && websiteDraft.enabled
-            ? websitePublications.groundedVehicleIdentityPhrase(
-                websiteDraft.vehicleDescription || "",
-              )
-            : "",
-        ),
-      ],
-      scenarioPolicy.releaseRequired && !publicCustomerName,
-    );
-    if (identityReview.unexpectedIdentity) {
-      return c.json(400, {
-        error:
-          "Customer-name review required. Remove any unapproved customer name and try again.",
-        code: "CUSTOMER_IDENTITY_CONFLICT",
-      });
-    }
-    caption = identityReview.projectedValues[0] || "";
-    disclosures = identityReview.projectedValues[1] || "";
-    const projectedPlatformCaptions = {};
-    for (let i = 0; i < platformCaptionIds.length; i++) {
-      projectedPlatformCaptions[platformCaptionIds[i]] =
-        identityReview.projectedValues[i + 2] || "";
-    }
-    parsedPlatformCaptions.value = projectedPlatformCaptions;
-    parsedPlatformCaptions.serialized = JSON.stringify(projectedPlatformCaptions);
-    if (websiteDraft && websiteDraft.enabled) {
-      websiteDraft = Object.assign({}, websiteDraft, {
-        title: identityReview.projectedValues[websiteIdentityOffset] || "",
-        body: identityReview.projectedValues[websiteIdentityOffset + 1] || "",
-        altText: identityReview.projectedValues[websiteIdentityOffset + 2] || "",
-      });
-      if (websiteDraft.kind === "customer_story" && publicCustomerName) {
-        websiteDraft.customerDisplayName = publicCustomerName;
-      }
-      websiteDraftSerialized = JSON.stringify(websiteDraft);
-    }
-    {
-      const compliance = policies.validatePostComplianceSet(
-        [caption].concat(Object.values(parsedPlatformCaptions.value)),
-        disclosures,
-        dealer.getString("banned_phrases"),
-      );
-      if (!compliance.ok) {
-        return c.json(400, { error: compliance.error });
-      }
-    }
-
-    // Creative archive: accept image for any post so History can reopen for
-    // re-share/export. Approval-pending still requires caption + image.
-    let creativeFile = null;
-    try {
-      const header = c.formFile("creative_image");
-      if (header) creativeFile = $filesystem.fileFromMultipart(header);
-    } catch (_e) {}
-    if (approvalStatus === "pending" && !creativeFile) {
-      return c.json(400, { error: "Review image is required" });
-    }
-    if (websiteDraft && websiteDraft.enabled && !creativeFile) {
-      return c.json(400, { error: "Website creative image is required" });
-    }
-
-    // Invalid requests above do not consume this normal storage allowance.
-    const postHourly = helpers.checkProxyRateLimit(
-      "app-write:post:hour:" + dealer.id + ":" + postWriter,
-      20,
-      60 * 60 * 1000,
-    );
-    const postDaily = helpers.checkProxyRateLimit(
-      "app-write:post:day:" + dealer.id + ":" + postWriter,
-      50,
-      24 * 60 * 60 * 1000,
-    );
-    // Bound the dealership's aggregate private-media growth as well as each
-    // person's usage. This intentionally does not delete History records.
-    const postDealerDaily = helpers.checkProxyRateLimit(
-      "app-write:post:dealer:day:" + dealer.id,
-      100,
-      24 * 60 * 60 * 1000,
-    );
-    if (!postHourly.ok || !postDaily.ok || !postDealerDaily.ok) {
-      const retryAfter = Math.max(
-        1,
-        Math.ceil(
-          Math.max(
-            postHourly.retryAfterMs || 0,
-            postDaily.retryAfterMs || 0,
-            postDealerDaily.retryAfterMs || 0,
-          ) / 1000,
-        ),
-      );
-      c.response().header().set("Retry-After", String(retryAfter));
-      return c.json(429, {
-        error: "WRITE_RATE_LIMITED",
-        code: "WRITE_RATE_LIMITED",
-        message: postDealerDaily.ok
-          ? "The post save limit was reached. Try again later."
-          : "The dealership reached its daily archive limit. Ask a manager to check storage.",
-        retry_after_seconds: retryAfter,
-      });
-    }
-
-    // Load only the server-approved text fields, then attach the parsed upload
-    // explicitly. This avoids trusting multipart filename strings as record
-    // values and keeps all tenant/policy/audit fields server-controlled.
-    const token = helpers.readSessionToken(c);
-    // Store caption/disclosures whenever provided (library reopen); always
-    // required for pending approval.
-    const storeCaption = approvalStatus === "pending" || caption ? caption : "";
-    const storeDisclosures =
-      approvalStatus === "pending" || disclosures ? disclosures : "";
-    const modelPolicy = policies.geminiModelPolicySnapshot();
-    const ownerSessionHash = token ? helpers.hashSessionToken(token) : "";
-    generationClaimOwner = ownerSessionHash;
-    const captionSourceCandidate = helpers.assertString(
-      (body.caption_source || "").toString(),
-      30,
-    );
-    // Operational provenance is derived from prompt-free proxy events bound to
-    // this exact session AND this exact logical model attempt. A broad recent
-    // session window allowed an older AI success to relabel a later local safe
-    // template, so attempt ids are now required for affirmative AI metadata.
-    const normalizeAttemptId = function (value) {
-      const candidate = (value || "").toString();
-      return /^[A-Za-z0-9_-]{16,80}$/.test(candidate) ? candidate : "";
-    };
-    const captionAttemptId = normalizeAttemptId(body.caption_attempt_id);
-    const imageAttemptId = normalizeAttemptId(body.image_attempt_id);
-    const eventCutoff = helpers.databaseTimestamp(
-      new Date(Date.now() - 20 * 60 * 1000).toISOString(),
-    );
-    const loadAttemptEvents = function (attemptId) {
-      if (!ownerSessionHash || !attemptId) return [];
-      try {
-        return $app
-          .dao()
-          .findRecordsByFilter(
-            "generation_events",
-            "owner_session_hash = {:owner} && dealer = {:dealer} && attempt_id = {:attempt} && occurred_at >= {:cutoff}",
-            "-occurred_at",
-            20,
-            0,
-            {
-              owner: ownerSessionHash,
-              dealer: dealer.id,
-              attempt: attemptId,
-              cutoff: eventCutoff,
-            },
-          )
-          .filter(function (event) {
-            return !event.getString("consumed_post");
-          });
-      } catch (_e) {
-        return [];
-      }
-    };
-    const captionGenerationEvents = loadAttemptEvents(captionAttemptId);
-    const imageGenerationEvents =
-      imageAttemptId && imageAttemptId !== captionAttemptId
-        ? loadAttemptEvents(imageAttemptId)
-        : [];
-    const recentGenerationEvents =
-      captionGenerationEvents.concat(imageGenerationEvents);
-    if (recentGenerationEvents.length) {
-      try {
-        generationClaimToken = helpers.claimGenerationEvents(
-          recentGenerationEvents.map(function (event) {
-            return event.id;
-          }),
-          ownerSessionHash,
-          dealer.id,
-        );
-        generationClaimCount = recentGenerationEvents.length;
-      } catch (_e) {
-        return c.json(409, {
-          error: "GENERATION_ATTEMPT_ALREADY_USED",
-          code: "GENERATION_ATTEMPT_ALREADY_USED",
-          message: "This generation result was already saved to another post.",
+        return respond(400, {
+          error: "Website draft does not match the selected post type",
+          code: "WEBSITE_MAPPING_CONFLICT",
         });
       }
-    }
-    // Which text tasks may be claimed as "an AI wrote this caption". This is
-    // provenance, not a task inventory: `vision_review` is a text task on the
-    // same models, but it is a QC read of a rendered image and must never
-    // relabel a locally templated caption as AI-generated. Any new text task
-    // has to be listed here explicitly, with its answer.
-    const captionTasks = {
-      caption: true,
-      caption_regenerate: true,
-      caption_edit: true,
-      vision_review: false,
-    };
-    const imageTasks = { image_standard: true, image_studio: true };
-    let latestCaptionSuccess = null;
-    let latestImageSuccess = null;
-    let latestAnySuccess = null;
-    let serverFallbackCount = 0;
-    captionGenerationEvents.forEach(function (event) {
-      const task = event.getString("task");
-      const succeeded = event.getBool
-        ? event.getBool("succeeded")
-        : !!event.get("succeeded");
-      if (!succeeded) {
-        serverFallbackCount += 1;
-        return;
-      }
-      if (!latestAnySuccess) latestAnySuccess = event;
-      if (!latestCaptionSuccess && captionTasks[task]) {
-        latestCaptionSuccess = event;
-      }
-    });
-    imageGenerationEvents.forEach(function (event) {
-      const task = event.getString("task");
-      const succeeded = event.getBool
-        ? event.getBool("succeeded")
-        : !!event.get("succeeded");
-      if (!succeeded) {
-        serverFallbackCount += 1;
-        return;
-      }
-      if (!latestImageSuccess && imageTasks[task]) latestImageSuccess = event;
-      if (
-        !latestAnySuccess ||
-        event.getString("occurred_at") > latestAnySuccess.getString("occurred_at")
-      ) {
-        latestAnySuccess = event;
-      }
-    });
-    const captionSource =
-      captionSourceCandidate === "custom"
-        ? "custom"
-        : captionSourceCandidate === "basic_fallback"
-          ? "basic_fallback"
-          : latestCaptionSuccess
-            ? "ai"
-            : "";
-    const generationTier = latestImageSuccess
-      ? latestImageSuccess.getString("tier")
-      : "";
-    const generationModel = latestAnySuccess ? latestAnySuccess.getString("model") : "";
-    const generationFallbackCount = Math.min(20, serverFallbackCount);
-    const generationLastSuccessAt = latestAnySuccess
-      ? latestAnySuccess.getString("occurred_at")
-      : "";
-    const modelPolicyVersion = recentGenerationEvents.length
-      ? String(modelPolicy.version)
-      : "";
-    form.loadData({
-      dealer: dealer.id,
-      salesperson_name: helpers.assertString(salespersonName, 120),
-      salesperson_id: salespersonId,
-      generated_at: new Date().toISOString(),
-      style: helpers.assertString((body.style || "").toString(), 60),
-      tone: helpers.assertString((body.tone || "").toString(), 60),
-      customer_name: protectedCustomerName,
-      scenario_id: scenarioId,
-      vin: helpers.assertString((body.vin || "").toString(), 17),
-      scheduled_for: helpers.assertString((body.scheduled_for || "").toString(), 40),
-      // Release status is derived from a durably stored, same-dealer signature
-      // by the photo-releases endpoint. Never trust a client assertion here.
-      has_release: false,
-      release_required: releaseRequired,
-      release_status: releaseRequired ? "pending" : "not_required",
-      // Video metrics are recorded only by the owner-scoped completion route
-      // after rendering succeeds; a client cannot pre-claim success here.
-      has_video: false,
-      approval_status: approvalStatus,
-      approved_by: "",
-      approved_at: "",
-      caption: storeCaption,
-      disclosures: storeDisclosures,
-      platform_ids: JSON.stringify(platformIds),
-      media_output_mode: mediaOutputMode,
-      platform_captions: parsedPlatformCaptions.serialized,
-      primary_format_id: primaryFormatId,
-      image_aspect_ratio: imageAspectRatio,
-      caption_source: captionSource,
-      generation_tier: generationTier,
-      generation_model: generationModel,
-      generation_fallback_count: generationFallbackCount,
-      generation_last_success_at: generationLastSuccessAt,
-      model_policy_version: modelPolicyVersion,
-      website_draft: websiteDraftSerialized,
-      // Every derived artifact (approval polling, protected creative, video
-      // completion) is bound to the opaque browser session that logged it.
-      owner_session_hash: ownerSessionHash,
-      owner_person_id: salespersonId,
-      attribution_authoritative: !!context.person,
-    });
-    if (creativeFile) form.addFiles("creative_image", creativeFile);
-    form.submit();
-    createdPostRecord = record;
+      const releaseRequired = scenarioPolicy.releaseRequired;
+      const allowedPlatformIds = helpers.allowedPostPlatformIds();
+      const allowedPrimaryFormatIds = [
+        "feed_portrait",
+        "feed_square",
+        "story_vertical",
+        "marketplace",
+        "gbp",
+      ];
+      const allowedImageAspectRatios = ["1:1", "4:5", "9:16", "16:9", "4:3"];
+      const allowedMediaOutputModes = ["photo", "video", "both"];
 
-    if (approvalStatus === "pending" && !record.getString("creative_image")) {
-      // Never create a queue item a manager cannot actually inspect.
-      let postRemoved = false;
-      try {
-        $app.dao().deleteRecord(record);
-        postRemoved = true;
-      } catch (_e) {
-        console.error("[posts] failed to remove incomplete approval post");
+      // Preserve the exact destination mix and generated master canvas so a
+      // History reopen uses the same sizing workflow. Multipart values arrive
+      // as strings; reject malformed/unknown values rather than storing
+      // arbitrary client metadata alongside customer creatives.
+      const rawPlatformIds = helpers.assertString(
+        (body.platform_ids || "").toString(),
+        400,
+      );
+      let parsedPlatformIds = [];
+      if (rawPlatformIds) {
+        try {
+          parsedPlatformIds = JSON.parse(rawPlatformIds);
+        } catch (_e) {
+          return respond(400, { error: "Invalid platform selection" });
+        }
+        if (!Array.isArray(parsedPlatformIds)) {
+          return respond(400, { error: "Invalid platform selection" });
+        }
       }
-      createdPostRecord = null;
-      if (generationClaimToken && postRemoved) {
-        helpers.releaseGenerationEventClaims(
+      if (parsedPlatformIds.length > allowedPlatformIds.length) {
+        return respond(400, { error: "Too many platform selections" });
+      }
+      const platformIds = [];
+      for (let i = 0; i < parsedPlatformIds.length; i++) {
+        const platformId = parsedPlatformIds[i];
+        if (
+          typeof platformId !== "string" ||
+          allowedPlatformIds.indexOf(platformId) === -1
+        ) {
+          return respond(400, { error: "Invalid platform selection" });
+        }
+        if (platformIds.indexOf(platformId) === -1) {
+          platformIds.push(platformId);
+        }
+      }
+      const primaryFormatId = helpers.assertString(
+        (body.primary_format_id || "").toString(),
+        40,
+      );
+      if (primaryFormatId && allowedPrimaryFormatIds.indexOf(primaryFormatId) === -1) {
+        return respond(400, { error: "Invalid primary image format" });
+      }
+      const imageAspectRatio = helpers.assertString(
+        (body.image_aspect_ratio || "").toString(),
+        10,
+      );
+      if (
+        imageAspectRatio &&
+        allowedImageAspectRatios.indexOf(imageAspectRatio) === -1
+      ) {
+        return respond(400, { error: "Invalid image aspect ratio" });
+      }
+      const expectedAspectByFormat = {
+        feed_portrait: "4:5",
+        feed_square: "1:1",
+        story_vertical: "9:16",
+        marketplace: "16:9",
+        gbp: "4:3",
+      };
+      if (
+        !!primaryFormatId !== !!imageAspectRatio ||
+        (primaryFormatId &&
+          expectedAspectByFormat[primaryFormatId] !== imageAspectRatio)
+      ) {
+        return respond(400, { error: "Output format and aspect ratio do not match" });
+      }
+      const mediaOutputMode =
+        helpers.assertString((body.media_output_mode || "photo").toString(), 10) ||
+        "photo";
+      if (allowedMediaOutputModes.indexOf(mediaOutputMode) === -1) {
+        return respond(400, { error: "Invalid media output mode" });
+      }
+      const parsedPlatformCaptions = helpers.parsePostPlatformCaptions(
+        body.platform_captions,
+        allowedPlatformIds,
+        platformIds,
+      );
+      if (!parsedPlatformCaptions.ok) {
+        return respond(400, { error: parsedPlatformCaptions.error });
+      }
+
+      // Attribution comes exclusively from the centrally validated session.
+      // Legacy client fields are ignored so a browser cannot credit another
+      // salesperson or inject a free-text identity into history/leaderboards.
+      const salespersonId = context.person ? context.person.id : "";
+      const salespersonName = context.person
+        ? context.person.getString("name")
+        : "System Admin";
+
+      // A store's approval policy is applied only from server-resolved facts:
+      // the scenario's brand category, whether the post involves a customer, and
+      // how many of the author's posts a manager has approved. Anything unknown
+      // is reviewed (see policies.initialApprovalStatus).
+      const approvalMapping = websitePublications.resolveWebsiteMapping(
+        scenarioId,
+        dealer.getString("custom_scenarios"),
+      );
+      const approvalStatus = policies.initialApprovalStatus(dealer, {
+        category: approvalMapping ? approvalMapping.category : "",
+        involvesCustomer:
+          releaseRequired ||
+          !approvalMapping ||
+          approvalMapping.kind === "customer_story",
+        countApprovedPosts: function () {
+          if (!salespersonId) return NaN;
+          const row = new DynamicModel({ total: 0 });
+          $app
+            .dao()
+            .db()
+            .newQuery(
+              "SELECT COUNT(*) AS total FROM posts " +
+                "WHERE dealer = {:dealer} AND salesperson_id = {:person} " +
+                "AND approval_status = 'approved'",
+            )
+            .bind({ dealer: dealer.id, person: salespersonId })
+            .one(row);
+          return Number(row.total);
+        },
+      });
+      let caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
+      let disclosures = helpers.assertString(
+        (body.disclosures || "").toString().trim(),
+        12000,
+      );
+      if (approvalStatus === "pending" && !caption) {
+        return respond(400, { error: "Review caption is required" });
+      }
+      const publicCustomerName =
+        websitePublications.publicCustomerLabel(protectedCustomerName);
+      if (
+        websiteDraft &&
+        websiteDraft.enabled &&
+        websiteDraft.customerDisplayName &&
+        !websitePublications.releaseAuthorizesPublicCustomerLabel(
+          protectedCustomerName,
+          websiteDraft.customerDisplayName,
+        )
+      ) {
+        return respond(400, {
+          error:
+            "The website customer label must be the exact approved public first name",
+          code: "CUSTOMER_IDENTITY_CONFLICT",
+        });
+      }
+      const platformCaptionIds = Object.keys(parsedPlatformCaptions.value);
+      const identityValues = [caption, disclosures].concat(
+        platformCaptionIds.map(function (platformId) {
+          return parsedPlatformCaptions.value[platformId];
+        }),
+      );
+      const websiteIdentityOffset = identityValues.length;
+      if (websiteDraft && websiteDraft.enabled) {
+        identityValues.push(
+          websiteDraft.title || "",
+          websiteDraft.body || "",
+          websiteDraft.altText || "",
+        );
+      }
+      // Canonical disclosure material is stripped before the customer-name guard
+      // reads anything (policies.reviewCustomerIdentityExcludingDisclosures).
+      const identityReview = policies.reviewCustomerIdentityExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
+        protectedCustomerName,
+        identityValues,
+        [
+          websitePublications.groundedIdentityPhrase(dealer.getString("name")),
+          websitePublications.groundedIdentityPhrase(
+            dealer.getString("oem_affiliation"),
+          ),
+          salespersonName,
+          websitePublications.publicCustomerLabel(salespersonName),
+          websitePublications.groundedIdentityPhrase(
+            websiteDraft && websiteDraft.enabled
+              ? websitePublications.groundedVehicleIdentityPhrase(
+                  websiteDraft.vehicleDescription || "",
+                )
+              : "",
+          ),
+        ],
+        scenarioPolicy.releaseRequired && !publicCustomerName,
+      );
+      if (identityReview.unexpectedIdentity) {
+        return respond(400, {
+          error:
+            "Customer-name review required. Remove any unapproved customer name and try again.",
+          code: "CUSTOMER_IDENTITY_CONFLICT",
+        });
+      }
+      caption = identityReview.projectedValues[0] || "";
+      disclosures = identityReview.projectedValues[1] || "";
+      const projectedPlatformCaptions = {};
+      for (let i = 0; i < platformCaptionIds.length; i++) {
+        projectedPlatformCaptions[platformCaptionIds[i]] =
+          identityReview.projectedValues[i + 2] || "";
+      }
+      parsedPlatformCaptions.value = projectedPlatformCaptions;
+      parsedPlatformCaptions.serialized = JSON.stringify(projectedPlatformCaptions);
+      if (websiteDraft && websiteDraft.enabled) {
+        websiteDraft = Object.assign({}, websiteDraft, {
+          title: identityReview.projectedValues[websiteIdentityOffset] || "",
+          body: identityReview.projectedValues[websiteIdentityOffset + 1] || "",
+          altText: identityReview.projectedValues[websiteIdentityOffset + 2] || "",
+        });
+        if (websiteDraft.kind === "customer_story" && publicCustomerName) {
+          websiteDraft.customerDisplayName = publicCustomerName;
+        }
+        websiteDraftSerialized = JSON.stringify(websiteDraft);
+      }
+      {
+        const compliance = policies.validatePostComplianceSet(
+          [caption].concat(Object.values(parsedPlatformCaptions.value)),
+          disclosures,
+          dealer.getString("banned_phrases"),
+        );
+        if (!compliance.ok) {
+          return respond(400, { error: compliance.error });
+        }
+      }
+
+      // Creative archive: accept image for any post so History can reopen for
+      // re-share/export. Approval-pending still requires caption + image.
+      if (approvalStatus === "pending" && !creativeFile) {
+        return respond(400, { error: "Review image is required" });
+      }
+      if (websiteDraft && websiteDraft.enabled && !creativeFile) {
+        return respond(400, { error: "Website creative image is required" });
+      }
+
+      // Invalid requests above do not consume this normal storage allowance.
+      const postHourly = helpers.checkProxyRateLimit(
+        "app-write:post:hour:" + dealer.id + ":" + postWriter,
+        20,
+        60 * 60 * 1000,
+      );
+      const postDaily = helpers.checkProxyRateLimit(
+        "app-write:post:day:" + dealer.id + ":" + postWriter,
+        50,
+        24 * 60 * 60 * 1000,
+      );
+      // Bound the dealership's aggregate private-media growth as well as each
+      // person's usage. This intentionally does not delete History records.
+      const postDealerDaily = helpers.checkProxyRateLimit(
+        "app-write:post:dealer:day:" + dealer.id,
+        100,
+        24 * 60 * 60 * 1000,
+      );
+      if (!postHourly.ok || !postDaily.ok || !postDealerDaily.ok) {
+        const retryAfter = Math.max(
+          1,
+          Math.ceil(
+            Math.max(
+              postHourly.retryAfterMs || 0,
+              postDaily.retryAfterMs || 0,
+              postDealerDaily.retryAfterMs || 0,
+            ) / 1000,
+          ),
+        );
+        c.response().header().set("Retry-After", String(retryAfter));
+        return respond(429, {
+          error: "WRITE_RATE_LIMITED",
+          code: "WRITE_RATE_LIMITED",
+          message: postDealerDaily.ok
+            ? "The post save limit was reached. Try again later."
+            : "The dealership reached its daily archive limit. Ask a manager to check storage.",
+          retry_after_seconds: retryAfter,
+        });
+      }
+
+      // Load only the server-approved text fields, then attach the parsed upload
+      // explicitly. This avoids trusting multipart filename strings as record
+      // values and keeps all tenant/policy/audit fields server-controlled.
+      const token = helpers.readSessionToken(c);
+      // Store caption/disclosures whenever provided (library reopen); always
+      // required for pending approval.
+      const storeCaption = approvalStatus === "pending" || caption ? caption : "";
+      const storeDisclosures =
+        approvalStatus === "pending" || disclosures ? disclosures : "";
+      const modelPolicy = policies.geminiModelPolicySnapshot();
+      const ownerSessionHash = token ? helpers.hashSessionToken(token) : "";
+      generationClaimOwner = ownerSessionHash;
+      const captionSourceCandidate = helpers.assertString(
+        (body.caption_source || "").toString(),
+        30,
+      );
+      // Operational provenance is derived from prompt-free proxy events bound to
+      // this exact session AND this exact logical model attempt. A broad recent
+      // session window allowed an older AI success to relabel a later local safe
+      // template, so attempt ids are now required for affirmative AI metadata.
+      const normalizeAttemptId = function (value) {
+        const candidate = (value || "").toString();
+        return /^[A-Za-z0-9_-]{16,80}$/.test(candidate) ? candidate : "";
+      };
+      const captionAttemptId = normalizeAttemptId(body.caption_attempt_id);
+      const imageAttemptId = normalizeAttemptId(body.image_attempt_id);
+      const eventCutoff = helpers.databaseTimestamp(
+        new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+      );
+      const loadAttemptEvents = function (attemptId) {
+        if (!ownerSessionHash || !attemptId) return [];
+        const events = txDao.findRecordsByFilter(
+          "generation_events",
+          "owner_session_hash = {:owner} && dealer = {:dealer} && attempt_id = {:attempt}",
+          "-occurred_at",
+          40,
+          0,
+          { owner: ownerSessionHash, dealer: dealer.id, attempt: attemptId },
+        );
+        if (
+          events.some(function (event) {
+            return !!event.getString("consumed_post");
+          })
+        ) {
+          throw operations.failure(
+            "GENERATION_ATTEMPT_ALREADY_USED",
+            409,
+            "This generation result was already saved to another post.",
+          );
+        }
+        return events.filter(function (event) {
+          return event.getString("occurred_at") >= eventCutoff;
+        });
+      };
+      const captionGenerationEvents = loadAttemptEvents(captionAttemptId);
+      const imageGenerationEvents =
+        imageAttemptId && imageAttemptId !== captionAttemptId
+          ? loadAttemptEvents(imageAttemptId)
+          : [];
+      const recentGenerationEvents =
+        captionGenerationEvents.concat(imageGenerationEvents);
+      if (recentGenerationEvents.length) {
+        try {
+          generationClaimToken = helpers.claimGenerationEvents(
+            recentGenerationEvents.map(function (event) {
+              return event.id;
+            }),
+            ownerSessionHash,
+            dealer.id,
+            txDao,
+          );
+          generationClaimCount = recentGenerationEvents.length;
+        } catch (_e) {
+          throw operations.failure(
+            "GENERATION_ATTEMPT_ALREADY_USED",
+            409,
+            "This generation result was already saved to another post.",
+          );
+        }
+      }
+      // Which text tasks may be claimed as "an AI wrote this caption". This is
+      // provenance, not a task inventory: `vision_review` is a text task on the
+      // same models, but it is a QC read of a rendered image and must never
+      // relabel a locally templated caption as AI-generated. Any new text task
+      // has to be listed here explicitly, with its answer.
+      const captionTasks = {
+        caption: true,
+        caption_regenerate: true,
+        caption_edit: true,
+        vision_review: false,
+      };
+      const imageTasks = { image_standard: true, image_studio: true };
+      let latestCaptionSuccess = null;
+      let latestImageSuccess = null;
+      let latestAnySuccess = null;
+      let serverFallbackCount = 0;
+      captionGenerationEvents.forEach(function (event) {
+        const task = event.getString("task");
+        const succeeded = event.getBool
+          ? event.getBool("succeeded")
+          : !!event.get("succeeded");
+        if (!succeeded) {
+          serverFallbackCount += 1;
+          return;
+        }
+        if (!latestAnySuccess) latestAnySuccess = event;
+        if (!latestCaptionSuccess && captionTasks[task]) {
+          latestCaptionSuccess = event;
+        }
+      });
+      imageGenerationEvents.forEach(function (event) {
+        const task = event.getString("task");
+        const succeeded = event.getBool
+          ? event.getBool("succeeded")
+          : !!event.get("succeeded");
+        if (!succeeded) {
+          serverFallbackCount += 1;
+          return;
+        }
+        if (!latestImageSuccess && imageTasks[task]) latestImageSuccess = event;
+        if (
+          !latestAnySuccess ||
+          event.getString("occurred_at") > latestAnySuccess.getString("occurred_at")
+        ) {
+          latestAnySuccess = event;
+        }
+      });
+      const captionSource =
+        captionSourceCandidate === "custom"
+          ? "custom"
+          : captionSourceCandidate === "basic_fallback"
+            ? "basic_fallback"
+            : latestCaptionSuccess
+              ? "ai"
+              : "";
+      const generationTier = latestImageSuccess
+        ? latestImageSuccess.getString("tier")
+        : "";
+      const generationModel = latestAnySuccess
+        ? latestAnySuccess.getString("model")
+        : "";
+      const generationFallbackCount = Math.min(20, serverFallbackCount);
+      const generationLastSuccessAt = latestAnySuccess
+        ? latestAnySuccess.getString("occurred_at")
+        : "";
+      const modelPolicyVersion = recentGenerationEvents.length
+        ? String(modelPolicy.version)
+        : "";
+      form.loadData({
+        dealer: dealer.id,
+        salesperson_name: helpers.assertString(salespersonName, 120),
+        salesperson_id: salespersonId,
+        generated_at: new Date().toISOString(),
+        style: helpers.assertString((body.style || "").toString(), 60),
+        tone: helpers.assertString((body.tone || "").toString(), 60),
+        customer_name: protectedCustomerName,
+        scenario_id: scenarioId,
+        vin: helpers.assertString((body.vin || "").toString(), 17),
+        scheduled_for: helpers.assertString((body.scheduled_for || "").toString(), 40),
+        // Release status is derived from a durably stored, same-dealer signature
+        // by the photo-releases endpoint. Never trust a client assertion here.
+        has_release: false,
+        release_required: releaseRequired,
+        release_status: releaseRequired ? "pending" : "not_required",
+        // Video metrics are recorded only by the owner-scoped completion route
+        // after rendering succeeds; a client cannot pre-claim success here.
+        has_video: false,
+        approval_status: approvalStatus,
+        approved_by: "",
+        approved_at: "",
+        caption: storeCaption,
+        disclosures: storeDisclosures,
+        platform_ids: JSON.stringify(platformIds),
+        media_output_mode: mediaOutputMode,
+        platform_captions: parsedPlatformCaptions.serialized,
+        primary_format_id: primaryFormatId,
+        image_aspect_ratio: imageAspectRatio,
+        caption_source: captionSource,
+        generation_tier: generationTier,
+        generation_model: generationModel,
+        generation_fallback_count: generationFallbackCount,
+        generation_last_success_at: generationLastSuccessAt,
+        model_policy_version: modelPolicyVersion,
+        website_draft: websiteDraftSerialized,
+        // Every derived artifact (approval polling, protected creative, video
+        // completion) is bound to the opaque browser session that logged it.
+        owner_session_hash: ownerSessionHash,
+        owner_person_id: salespersonId,
+        attribution_authoritative: !!context.person,
+      });
+      if (creativeFile) form.addFiles("creative_image", creativeFile);
+      const storage = require(__hooks + "/mediaStorage.js");
+      storage.ensureStorageRoom(creativeFile ? storage.MEDIA_BYTES.creative : 0);
+      if (generationClaimToken) {
+        helpers.finalizeGenerationEventClaims(
           generationClaimToken,
+          record.id,
           generationClaimOwner,
           dealer.id,
+          generationClaimCount,
+          txDao,
         );
         generationClaimToken = "";
       }
-      return c.json(400, { error: "Review image is required" });
-    }
+      if (operationId)
+        operations.reserve(
+          txDao,
+          dealer.id,
+          ownerForSave,
+          operationId,
+          payloadDigest,
+          record.id,
+        );
+      form.setDao(txDao);
+      createdPostRecord = record;
+      form.submit();
+      if (approvalStatus === "pending" && !record.getString("creative_image"))
+        throw new Error("post_review_image_missing");
+      if (operationId)
+        operations.complete(txDao, dealer.id, ownerForSave, operationId, record);
 
-    if (generationClaimToken) {
-      helpers.finalizeGenerationEventClaims(
-        generationClaimToken,
-        record.id,
-        generationClaimOwner,
-        dealer.id,
-        generationClaimCount,
-      );
-      generationClaimToken = "";
-    }
-
-    c.response().header().set("Cache-Control", "private, no-store");
-    return c.json(200, {
-      id: record.id,
-      dealer: dealer.id,
-      generated_at: record.getString("generated_at"),
-      updated: record.getString("updated"),
-      customer_name: publicCustomerName,
-      approval_status: record.getString("approval_status"),
-      release_required: record.getBool
-        ? record.getBool("release_required")
-        : !!record.get("release_required"),
-      release_status: record.getString("release_status"),
-      platform_ids: platformIds,
-      media_output_mode: mediaOutputMode,
-      platform_captions: parsedPlatformCaptions.value,
-      primary_format_id: primaryFormatId,
-      image_aspect_ratio: imageAspectRatio,
-      image_review_required:
-        policies.postImageReviewRequired(record, modelPolicy) || undefined,
-      website_draft: websiteDraft && websiteDraft.enabled ? websiteDraft : null,
-      website_publication: websitePublications.publicationSummaryForPost(record, null),
+      c.response().header().set("Cache-Control", "private, no-store");
+      return respond(200, {
+        id: record.id,
+        dealer: dealer.id,
+        generated_at: record.getString("generated_at"),
+        updated: record.getString("updated"),
+        customer_name: publicCustomerName,
+        approval_status: record.getString("approval_status"),
+        release_required: record.getBool
+          ? record.getBool("release_required")
+          : !!record.get("release_required"),
+        release_status: record.getString("release_status"),
+        platform_ids: platformIds,
+        media_output_mode: mediaOutputMode,
+        platform_captions: parsedPlatformCaptions.value,
+        primary_format_id: primaryFormatId,
+        image_aspect_ratio: imageAspectRatio,
+        image_review_required:
+          policies.postImageReviewRequired(record, modelPolicy) || undefined,
+        website_draft: websiteDraft && websiteDraft.enabled ? websiteDraft : null,
+        website_publication: websitePublications.publicationSummaryForPost(
+          record,
+          null,
+        ),
+      });
     });
+    return c.json(outcome.status, outcome.body);
   } catch (err) {
-    if (generationClaimToken) {
-      let postRemoved = !createdPostRecord;
-      if (createdPostRecord) {
+    // Files are outside SQLite rollback. Clean only this newly allocated
+    // record's exact file after confirming it did not commit; replay never
+    // assigns createdPostRecord and therefore never reaches this cleanup.
+    if (createdPostRecord && createdPostRecord.getString("creative_image")) {
+      let missing = false;
+      try {
+        const rows = arrayOf(new DynamicModel({ id: "" }));
+        $app
+          .dao()
+          .db()
+          .newQuery("SELECT id FROM posts WHERE id = {:id}")
+          .bind({ id: createdPostRecord.id })
+          .all(rows);
+        missing = rows.length === 0;
+      } catch (_e) {}
+      if (missing) {
+        let fs = null;
         try {
-          $app.dao().deleteRecord(createdPostRecord);
-          postRemoved = true;
-        } catch (_cleanupError) {
-          console.error("[posts] failed to roll back post after claim failure");
-        }
-      }
-      if (postRemoved) {
-        try {
-          helpers.releaseGenerationEventClaims(
-            generationClaimToken,
-            generationClaimOwner,
-            dealer.id,
+          fs = $app.newFilesystem();
+          fs.delete(
+            createdPostRecord.baseFilesPath() +
+              "/" +
+              createdPostRecord.getString("creative_image"),
           );
-        } catch (_cleanupError) {
-          console.error("[posts] failed to release generation claim");
+        } catch (_e) {
+          console.error("[posts] failed to clean uncommitted creative");
+        } finally {
+          if (fs) fs.close();
         }
       }
     }
+    if (err && err.postSaveCode)
+      return c.json(err.postSaveStatus, { code: err.postSaveCode, error: err.message });
+    if (require(__hooks + "/mediaStorage.js").respondIfLimited(c, err)) return;
     console.error("[/api/app/posts] create error", err);
     return c.json(400, { error: "Failed to log post" });
   }
@@ -3344,7 +3456,10 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
       form.setFullManageAccess(true);
       form.setDao(txDao);
       form.loadData(draftData);
-      if (creativeFile) form.addFiles("creative_image", creativeFile);
+      if (creativeFile) {
+        require(__hooks + "/mediaStorage.js").ensureStorageRoom(8 * 1024 * 1024);
+        form.addFiles("creative_image", creativeFile);
+      }
       form.submit();
       if (creativeChanged) {
         // These bounded receipts describe the current creative. Clear them
@@ -3367,6 +3482,7 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
     });
   } catch (err) {
     const code = (err && err.message ? err.message : "").toString();
+    if (require(__hooks + "/mediaStorage.js").respondIfLimited(c, err)) return;
     if (code === "website_draft_already_sent") {
       return c.json(409, {
         error:
@@ -5778,6 +5894,16 @@ routerAdd("POST", "/api/app/dealers", (c) => {
       detail: "create name=" + data.name.toString().slice(0, 120),
     };
     helpers.runAuditedTransaction("dealer_created", auditOptions, function (txDao) {
+      if (logo) {
+        const fence = txDao
+          .db()
+          .newQuery("UPDATE dealers SET updated = updated WHERE id = {:dealer}")
+          .bind({ dealer: dealer.id })
+          .execute();
+        if (!fence || fence.rowsAffected() !== 1)
+          throw new Error("media_dealer_missing");
+        require(__hooks + "/mediaStorage.js").ensureStorageRoom(5 * 1024 * 1024);
+      }
       // PocketBase 0.22 forms support SetDao specifically for transactional
       // submits; this keeps the dealer row and audit receipt atomic.
       form.setDao(txDao);
@@ -5786,6 +5912,7 @@ routerAdd("POST", "/api/app/dealers", (c) => {
     });
     return c.json(200, { id: record.id });
   } catch (err) {
+    if (require(__hooks + "/mediaStorage.js").respondIfLimited(c, err)) return;
     console.error("[/api/app/dealers] create error", err);
     return c.json(400, { error: helpers.safeDealerMutationError(err) });
   }
@@ -5839,12 +5966,23 @@ routerAdd("PATCH", "/api/app/dealers/:id", (c) => {
       detail: "dealer=" + target.id + " actor_role=" + role,
     };
     helpers.runAuditedTransaction("dealer_updated", auditOptions, function (txDao) {
+      if (logo) {
+        const fence = txDao
+          .db()
+          .newQuery("UPDATE dealers SET updated = updated WHERE id = {:dealer}")
+          .bind({ dealer: target.id })
+          .execute();
+        if (!fence || fence.rowsAffected() !== 1)
+          throw new Error("media_dealer_missing");
+        require(__hooks + "/mediaStorage.js").ensureStorageRoom(5 * 1024 * 1024);
+      }
       form.setDao(txDao);
       form.submit();
     });
 
     return c.json(200, { id: target.id });
   } catch (err) {
+    if (require(__hooks + "/mediaStorage.js").respondIfLimited(c, err)) return;
     console.error("[/api/app/dealers/:id] patch error", err);
     return c.json(400, { error: helpers.safeDealerMutationError(err) });
   }

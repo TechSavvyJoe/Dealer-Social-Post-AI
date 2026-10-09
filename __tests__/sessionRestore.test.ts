@@ -9,6 +9,7 @@ import {
 import { proxyCapabilities, setProxyCapabilities } from "../services/proxyCapabilities";
 import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 import { AppStep, StyleOption, ToneOption } from "../types";
+import * as creativeStorage from "../utils/creativeStorage";
 
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -36,6 +37,7 @@ Object.defineProperty(globalThis, "localStorage", {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   localStorage.clear();
   useAppStore.setState({
@@ -43,11 +45,53 @@ afterEach(() => {
     selectedImage: null,
     generatedPost: null,
     generationParams: null,
+    error: null,
     step: AppStep.LOGIN,
   });
 });
 
 describe("session restore navigation", () => {
+  it.each(["saving", "failed"] as const)(
+    "does not offer an inactive save retry after reopening a %s result",
+    async (saveStatus) => {
+      vi.spyOn(creativeStorage, "loadDealerCreative").mockResolvedValue(
+        "data:image/png;base64,retained-photo",
+      );
+      localStorage.setItem(
+        "dealer-social-post-ai.session",
+        JSON.stringify({
+          dealerId: "dealer-recovery",
+          step: AppStep.RESULT,
+          loginTimestamp: Date.now(),
+          postDraft: { categoryId: "inventory", scenarioId: "new_arrival" },
+          generatedPost: {
+            text: "A completed result awaiting confirmation",
+            saveStatus,
+            saveOperationId: "opaque-operation",
+          },
+        }),
+      );
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              role: "salesperson",
+              dealer: { id: "dealer-recovery", name: "Recovery Motors" },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      );
+      await useAppStore.getState().restoreSession();
+      expect(useAppStore.getState().generatedPost).toBeNull();
+      expect(useAppStore.getState().selectedImage).toContain("retained-photo");
+      expect(useAppStore.getState().postDraft?.scenarioId).toBe("new_arrival");
+      expect(useAppStore.getState().step).toBe(AppStep.CUSTOMIZE);
+      expect(useAppStore.getState().error).toContain("Check My work");
+    },
+  );
+
   it("fails legacy identity flags closed while preserving explicit non-customer posts", () => {
     expect(resolveRestoredCustomerIdentityRequired(undefined, undefined)).toBe(true);
     expect(resolveRestoredCustomerIdentityRequired(undefined, false)).toBe(false);

@@ -97,6 +97,36 @@ describe("Details draft persistence", () => {
     expect(useAppStore.getState().postDraft?.personalLine).toBe("Just arrived");
     expect(useAppStore.getState().generationParams?.platformIds).toEqual(["gbp"]);
   });
+
+  it("keeps replacement guidance and source details while discarding consent tied to the prior post", () => {
+    const state = useAppStore.getState();
+    state.setSelectedImage("photo");
+    state.setPostDraft({
+      categoryId: "deliveries",
+      scenarioId: "customer_delivery",
+      personalLine: "Thank you",
+    });
+    state.setPendingRelease({
+      customerName: "Jamie Test",
+      signaturePngDataUrl: "data:image/png;base64,test",
+      linked: true,
+    });
+    state.setGeneratedPost({
+      image: "image",
+      text: "caption",
+      approvalStatus: "rejected",
+      rejectionReason: "Remove the price claim",
+    });
+    state.startRemix();
+    expect(useAppStore.getState().selectedImage).toBe("photo");
+    expect(useAppStore.getState().postDraft).toMatchObject({
+      personalLine: "Thank you",
+      replacementReason: "Remove the price claim",
+    });
+    expect(useAppStore.getState().pendingRelease).toBeNull();
+    expect(useAppStore.getState().generatedPost).toBeNull();
+    expect(useAppStore.getState().step).toBe(AppStep.DETAILS);
+  });
 });
 
 describe("MainContent on Creating", () => {

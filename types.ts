@@ -27,6 +27,8 @@ export interface PostDraft {
   scenarioId: string;
   decodedVehicle?: DecodedVehicle;
   personalLine?: string;
+  /** Manager guidance shown when creating an immutable replacement. */
+  replacementReason?: string;
 }
 
 /** A signature is session-memory only and can be linked to just one post. */
@@ -207,6 +209,9 @@ export interface GeneratedPost {
   scenarioId?: string;
   /** Server record used for owner-scoped approval status polling. */
   postId?: string;
+  /** Stable owner-bound save identity; retrying never calls the AI again. */
+  saveOperationId?: string;
+  saveStatus?: "saving" | "failed" | "saved";
   /** `submission_failed` is client-only and keeps delivery locked safely. */
   approvalStatus?: "n_a" | "pending" | "approved" | "rejected" | "submission_failed";
   /** What the manager asked to be changed. Set only when rejected. */

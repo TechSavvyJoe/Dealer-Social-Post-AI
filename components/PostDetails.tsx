@@ -227,7 +227,8 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
     websiteDiscovery === "loading"
       ? "Checking your store’s destinations…"
       : (request.ok || request.reason === "no_destination") &&
-          websiteDiscovery === "failed"
+          websiteDiscovery === "failed" &&
+          !request.ok
         ? "Your store’s destinations could not be checked. Retry before creating."
         : request.ok
           ? null
@@ -246,7 +247,7 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
   const openRelease = () => setReleaseOpen(true);
 
   const createPost = async () => {
-    if (!request.ok || submitting || websiteDiscovery !== "ready") return;
+    if (!request.ok || submitting || websiteDiscovery === "loading") return;
     setSubmitting(true);
     setLocalError(null);
     try {
@@ -310,6 +311,16 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
       />
 
       <section className="flex min-w-0 flex-col px-4 sm:px-0 lg:col-start-2 lg:row-start-2">
+        {draft.replacementReason ? (
+          <p
+            className="mb-3 rounded-sm border border-warning-ink/30 bg-warning-fill px-4 py-3 text-sm leading-5 text-ink"
+            role="status"
+          >
+            <span className="font-semibold">Your manager asked for a change: </span>
+            {draft.replacementReason} Review these details before creating the
+            replacement.
+          </p>
+        ) : null}
         {bannerMessage ? (
           <ErrorBanner
             message={bannerMessage}
@@ -405,12 +416,20 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
             </p>
           ) : null}
           {websiteDiscovery === "failed" ? (
-            <Button
-              variant="secondary"
-              onClick={() => setWebsiteDiscoveryAttempt((value) => value + 1)}
-            >
-              Retry destinations
-            </Button>
+            <div className="mb-3 space-y-2">
+              {request.ok ? (
+                <p className="text-sm text-ink-2" role="status">
+                  Website destinations are unavailable. You can still create this post
+                  for your store’s social channels.
+                </p>
+              ) : null}
+              <Button
+                variant="secondary"
+                onClick={() => setWebsiteDiscoveryAttempt((value) => value + 1)}
+              >
+                Retry destinations
+              </Button>
+            </div>
           ) : null}
           <Button
             type="button"
@@ -421,7 +440,11 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
             aria-describedby={gateReason ? REASON_ID : undefined}
             onClick={primaryAction}
           >
-            {needsSignature ? "Get customer's signature" : "Create post"}
+            {needsSignature
+              ? "Get customer's signature"
+              : websiteDiscovery === "failed" && request.ok
+                ? "Create social post"
+                : "Create post"}
           </Button>
         </div>
       </section>

@@ -2213,7 +2213,7 @@ function generationClaimResultCount(result) {
  * post. SQLite serializes each conditional update in this transaction, so two
  * concurrent submissions cannot both consume the same attempt.
  */
-function claimGenerationEvents(eventIds, ownerSessionHash, dealerId) {
+function claimGenerationEvents(eventIds, ownerSessionHash, dealerId, transactionDao) {
   if (!Array.isArray(eventIds) || eventIds.length === 0) return "";
   if (!ownerSessionHash || !dealerId) {
     throw new Error("Generation claim identity is required");
@@ -2230,7 +2230,7 @@ function claimGenerationEvents(eventIds, ownerSessionHash, dealerId) {
   const claimToken = "claim_" + secureRandomString(32, "0123456789abcdef");
   const updated = databaseTimestamp(new Date().toISOString());
 
-  $app.dao().runInTransaction(function (txDao) {
+  const write = function (txDao) {
     ids.forEach(function (id) {
       const result = txDao
         .db()
@@ -2251,7 +2251,9 @@ function claimGenerationEvents(eventIds, ownerSessionHash, dealerId) {
         throw new Error("Generation attempt was already consumed");
       }
     });
-  });
+  };
+  if (transactionDao) write(transactionDao);
+  else $app.dao().runInTransaction(write);
   return claimToken;
 }
 
@@ -2261,6 +2263,7 @@ function finalizeGenerationEventClaims(
   ownerSessionHash,
   dealerId,
   expectedCount,
+  transactionDao,
 ) {
   if (!claimToken) return 0;
   if (
@@ -2270,7 +2273,7 @@ function finalizeGenerationEventClaims(
     throw new Error("Generation claim finalization is invalid");
   }
   let affected = 0;
-  $app.dao().runInTransaction(function (txDao) {
+  const write = function (txDao) {
     const result = txDao
       .db()
       .newQuery(
@@ -2290,7 +2293,9 @@ function finalizeGenerationEventClaims(
     if (affected !== Number(expectedCount)) {
       throw new Error("Generation claim finalization count mismatch");
     }
-  });
+  };
+  if (transactionDao) write(transactionDao);
+  else $app.dao().runInTransaction(write);
   return affected;
 }
 

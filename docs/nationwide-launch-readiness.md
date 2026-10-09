@@ -6,10 +6,11 @@ or an availability promise. A green health endpoint is necessary, but insufficie
 
 ## Release evidence
 
-The baseline production release `c684a6de1d9b55cd5d722c40deac4870c9d466ef`
-was verified on October 8 at 16:06 UTC: canonical frontend, direct and proxied
-backend, and release-bound recovery evidence agreed. Subsequent changes must pass
-the entire CI and backend-before-frontend release sequence again.
+The baseline production release `b47796fb8af7728eb02d95b3d0e07646ab92daa4`
+was verified on October 9 at 02:03 UTC: canonical frontend, service worker,
+direct and proxied backend, and release-bound recovery evidence agreed.
+Subsequent changes must pass the entire CI and backend-before-frontend release
+sequence again.
 
 The `25 dealerships / 250 users` CI job runs the pinned real PocketBase executable
 against fresh, isolated synthetic data. It provisions all 250 identities, signs in
@@ -70,6 +71,51 @@ timings on a busy development machine; use a clean runner and retain its evidenc
 The launch decision must identify outstanding gates explicitly. Passing CI does
 not close business, physical-device, provider-quality, or operational evidence gaps.
 
+## Studio refinement release
+
+The next release adds recovery for generated posts whose initial save failed or
+whose save response was lost. A browser keeps the completed image, caption and
+existing signature while it reconciles the original save operation. Repeating
+that operation cannot create a second post or trigger another AI generation.
+Delivery and editing remain blocked until the post is saved. Leaving or closing
+the page can still discard an unsaved result; the interface does not promise
+durability before the server confirms it.
+After reopening an interrupted save, the app retains the source details and
+directs the person to My Work before creating a replacement. It does not offer
+a retry rebuilt from incomplete persisted display metadata.
+
+The recovery ledger is private SQL state bound to the exact authenticated
+session, dealership, operation and immutable request digest. A replay whose saved
+creative or caption has since changed cannot label the original preview with a
+newer revision. The user must reopen the authoritative saved post through My Work.
+The migration creates the ledger without rewriting existing posts; compatibility
+with older clients is preserved. Do not remove this state during a rollback while
+recovery clients can still retry.
+
+Media writes share a transaction fence and reserve physical headroom for the next
+full backup. Posts, replacement images, signatures, dealership logos and 360
+frames reject writes with an actionable storage response when measurements fail
+or space is limited. Finishing an already uploaded spin and other metadata-only
+changes remain available. CI exercises the real pinned backend with concurrent
+cross-dealership writes, idempotent post recovery and low-space metadata changes;
+retain its `media-storage-and-save-recovery` artifact for the exact release.
+
+The manager queue distinguishes an unavailable queue from a confirmed empty
+queue, uses the signed-in manager as the reviewer, and prevents decisions against
+stale rows after a failed refresh. Rejected or quarantined posts offer an explicit
+replacement path that keeps source details but requires a new customer signature.
+
+The vehicle studio adds precise trim controls, cancellation that preserves the
+previous recording, a fresh viewer state after rebuilding, and decoded output
+checks before an export is offered. Synthetic still-vehicle browser fixtures
+prove decoding, controls and visible pixels; they do not prove complete real
+walkaround coverage, reconstruction quality or physical iPhone performance.
+An image sequence from a walkaround is not a reconstructed 3D model.
+
+The owner accepted the installed iPhone header and bottom controls on October 8
+("Top is sharp and bottom fits"). That acceptance covers those existing controls,
+not every subsequent studio, keyboard, capture or social sharing behavior.
+
 ### Read-only production storage inspection
 
 Run **Inspect production storage** from the Actions page on `main`, or use:
@@ -88,12 +134,18 @@ billing allocation. A successful snapshot or room for one maximum spin does not
 establish capacity for all 25 dealerships; apply the fleet and backup requirements
 above to the measured available bytes before onboarding.
 
-### Reviewed storage growth plan
+### Current storage decision and reviewed growth plan
 
 The protected inspection on October 8, 2026 measured 1,021,005,824 filesystem
 bytes, 896,565,248 available bytes and 54,812,672 bytes in the data directory.
 This is roughly a 1 GB filesystem and is insufficient for the full fleet quota.
 The numeric receipt is in [run 37844690958](https://github.com/TechSavvyJoe/Dealer-Social-Post-AI/actions/runs/37844690958).
+
+The owner explicitly chose **Keep current storage for now**. Do not run the
+extension below, provision a paid substitute, or advertise space for the full
+25-dealership media allowance. The upload guard protects the existing volume; it
+does not increase its capacity. Continue monitoring the actual mounted usage and
+backup headroom before admitting more stores or large media batches.
 
 The initial proposal is **60 GB for the existing `pb_data` volume**. Maximum
 spin frames require 27 GB; allowing another 27 GB for backup working space

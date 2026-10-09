@@ -314,12 +314,15 @@ describe("backend operational hardening", () => {
     expect(posts.indexOf("helpers.claimGenerationEvents(")).toBeLessThan(
       posts.indexOf("form.submit()"),
     );
-    expect(posts.indexOf("helpers.finalizeGenerationEventClaims(")).toBeGreaterThan(
+    // All claiming and the recovery ledger commit in the same outer fence.
+    // Finalize before file upload, so a SQL failure cannot orphan an image.
+    expect(posts.indexOf("helpers.finalizeGenerationEventClaims(")).toBeLessThan(
       posts.indexOf("form.submit()"),
     );
     expect(posts).not.toContain('event.set("consumed_post"');
     expect(helpers).toContain("AND (consumed_post = '' OR consumed_post IS NULL)");
-    expect(helpers).toContain("$app.dao().runInTransaction(function (txDao)");
+    expect(helpers).toContain("if (transactionDao) write(transactionDao)");
+    expect(posts).toContain("operations.withFence($app.dao(), dealer.id");
 
     const health = hook.slice(
       hook.indexOf('routerAdd("GET", "/api/app/health"'),

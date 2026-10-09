@@ -10,7 +10,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Button } from "./ui/Button";
-import { Input } from "./ui/Input";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { listPendingPosts, setApprovalStatus, PostRecord } from "../services/posts";
@@ -41,10 +40,11 @@ const formatTime = (iso: string) => {
 
 export const ApprovalQueue: React.FC = () => {
   const currentDealer = useAppStore((s) => s.currentDealer);
+  const currentPerson = useAppStore((s) => s.currentPerson);
   const [pending, setPending] = useState<PostRecord[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [approver, setApprover] = useState("");
   // Which decision is being sent for each post, so only that button spins.
   const [busy, setBusy] = useState<Record<string, "approved" | "rejected" | undefined>>(
     {},
@@ -54,7 +54,12 @@ export const ApprovalQueue: React.FC = () => {
   // current dealer's pending list if the dealer changes mid-fetch.
   const reqIdRef = useRef(0);
   const load = useCallback(async () => {
-    if (!currentDealer) return;
+    if (!currentDealer) {
+      setPending([]);
+      setHasLoaded(false);
+      setLoading(false);
+      return;
+    }
     const myId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
@@ -63,7 +68,10 @@ export const ApprovalQueue: React.FC = () => {
         dealerName: currentDealer.name,
         oemAffiliation: currentDealer.oem_affiliation,
       });
-      if (reqIdRef.current === myId) setPending(items);
+      if (reqIdRef.current === myId) {
+        setPending(items);
+        setHasLoaded(true);
+      }
     } catch (err) {
       if (reqIdRef.current === myId)
         setError(toUiMessage(err, "Could not load pending posts."));
@@ -73,6 +81,11 @@ export const ApprovalQueue: React.FC = () => {
   }, [currentDealer]);
 
   useEffect(() => {
+    // Do not show another dealer's posts while the new dealer loads.
+    setPending([]);
+    setHasLoaded(false);
+    setError(null);
+    setLoading(true);
     void load();
   }, [load]);
 
@@ -103,8 +116,11 @@ export const ApprovalQueue: React.FC = () => {
       );
       return;
     }
-    if (!approver.trim()) {
-      setError("Enter your name first so the decision is logged.");
+    const approver = currentPerson?.name?.trim() || "";
+    if (!approver) {
+      setError(
+        "Your signed-in reviewer identity is unavailable. Sign in again before recording a decision.",
+      );
       return;
     }
     if (status === "rejected" && !reason.trim()) {
@@ -117,7 +133,7 @@ export const ApprovalQueue: React.FC = () => {
       await setApprovalStatus(
         post.id,
         status,
-        approver.trim(),
+        approver,
         status === "rejected" ? reason.trim() : undefined,
       );
       setPending((prev) => prev.filter((p) => p.id !== post.id));
@@ -131,7 +147,12 @@ export const ApprovalQueue: React.FC = () => {
   };
 
   // Hide the entire queue if this dealer doesn't use the approval gate.
-  if (currentDealer && !currentDealer.requires_approval && pending.length === 0) {
+  if (
+    currentDealer &&
+    hasLoaded &&
+    !currentDealer.requires_approval &&
+    pending.length === 0
+  ) {
     return null;
   }
 
@@ -146,8 +167,9 @@ export const ApprovalQueue: React.FC = () => {
             Waiting for approval
           </h3>
           <p className="mt-0.5 text-sm text-ink-2">
-            {pending.length} post{pending.length === 1 ? "" : "s"} awaiting manager
-            review
+            {!hasLoaded
+              ? "Approval queue status is unknown"
+              : `${pending.length} post${pending.length === 1 ? "" : "s"} awaiting manager review`}
           </p>
         </div>
         <Button
@@ -162,24 +184,29 @@ export const ApprovalQueue: React.FC = () => {
         </Button>
       </div>
 
-      <Input
-        label="Your name"
-        value={approver}
-        onChange={(e) => setApprover(e.target.value)}
-        placeholder="e.g. Joe G. (GSM)"
-        helperText="Saved with each approve or reject decision."
-        fullWidth
-      />
+      <p className="text-sm text-ink-2">
+        Reviewing as {currentPerson?.name || "Signed-in reviewer"}
+      </p>
 
       {error && <ErrorBanner message={error} onRetry={() => void load()} />}
+      {error && pending.length > 0 && (
+        <p role="status" className="text-sm font-medium text-warning-ink">
+          Showing previously loaded posts. This list may be out of date; refresh before
+          making a decision.
+        </p>
+      )}
 
-      {loading && pending.length === 0 ? (
+      {loading && !hasLoaded ? (
         <div
           className="flex min-h-32 items-center justify-center gap-2 text-sm text-ink-2"
           role="status"
         >
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
           Loading approval queue…
+        </div>
+      ) : !hasLoaded ? (
+        <div role="status" className="text-sm text-ink-2">
+          Approval queue status is unknown until it loads successfully.
         </div>
       ) : pending.length === 0 ? (
         <EmptyState
@@ -336,7 +363,7 @@ export const ApprovalQueue: React.FC = () => {
                       setReason("");
                       setRejectingId(rejectingId === post.id ? null : post.id);
                     }}
-                    disabled={Boolean(busy[post.id])}
+                    disabled={Boolean(busy[post.id]) || Boolean(error) || loading}
                     aria-expanded={rejectingId === post.id}
                   >
                     Reject
@@ -392,7 +419,12 @@ export const ApprovalQueue: React.FC = () => {
                           size="md"
                           onClick={() => handleAction(post, "rejected")}
                           loading={busy[post.id] === "rejected"}
-                          disabled={Boolean(busy[post.id]) || !reason.trim()}
+                          disabled={
+                            Boolean(busy[post.id]) ||
+                            Boolean(error) ||
+                            loading ||
+                            !reason.trim()
+                          }
                         >
                           Send rejection
                         </Button>
@@ -405,7 +437,9 @@ export const ApprovalQueue: React.FC = () => {
                     leftIcon={<Check className="h-4 w-4" />}
                     loading={busy[post.id] === "approved"}
                     onClick={() => handleAction(post, "approved")}
-                    disabled={Boolean(busy[post.id]) || !canApprove}
+                    disabled={
+                      Boolean(busy[post.id]) || Boolean(error) || loading || !canApprove
+                    }
                     title={
                       canApprove
                         ? "Approve this post"

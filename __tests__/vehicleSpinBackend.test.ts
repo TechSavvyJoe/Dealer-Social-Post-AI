@@ -9,7 +9,14 @@ const module = {
     owner: (context: unknown, record: unknown) => boolean;
   },
 };
-new Function("module", readFileSync("pb_hooks/vehicleSpins.js", "utf8"))(module);
+const storageModule = { exports: {} };
+new Function("module", readFileSync("pb_hooks/mediaStorage.js", "utf8"))(storageModule);
+new Function(
+  "module",
+  "require",
+  "__hooks",
+  readFileSync("pb_hooks/vehicleSpins.js", "utf8"),
+)(module, () => storageModule.exports, "/hooks");
 const { normalizeVehicle, stateAllowsDelivery, owner, storageHasRoom } = module.exports;
 const vehicle = {
   title: "2024 Test Vehicle",
