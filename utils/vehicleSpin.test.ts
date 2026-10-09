@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkSpinVideo,
+  extractSpinFrames,
   spinFrameAt,
   spinSampleTimes,
   spinZoom,
   waitForSpinFrame,
 } from "./vehicleSpin";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 const decodingVideo = () => {
   const video = document.createElement("video");
@@ -34,6 +39,130 @@ const decodingVideo = () => {
 };
 
 describe("walkaround decoded frame boundary", () => {
+  it.each(["capture", "cancel initialization"])(
+    "positions the stale primed surface safely: %s",
+    async (mode) => {
+      vi.useFakeTimers();
+      const create = document.createElement.bind(document);
+      const video = create("video");
+      const canvas = create("canvas");
+      let clock = 0;
+      let surface = 1 / 6;
+      let seeking = false;
+      const seeks: number[] = [];
+      const captured: number[] = [];
+      const controller = new AbortController();
+      const progress = vi.fn();
+      const completed = vi.fn();
+      let callback: VideoFrameRequestCallback | undefined;
+      Object.defineProperties(video, {
+        duration: { value: 4 },
+        videoWidth: { value: 1280 },
+        videoHeight: { value: 720 },
+        readyState: { value: HTMLMediaElement.HAVE_CURRENT_DATA },
+        seeking: { get: () => seeking },
+        currentTime: {
+          get: () => clock,
+          set: (time: number) => {
+            seeks.push(time);
+            // Match WebKit's exact same-time optimization: it may emit seeked
+            // without asking the media engine to replace the drawable surface.
+            const changed = time !== clock;
+            clock = time;
+            seeking = true;
+            if (mode === "cancel initialization") controller.abort();
+            queueMicrotask(() => {
+              if (changed) surface = time;
+              seeking = false;
+              video.dispatchEvent(new Event("seeked"));
+            });
+          },
+        },
+      });
+      video.load = vi.fn(() => video.dispatchEvent(new Event("loadeddata")));
+      video.pause = vi.fn();
+      video.play = vi.fn(async () => {
+        queueMicrotask(() =>
+          callback?.(0, {
+            mediaTime: 1 / 3,
+            presentationTime: performance.now() + 1,
+          } as VideoFrameCallbackMetadata),
+        );
+      });
+      video.requestVideoFrameCallback = vi.fn((next) => {
+        callback = next;
+        return 1;
+      });
+      video.cancelVideoFrameCallback = vi.fn();
+      vi.spyOn(canvas, "getContext").mockReturnValue({
+        drawImage: () => {
+          expect(seeking).toBe(false);
+          captured.push(surface);
+        },
+      } as unknown as CanvasRenderingContext2D);
+      vi.spyOn(canvas, "toBlob").mockImplementation((done) =>
+        done(new Blob(["decoded frame"], { type: "image/jpeg" })),
+      );
+      vi.spyOn(document, "createElement").mockImplementation(((tag: string) =>
+        tag === "video"
+          ? video
+          : tag === "canvas"
+            ? canvas
+            : create(tag)) as typeof document.createElement);
+      vi.stubGlobal(
+        "URL",
+        class extends URL {
+          static createObjectURL = vi.fn(() => "blob:spin-unit-source");
+          static revokeObjectURL = vi.fn();
+        },
+      );
+      const frames = extractSpinFrames(
+        new File(["video"], "fixture.mp4", { type: "video/mp4" }),
+        { start: 0, end: 4 },
+        { signal: controller.signal, onProgress: progress },
+      ).then(completed);
+      const canceled =
+        mode === "cancel initialization"
+          ? expect(frames).rejects.toMatchObject({ name: "AbortError" })
+          : undefined;
+      await vi.advanceTimersByTimeAsync(5000);
+      if (canceled) {
+        await canceled;
+        expect(seeks).toEqual([1 / 12]);
+        expect(captured).toEqual([]);
+        expect(canvas.toBlob).not.toHaveBeenCalled();
+        expect(progress).not.toHaveBeenCalled();
+        expect(completed).not.toHaveBeenCalled();
+        // A late prime callback and seek event must not restart extraction.
+        callback?.(0, {
+          mediaTime: 1 / 3,
+          presentationTime: performance.now() + 1,
+        } as VideoFrameCallbackMetadata);
+        video.dispatchEvent(new Event("seeked"));
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(seeks).toEqual([1 / 12]);
+        expect(video.requestVideoFrameCallback).toHaveBeenCalledOnce();
+        expect(canvas.toBlob).not.toHaveBeenCalled();
+        expect(progress).not.toHaveBeenCalled();
+        expect(completed).not.toHaveBeenCalled();
+      } else {
+        await frames;
+        expect(completed).toHaveBeenCalledWith(expect.any(Array));
+        expect(completed.mock.calls[0][0]).toHaveLength(48);
+        expect(captured).toEqual(spinSampleTimes(0, 4, 4));
+        expect(seeks.slice(0, 2)).toEqual([1 / 12, 0]);
+      }
+      expect(video.play).toHaveBeenCalledOnce();
+      expect(video.pause).toHaveBeenCalled();
+      expect(video.cancelVideoFrameCallback).toHaveBeenCalledWith(1);
+      expect(video.load).toHaveBeenCalledTimes(2);
+      expect(video.hasAttribute("src")).toBe(false);
+      expect(video.isConnected).toBe(false);
+      expect(URL.revokeObjectURL).toHaveBeenCalledOnce();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:spin-unit-source");
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
   it.each(["between paints", "at seeked", "same time"])(
     "recovers from delayed target data %s without requiring another seeked event",
     async (phase) => {

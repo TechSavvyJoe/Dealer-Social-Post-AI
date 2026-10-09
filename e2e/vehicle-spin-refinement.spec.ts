@@ -20,6 +20,7 @@ const traceDecoder = async (page: Page) => {
       error: number | null;
       mediaTime?: number;
       presentedFrames?: number;
+      previewLayout?: { width: number; height: number };
     };
     const history: Sample[] = [];
     const videos = new Map<HTMLVideoElement, number>();
@@ -34,6 +35,15 @@ const traceDecoder = async (page: Page) => {
       seeking: video.seeking,
       paused: video.paused,
       error: video.error?.code ?? null,
+      ...(video.getAttribute("aria-label") === "Original walkaround video" &&
+      ["attached", "loadedmetadata", "loadeddata"].includes(event)
+        ? {
+            previewLayout: {
+              width: video.getBoundingClientRect().width,
+              height: video.getBoundingClientRect().height,
+            },
+          }
+        : {}),
     });
     const record = (value: Sample) => {
       history.push(value);
@@ -279,15 +289,54 @@ for (const fixture of [
         .setInputFiles(
           fileURLToPath(new URL("./fixtures/" + fixture.file, import.meta.url)),
         );
+      if (lowFps) {
+        const reservedRatio = await page
+          .getByLabel("Original walkaround video", { exact: true })
+          .evaluate((node) => getComputedStyle(node).aspectRatio);
+        const [width, height] = reservedRatio.split("/").map(Number);
+        expect(width / height).toBeCloseTo(1280 / 720);
+      }
       const buildStarted = Date.now();
       stage = "start-build";
       await page.getByRole("button", { name: "Build 360° view", exact: true }).click();
+      if (lowFps) {
+        await expect(
+          page.getByRole("status").filter({ hasText: "Building your 360° view" }),
+        ).toBeVisible();
+      }
       stage = "wait-for-48-frame-view";
       const image = page.getByRole("img", {
         name: "Your vehicle, angle 1 of 48",
         exact: true,
       });
       await expect(image).toBeVisible({ timeout: 60000 });
+      if (lowFps) {
+        const layouts = await page.evaluate(() => {
+          const inspect = (
+            window as typeof window & {
+              studioDecoderDiagnostic: () => {
+                history: {
+                  event: string;
+                  readyState: number;
+                  previewLayout?: { width: number; height: number };
+                }[];
+              };
+            }
+          ).studioDecoderDiagnostic;
+          return inspect().history.filter((entry) => entry.previewLayout);
+        });
+        const initial = layouts.find((entry) => entry.event === "attached")!;
+        const decoded = layouts.find((entry) => entry.event === "loadeddata")!;
+        expect(initial.previewLayout?.width).toBeGreaterThan(0);
+        expect(initial.previewLayout?.height).toBeGreaterThan(0);
+        expect(decoded).toBeDefined();
+        expect(
+          Math.abs(decoded.previewLayout!.height - initial.previewLayout!.height),
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(decoded.previewLayout!.width - initial.previewLayout!.width),
+        ).toBeLessThanOrEqual(1);
+      }
       const buildMilliseconds = Date.now() - buildStarted;
       await info.attach("full-48-frame-build-time", {
         body: JSON.stringify({ fixture: fixture.file, buildMilliseconds }),

@@ -59,6 +59,7 @@ export const VehicleSpinStudio: React.FC<{
   const [file, setFile] = useState<File | null>(null);
   const [projectKey, setProjectKey] = useState(0);
   const [sourceUrl, setSourceUrl] = useState("");
+  const [sourceAspectRatio, setSourceAspectRatio] = useState(16 / 9);
   const [duration, setDuration] = useState(0);
   const [start, setStart] = useState(0);
   const [end, setEnd] = useState(0);
@@ -168,6 +169,7 @@ export const VehicleSpinStudio: React.FC<{
   const reset = () => {
     setProjectKey((current) => current + 1);
     setFile(null);
+    setSourceAspectRatio(16 / 9);
     setFrames([]);
     setOriginals([]);
     setCutouts(null);
@@ -204,6 +206,7 @@ export const VehicleSpinStudio: React.FC<{
         reset();
         setVehicle(vehicle);
         setFile(chosen);
+        setSourceAspectRatio(source.width / source.height);
         setDuration(source.duration);
         setStart(0);
         setEnd(source.duration);
@@ -423,7 +426,8 @@ export const VehicleSpinStudio: React.FC<{
               controls
               playsInline
               muted
-              className="max-h-[55svh] w-full rounded-lg border border-strong bg-panel"
+              className="max-h-[55svh] w-full rounded-lg border border-strong bg-panel object-contain"
+              style={{ aspectRatio: sourceAspectRatio }}
               aria-label="Original walkaround video"
             />
           ) : (
@@ -453,7 +457,8 @@ export const VehicleSpinStudio: React.FC<{
                 controls
                 playsInline
                 muted
-                className="mt-3 max-h-[50svh] w-full"
+                className="mt-3 max-h-[50svh] w-full object-contain"
+                style={{ aspectRatio: sourceAspectRatio }}
                 aria-label="Original walkaround recording"
               />
             </details>

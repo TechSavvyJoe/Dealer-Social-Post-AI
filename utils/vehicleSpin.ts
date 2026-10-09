@@ -295,6 +295,12 @@ export const extractSpinFrames = async (
     if (!context) throw new Error("Your browser could not open the video editor.");
     const frames: Blob[] = [];
     await waitForSpinFrame(source.video, options.signal);
+    // Prime playback can leave a later drawable frame while the logical clock
+    // still equals the first sample. WebKit may skip the media engine for a
+    // seek to that same time. Position through the next planned in-range sample
+    // once, so the loop's first seek back really replaces the primed surface.
+    if (Math.abs(source.video.currentTime - times[0]) <= 0.001)
+      await waitForSpinFrame(source.video, options.signal, times[1]);
     for (let index = 0; index < times.length; index++) {
       checkSpinAbort(options.signal);
       await waitForSpinFrame(source.video, options.signal, times[index]);

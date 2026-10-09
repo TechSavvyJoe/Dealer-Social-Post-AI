@@ -992,11 +992,19 @@ test("installed iPhone fills its canvas with a stale viewport and reachable imag
   await expect(page.getByLabel("Post video", { exact: true })).toBeInViewport();
   await versions.getByRole("button", { name: "Image", exact: true }).click();
   await expect(
+    versions.getByRole("button", { name: "Image", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
     page.getByRole("img", { name: "Post image", exact: true }),
   ).toBeInViewport();
-  await page
-    .getByRole("group", { name: "Image and video previews", exact: true })
-    .evaluate((rail) => rail.scrollTo({ left: 0 }));
+  const previews = page.getByRole("group", {
+    name: "Image and video previews",
+    exact: true,
+  });
+  await expect
+    .poll(() => previews.evaluate((rail) => rail.scrollLeft / rail.clientWidth))
+    .toBeGreaterThanOrEqual(0.9);
+  await previews.evaluate((rail) => rail.scrollTo({ left: 0 }));
   await expect(
     versions.getByRole("button", { name: "Video", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");

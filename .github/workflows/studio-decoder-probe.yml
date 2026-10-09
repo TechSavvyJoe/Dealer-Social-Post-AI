@@ -4,7 +4,11 @@ on:
   pull_request:
     paths:
       - "utils/vehicleSpin*"
+      - "components/VehicleSpinStudio.tsx"
+      - "components/PostScreen.tsx"
+      - "components/post/PostPreviewCard.tsx"
       - "e2e/vehicle-spin-refinement.spec.ts"
+      - "e2e/streamlined-flow.spec.ts"
       - ".github/workflows/studio-decoder-probe.yml"
   workflow_dispatch:
 
@@ -24,10 +28,10 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npx playwright install --with-deps webkit
-      - name: Repeat the 6 fps fixture on WebKit desktop and phone
+      - name: Repeat the 6 fps and installed-phone preview fixtures on WebKit
         run: >-
-          npx playwright test e2e/vehicle-spin-refinement.spec.ts
-          --grep "6fps vehicle import builds all 48 quantized samples with decoded pixels"
+          npx playwright test e2e/vehicle-spin-refinement.spec.ts e2e/streamlined-flow.spec.ts
+          --grep "6fps vehicle import builds all 48 quantized samples with decoded pixels|installed iPhone fills its canvas with a stale viewport and reachable image/video actions"
           --project=webkit-desktop-1440 --project=webkit-phone-390
           --repeat-each=10 --retries=0 --workers=1
           --trace=retain-on-failure --reporter=line
