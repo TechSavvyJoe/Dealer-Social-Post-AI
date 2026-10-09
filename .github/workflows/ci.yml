@@ -75,6 +75,17 @@ jobs:
         run: node scripts/launch-capacity-canary.mjs
         env:
           POCKETBASE_TEST_BINARY: /tmp/launch-pocketbase/pocketbase
+      - name: Exercise low storage and recoverable post saves
+        run: node scripts/media-storage-canary.mjs
+        env:
+          POCKETBASE_TEST_BINARY: /tmp/launch-pocketbase/pocketbase
+      - name: Retain storage and save-recovery evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: media-storage-and-save-recovery
+          path: .release-evidence/media-storage-canary.json
+          retention-days: 30
       - name: Retain redacted capacity evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -135,6 +146,13 @@ jobs:
         env:
           CI: true
           # Frontend-only smoke tests stub API routes; PocketBase is not required.
+      - name: Retain browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-${{ matrix.browser }}-test-results
+          path: test-results/
+          retention-days: 7
 
   vehicle-spin-editor:
     name: Full 48-angle background editor

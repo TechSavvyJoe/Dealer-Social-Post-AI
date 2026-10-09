@@ -3,7 +3,7 @@
 // entry chunk; load it through loadPublishPipeline() in
 // services/publishPipeline.ts (memoized, reset-on-failure) rather than
 // importing this module statically from anything the login screen boots.
-export { logPost } from "./posts";
+export { logPost, reconcilePostSave } from "./posts";
 export {
   analyzeCaptionSetForDelivery,
   prepareCaptionForDelivery,

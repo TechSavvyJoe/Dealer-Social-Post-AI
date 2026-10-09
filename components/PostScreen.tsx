@@ -91,6 +91,8 @@ export interface PostScreenProps {
   }>;
   onShowSettings?: () => void;
   onShowHistory?: () => void;
+  onRetrySaveGeneratedPost?: () => Promise<boolean>;
+  savingGeneratedPost?: boolean;
   onRequestLogout?: () => void;
   error?: string | null;
   isDesktopLayout: boolean;
@@ -127,6 +129,8 @@ const lockedShareLabel = (
   approvalStatus: GeneratedPost["approvalStatus"],
 ): string => {
   switch (locks.primary.kind) {
+    case "save":
+      return "Save post to share";
     case "approval":
       // A sent-back or unsent post is not waiting on anyone.
       return approvalStatus === "rejected" || approvalStatus === "submission_failed"
@@ -177,6 +181,9 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     bannedPhrases,
     onChangeLook,
     onShowHistory,
+    onRemix,
+    onRetrySaveGeneratedPost,
+    savingGeneratedPost = false,
   } = props;
   const currentDealer = useAppStore((state) => state.currentDealer);
   const currentPerson = useAppStore((state) => state.currentPerson);
@@ -212,6 +219,12 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     post.aiMeta?.image.attemptId ||
     post.aiMeta?.lastSuccessfulGenerationAt ||
     "local-result";
+  const savePending = post.saveStatus !== undefined && post.saveStatus !== "saved";
+  const canCreateReplacement =
+    !savePending &&
+    (post.approvalStatus === "rejected" || Boolean(post.imageReviewRequired));
+  const createReplacement = selectedImage ? onRemix : onStartOver;
+  const replacementLabel = selectedImage ? "Create replacement" : "Choose a new photo";
   const [caption, setCaption] = useState(post.text);
   const [editingCaption, setEditingCaption] = useState(false);
   const previousPostTextRef = useRef(post.text);
@@ -346,6 +359,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
         releaseLinkStatus: release.releaseLinkStatus,
         releaseId: post.releaseId,
         postId: post.postId,
+        saveStatus: post.saveStatus,
         customerDisplayName: post.customerDisplayName,
       }),
     [
@@ -359,13 +373,14 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
       identityContext,
       post.customerDisplayName,
       post.postId,
+      post.saveStatus,
       post.releaseId,
       release.releaseLinkStatus,
       release.releaseStatus,
     ],
   );
   const contentEditingLocked =
-    approval.reviewRequired || website.handoffStarted || website.sending;
+    savePending || approval.reviewRequired || website.handoffStarted || website.sending;
   const historyReadOnly = Boolean(post.historyReadOnly);
   const editable = !contentEditingLocked && !historyReadOnly;
   const draftGrounding = useMemo<DealerIdentityGrounding>(
@@ -637,6 +652,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           (event) => event.via === "download" || event.via === "share_sheet",
         ),
       ) &&
+      !savePending &&
       autosave.status !== "saving" &&
       autosave.status !== "failed" &&
       autosave.status !== "conflict",
@@ -647,7 +663,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     // Image renders and the website send block leaving; a running video is
     // only a confirm (video.atRisk above), so it is not counted as busy here.
     imageBusy: creative.busy && !video.isVideoLoading,
-    textBusy: captionRewriting,
+    textBusy: captionRewriting || savingGeneratedPost,
     websiteSending: website.sending,
   });
   useEffect(() => {
@@ -1207,17 +1223,33 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
         return (
           <div className={isSaved ? barPair : undefined}>
             {doneSecondary()}
-            <Button
-              variant="primary"
-              size="lg"
-              fullWidth
-              className="px-4"
-              disabled
-              leftIcon={<Lock />}
-              aria-label={`Share to ${selectedChannel.label} unavailable. ${lockedLabel}.`}
-            >
-              {lockedLabel}
-            </Button>
+            {savePending && onRetrySaveGeneratedPost ? (
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                loading={savingGeneratedPost}
+                onClick={() => void onRetrySaveGeneratedPost()}
+              >
+                Retry saving post
+              </Button>
+            ) : canCreateReplacement ? (
+              <Button variant="primary" size="lg" fullWidth onClick={createReplacement}>
+                {replacementLabel}
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                className="px-4"
+                disabled
+                leftIcon={<Lock />}
+                aria-label={`Share to ${selectedChannel.label} unavailable. ${lockedLabel}.`}
+              >
+                {lockedLabel}
+              </Button>
+            )}
           </div>
         );
       case "conflict":
@@ -1395,113 +1427,139 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
       </p>
     ) : null;
 
-  const deliveryActions = preparedDelivery.websiteOnly ? (
-    isDesktopLayout ? (
+  const deliveryActions =
+    isDesktopLayout && (savePending || canCreateReplacement) ? (
       <div className="flex flex-col gap-2">
-        {websiteOnlyAction}
+        {savePending && onRetrySaveGeneratedPost ? (
+          <Button
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={savingGeneratedPost}
+            onClick={() => void onRetrySaveGeneratedPost()}
+          >
+            Retry saving post
+          </Button>
+        ) : canCreateReplacement ? (
+          <Button variant="primary" size="lg" fullWidth onClick={createReplacement}>
+            {replacementLabel}
+          </Button>
+        ) : null}
+        {doneSecondary()}
+      </div>
+    ) : !isDesktopLayout && (savePending || canCreateReplacement) ? (
+      <div className={phoneBarClass}>
+        <div className="mx-auto flex w-full max-w-[640px] flex-col gap-2">
+          {phoneBarContent}
+        </div>
+      </div>
+    ) : preparedDelivery.websiteOnly ? (
+      isDesktopLayout ? (
+        <div className="flex flex-col gap-2">
+          {websiteOnlyAction}
+          {isSaved ? (
+            <Button variant="ghost" size="md" fullWidth onClick={onStartOver}>
+              Done
+            </Button>
+          ) : null}
+        </div>
+      ) : websiteOnlyAction || isSaved ? (
+        <div className={phoneBarClass}>
+          <div className="mx-auto flex w-full max-w-[640px] flex-col gap-2">
+            {websiteOnlyAction ? (
+              <div className={isSaved ? barPair : undefined}>
+                {doneSecondary()}
+                {websiteOnlyAction}
+              </div>
+            ) : (
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                leftIcon={<Check />}
+                onClick={onStartOver}
+              >
+                Done
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : null
+    ) : isDesktopLayout ? (
+      <div className="flex flex-col gap-2">
+        <Button
+          variant="primary"
+          size="lg"
+          fullWidth
+          leftIcon={<Download />}
+          disabled={share.shareDisabled}
+          aria-label={
+            share.shareDisabled
+              ? `Download for ${selectedChannel.label} unavailable. ${shareDisabledReason}`
+              : canSaveToPhotos
+                ? "Save to Photos"
+                : `Download for ${selectedChannel.label}`
+          }
+          onClick={() =>
+            void (canSaveToPhotos ? share.saveToPhotos() : share.downloadAndCopy())
+          }
+        >
+          {canSaveToPhotos ? "Save to Photos" : `Download for ${selectedChannel.label}`}
+        </Button>
+        <Button
+          variant="secondary"
+          size="md"
+          fullWidth
+          leftIcon={<Copy />}
+          disabled={share.shareDisabled}
+          aria-label={
+            share.shareDisabled
+              ? `Copy caption unavailable. ${shareDisabledReason}`
+              : "Copy caption"
+          }
+          onClick={() => void share.copyCaption()}
+        >
+          Copy caption
+        </Button>
+        {selectedTarget?.webIntentUrl?.(shareContent) ? (
+          <Button
+            variant="secondary"
+            size="md"
+            fullWidth
+            rightIcon={<ExternalLink />}
+            disabled={share.shareDisabled}
+            onClick={share.openTarget}
+          >
+            Open {selectedChannel.label}
+          </Button>
+        ) : null}
         {isSaved ? (
           <Button variant="ghost" size="md" fullWidth onClick={onStartOver}>
             Done
           </Button>
         ) : null}
+        {desktopHelper}
       </div>
-    ) : websiteOnlyAction || isSaved ? (
+    ) : (
       <div className={phoneBarClass}>
         <div className="mx-auto flex w-full max-w-[640px] flex-col gap-2">
-          {websiteOnlyAction ? (
-            <div className={isSaved ? barPair : undefined}>
-              {doneSecondary()}
-              {websiteOnlyAction}
-            </div>
-          ) : (
-            <Button
-              variant="primary"
-              size="lg"
-              fullWidth
-              leftIcon={<Check />}
-              onClick={onStartOver}
-            >
-              Done
-            </Button>
-          )}
+          {handoffReady ? (
+            <p className="text-caption leading-4 text-ink-2" aria-live="polite">
+              {share.feedback?.manualCopy
+                ? "Caption not copied. Use Copy caption or select it above."
+                : share.feedback?.detail.startsWith("Caption copied.")
+                  ? `Caption and hashtags copied. Paste in ${handoffAppLabel} only if missing.`
+                  : sharedViaSheet
+                    ? `Finish your post in ${handoffAppLabel}. Paste the caption only if missing.`
+                    : manualHandoff
+                      ? `Saving the ${mediaNoun} also copies your caption.`
+                      : `Choose ${nativeTarget ? "an app" : selectedChannel.label} in the share sheet. Your caption is copied automatically.`}
+            </p>
+          ) : null}
+          {phoneBarContent}
         </div>
       </div>
-    ) : null
-  ) : isDesktopLayout ? (
-    <div className="flex flex-col gap-2">
-      <Button
-        variant="primary"
-        size="lg"
-        fullWidth
-        leftIcon={<Download />}
-        disabled={share.shareDisabled}
-        aria-label={
-          share.shareDisabled
-            ? `Download for ${selectedChannel.label} unavailable. ${shareDisabledReason}`
-            : canSaveToPhotos
-              ? "Save to Photos"
-              : `Download for ${selectedChannel.label}`
-        }
-        onClick={() =>
-          void (canSaveToPhotos ? share.saveToPhotos() : share.downloadAndCopy())
-        }
-      >
-        {canSaveToPhotos ? "Save to Photos" : `Download for ${selectedChannel.label}`}
-      </Button>
-      <Button
-        variant="secondary"
-        size="md"
-        fullWidth
-        leftIcon={<Copy />}
-        disabled={share.shareDisabled}
-        aria-label={
-          share.shareDisabled
-            ? `Copy caption unavailable. ${shareDisabledReason}`
-            : "Copy caption"
-        }
-        onClick={() => void share.copyCaption()}
-      >
-        Copy caption
-      </Button>
-      {selectedTarget?.webIntentUrl?.(shareContent) ? (
-        <Button
-          variant="secondary"
-          size="md"
-          fullWidth
-          rightIcon={<ExternalLink />}
-          disabled={share.shareDisabled}
-          onClick={share.openTarget}
-        >
-          Open {selectedChannel.label}
-        </Button>
-      ) : null}
-      {isSaved ? (
-        <Button variant="ghost" size="md" fullWidth onClick={onStartOver}>
-          Done
-        </Button>
-      ) : null}
-      {desktopHelper}
-    </div>
-  ) : (
-    <div className={phoneBarClass}>
-      <div className="mx-auto flex w-full max-w-[640px] flex-col gap-2">
-        {handoffReady ? (
-          <p className="text-caption leading-4 text-ink-2" aria-live="polite">
-            {share.feedback?.manualCopy
-              ? "Caption not copied. Use Copy caption or select it above."
-              : share.feedback?.detail.startsWith("Caption copied.")
-                ? `Caption and hashtags copied. Paste in ${handoffAppLabel} only if missing.`
-                : sharedViaSheet
-                  ? `Finish your post in ${handoffAppLabel}. Paste the caption only if missing.`
-                  : manualHandoff
-                    ? `Saving the ${mediaNoun} also copies your caption.`
-                    : `Choose ${nativeTarget ? "an app" : selectedChannel.label} in the share sheet. Your caption is copied automatically.`}
-          </p>
-        ) : null}
-        {phoneBarContent}
-      </div>
-    </div>
-  );
+    );
 
   return (
     <div
@@ -1511,13 +1569,22 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           : "pb-[calc(126px+env(safe-area-inset-bottom))]"
       }`}
     >
-      <h1 className="sr-only lg:hidden">Your post</h1>
+      {!isDesktopLayout ? (
+        <h1 className="sr-only">
+          {savePending ? "Finish saving your post" : "Your post"}
+        </h1>
+      ) : null}
       <div className="mx-auto grid w-full max-w-[1160px] gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
         <section
           className="mx-auto w-full max-w-[640px] lg:mx-0"
           ref={previewSectionRef}
           aria-label="Post preview"
         >
+          {!isDesktopLayout && savePending && banner ? (
+            <div className="mb-3">
+              <LockBanner {...banner} />
+            </div>
+          ) : null}
           {!isDesktopLayout &&
           !preparedDelivery.websiteOnly &&
           availableChannels.length > 0 ? (
@@ -1538,7 +1605,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
             videoUrl={video.videoUrl}
             availableVideoUrl={latestPreviewVideo?.url}
             onSelectMedia={selectPreviewMedia}
-            mediaSelectionDisabled={postChanging}
+            mediaSelectionDisabled={postChanging || savePending}
             caption={caption}
             outboundText={previewOutboundText}
             employeeDisclosure={employeeDisclosure}
@@ -1556,18 +1623,24 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           className="mx-auto flex w-full min-w-0 max-w-[640px] flex-col gap-6 lg:mx-0 lg:max-w-none"
           aria-label="Post actions"
         >
-          <header className="hidden lg:block">
-            <h1 className="font-display text-4xl font-semibold text-ink">
-              Ready to share
-            </h1>
-            <p className="mt-2 max-w-sm text-sm leading-6 text-ink-2">
-              {isDesktopLayout
-                ? `Download saves the ${mediaNoun} and copies your caption. Open ${handoffAppLabel} to finish your post.`
-                : `Pick where it's going, then share it to ${selectedChannel.label}.`}
-            </p>
-          </header>
+          {isDesktopLayout ? (
+            <header className="hidden lg:block">
+              <h1 className="font-display text-4xl font-semibold text-ink">
+                {savePending ? "Finish saving your post" : "Ready to share"}
+              </h1>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-ink-2">
+                {savePending
+                  ? "Your image and caption are ready. Save this result before sharing."
+                  : isDesktopLayout
+                    ? `Download saves the ${mediaNoun} and copies your caption. Open ${handoffAppLabel} to finish your post.`
+                    : `Pick where it's going, then share it to ${selectedChannel.label}.`}
+              </p>
+            </header>
+          ) : null}
 
-          {banner ? <LockBanner {...banner} /> : null}
+          {banner && (isDesktopLayout || !savePending) ? (
+            <LockBanner {...banner} />
+          ) : null}
 
           {isDesktopLayout &&
           !preparedDelivery.websiteOnly &&

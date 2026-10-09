@@ -462,6 +462,8 @@ const AppContent: React.FC = () => {
           onSpinDirtyChange={setSpinDirty}
           onOpenSpin={() => requestLeave(() => app.setStep(AppStep.VEHICLE_SPIN))}
           onRemix={() => requestLeave(app.startRemix)}
+          onRetrySaveGeneratedPost={app.retrySaveGeneratedPost}
+          savingGeneratedPost={app.savingGeneratedPost}
           onDismissError={() => app.setError(null)}
           onGenerate={app.handleGenerate}
           onBackToCapture={goBack}

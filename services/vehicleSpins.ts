@@ -9,6 +9,8 @@ export interface SpinCapacity {
   dealershipUsed: number;
   dealershipLimit: number;
   canCreate: boolean;
+  /** Physical space for a complete spin plus backup working room. */
+  storageAvailable?: boolean;
   reason: string;
 }
 

@@ -544,7 +544,8 @@ describe("PostScreen", () => {
     expect(callbacks.onStartOver).toHaveBeenCalledTimes(1);
   });
 
-  it("never calls a sent-back post one that is waiting for approval", () => {
+  it("offers a replacement for a sent-back post without unlocking the reviewed copy", async () => {
+    const user = userEvent.setup();
     mocks.autosaveStatus = "idle";
     renderScreen({
       requiresApproval: true,
@@ -560,13 +561,49 @@ describe("PostScreen", () => {
       "Your manager asked for a change: Please remove the pricing claim. Start a new post to make it.",
     );
     expect(screen.queryByText("Waiting for approval")).toBeNull();
-    expect(
-      screen.getByRole("button", {
-        name: "Share to Facebook unavailable. Start a new post to share.",
-      }),
-    ).toBeDisabled();
+    const replacement = screen.getByRole("button", { name: "Create replacement" });
+    expect(replacement).toBeEnabled();
+    await user.click(replacement);
+    expect(callbacks.onRemix).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Edit caption" })).toBeNull();
     expect(screen.getByText("Saved to My work")).toBeInTheDocument();
   });
+
+  it.each([false, true])(
+    "keeps a failed generated save visible and offers a save retry without sharing or editing (desktop: %s)",
+    async (isDesktopLayout) => {
+      const user = userEvent.setup();
+      const retry = vi.fn(async () => true);
+      mocks.autosaveStatus = "idle";
+      renderScreen({
+        isDesktopLayout,
+        post: {
+          ...basePost,
+          postId: undefined,
+          saveOperationId: "same-operation",
+          saveStatus: "failed",
+        },
+        onRetrySaveGeneratedPost: retry,
+      });
+      expect(screen.getByRole("img", { name: "Post image" })).toBeVisible();
+      expect(screen.getByText("Your post is ready, but not saved")).toBeVisible();
+      expect(
+        screen.getByRole("heading", { name: "Finish saving your post" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Ready to share" })).toBeNull();
+      if (!isDesktopLayout) {
+        expect(screen.getByRole("region", { name: "Post preview" })).toContainElement(
+          screen.getByText("Your post is ready, but not saved"),
+        );
+      }
+      expect(screen.queryByRole("button", { name: "Edit caption" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Share to Facebook" })).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Retry saving post" }));
+      expect(retry).toHaveBeenCalledTimes(1);
+      expect(callbacks.onRegenerateImage).not.toHaveBeenCalled();
+      expect(callbacks.onRegenerateText).not.toHaveBeenCalled();
+    },
+  );
 
   it("names the fix on a caption-locked phone Share", async () => {
     const user = userEvent.setup();

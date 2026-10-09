@@ -87,6 +87,17 @@ export const useDraftAutosave = ({
   const pendingDraftSyncRef = useRef<PendingDraftSync | null>(null);
   const draftSyncChainRef = useRef<Promise<void>>(Promise.resolve());
   const draftSyncMountedRef = useRef(true);
+  const activeSaveRef = useRef<PendingDraftSync | null>(null);
+  const cancelledDraftsRef = useRef(new WeakSet<PendingDraftSync>());
+  const draftCancellationVersionRef = useRef(0);
+  const visibleDraftSavableRef = useRef(true);
+  const observedVisibleDraftRef = useRef<string | null>(null);
+  visibleDraftSavableRef.current = Boolean(
+    primaryCaption.trim() &&
+    captionAnalysis.compliance.prohibited.length === 0 &&
+    captionSetAnalysis.prohibited.length === 0 &&
+    !identityLocked,
+  );
   const lastSyncedDraftRef = useRef({
     caption: post.text,
     disclosures: post.disclosures || "",
@@ -123,13 +134,25 @@ export const useDraftAutosave = ({
     }
     const postId = post.postId;
     if (!draft || !postId || !editable) return Promise.resolve(true);
+    const requestAuthEpoch = useAppStore.getState().authEpoch;
+    const cancellationVersion = draftCancellationVersionRef.current;
     const report = (next: DraftAutosaveStatus) => {
-      if (draftSyncMountedRef.current && livePostIdRef.current === postId) {
+      if (
+        draftSyncMountedRef.current &&
+        livePostIdRef.current === postId &&
+        useAppStore.getState().authEpoch === requestAuthEpoch
+      ) {
         setStatus(next);
       }
     };
 
     const operation = draftSyncChainRef.current.then(async () => {
+      if (
+        cancelledDraftsRef.current.has(draft) ||
+        cancellationVersion !== draftCancellationVersionRef.current ||
+        useAppStore.getState().authEpoch !== requestAuthEpoch
+      )
+        return false;
       // Retrying with the stale token can only fail again and would never
       // tell the salesperson why; keep the conflict state until a reopen.
       if (conflictPostIdRef.current === postId) {
@@ -150,6 +173,7 @@ export const useDraftAutosave = ({
         return false;
       }
       try {
+        activeSaveRef.current = draft;
         const updated = await updatePostDraft(postId, {
           ...draft,
           // Website handoff stages the exact visible image even when it was
@@ -164,6 +188,7 @@ export const useDraftAutosave = ({
           expectedPostRevision,
           grounding,
         });
+        if (useAppStore.getState().authEpoch !== requestAuthEpoch) return false;
         lastSyncedDraftRef.current = {
           caption: draft.caption,
           disclosures: draft.disclosures,
@@ -202,7 +227,13 @@ export const useDraftAutosave = ({
         if (pendingDraftSyncRef.current === draft) {
           pendingDraftSyncRef.current = null;
         }
-        report(pendingDraftSyncRef.current ? "saving" : "saved");
+        report(
+          pendingDraftSyncRef.current
+            ? "saving"
+            : visibleDraftSavableRef.current && !cancelledDraftsRef.current.has(draft)
+              ? "saved"
+              : "idle",
+        );
         return true;
       } catch (err) {
         const conflict =
@@ -216,6 +247,8 @@ export const useDraftAutosave = ({
         });
         report(conflict ? "conflict" : "failed");
         return false;
+      } finally {
+        if (activeSaveRef.current === draft) activeSaveRef.current = null;
       }
     });
     draftSyncChainRef.current = operation.then(() => undefined);
@@ -229,6 +262,30 @@ export const useDraftAutosave = ({
 
   useEffect(() => {
     if (!post.postId || !editable) return;
+    const visibleDraftKey = JSON.stringify([
+      post.postId,
+      primaryCaption,
+      captionAnalysis.caption,
+      captionSetAnalysis.disclosures,
+      post.image,
+      effectivePack || {},
+      visibleDraftSavableRef.current,
+    ]);
+    // A status update can render fresh analysis objects for the same caption.
+    // It must not cancel a manually staged draft or queue a second copy.
+    if (observedVisibleDraftRef.current === visibleDraftKey) return;
+    observedVisibleDraftRef.current = visibleDraftKey;
+    const cancelPending = () => {
+      draftCancellationVersionRef.current += 1;
+      if (draftSyncTimeoutRef.current) {
+        clearTimeout(draftSyncTimeoutRef.current);
+        draftSyncTimeoutRef.current = null;
+      }
+      const pending = pendingDraftSyncRef.current;
+      if (pending) cancelledDraftsRef.current.add(pending);
+      pendingDraftSyncRef.current = null;
+      setStatus(conflictPostIdRef.current === post.postId ? "conflict" : "idle");
+    };
     const historyCaption = primaryCaption;
     const historyAnalysis = captionAnalysis;
     if (
@@ -237,6 +294,9 @@ export const useDraftAutosave = ({
       captionSetAnalysis.prohibited.length > 0 ||
       identityLocked
     ) {
+      // A valid edit queued before this render is no longer the visible draft.
+      // Never save it or report it as the salesperson's latest saved copy.
+      cancelPending();
       return;
     }
     const last = lastSyncedDraftRef.current;
@@ -249,8 +309,10 @@ export const useDraftAutosave = ({
       caption === last.caption &&
       disclosures === last.disclosures &&
       !imageChanged &&
-      !platformCaptionsChanged
+      !platformCaptionsChanged &&
+      !activeSaveRef.current
     ) {
+      cancelPending();
       return;
     }
     pendingDraftSyncRef.current = {

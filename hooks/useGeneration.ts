@@ -46,7 +46,11 @@ import {
 // Kept static deliberately: stores/appStore.ts already imports this constant
 // eagerly, so modelConfig rides the entry chunk either way and
 // mergeCaptionProvenance can stay synchronous.
-import { MODEL_POLICY_VERSION } from "../services/modelConfig";
+import {
+  MODEL_POLICY_VERSION,
+  createGenerationAttemptId,
+} from "../services/modelConfig";
+import type { LogPostInput } from "../services/posts";
 import type {
   FinalWebsiteDraftSource,
   WebsiteDraft,
@@ -153,6 +157,7 @@ const workspaceIsCurrent = (workspaceKey: string | null): boolean =>
  * approval status counts: a replaced image is never the one a manager saw.
  */
 const imageStaysOffDevice = (post: GeneratedPost): boolean =>
+  (post.saveStatus !== undefined && post.saveStatus !== "saved") ||
   (post.approvalStatus ?? "n_a") !== "n_a" ||
   Boolean(post.imageReviewRequired) ||
   post.releaseStatus === "save_failed";
@@ -331,6 +336,7 @@ type GenerationDetachReason = "cancel" | "superseded";
  * newer run has started.
  */
 interface GenerationRun {
+  saveOperationId: string;
   controller: AbortController;
   cancelled: boolean;
   /**
@@ -368,11 +374,6 @@ const linkedReleaseIds = new Set<string>();
 const markReleaseLinked = (release: CapturedRelease, releaseId?: string): void => {
   linkedReleases.add(release);
   if (releaseId) linkedReleaseIds.add(releaseId);
-};
-
-const unmarkReleaseLinked = (release: CapturedRelease, releaseId?: string): void => {
-  linkedReleases.delete(release);
-  if (releaseId) linkedReleaseIds.delete(releaseId);
 };
 
 /**
@@ -477,6 +478,67 @@ export const useGeneration = () => {
   // repeated Cmd/Ctrl+Enter is a no-op before the step changes.
   const inFlightRef = useRef(false);
   const activeRunRef = useRef<GenerationRun | null>(null);
+  const [savingGeneratedPost, setSavingGeneratedPost] = useState(false);
+  const retrySaveBusyRef = useRef<string | null>(null);
+  const pendingGeneratedSaveRef = useRef<{
+    authEpoch: number;
+    operationId: string;
+    recover: () => Promise<GeneratedPost>;
+  } | null>(null);
+
+  const retrySaveGeneratedPost = useCallback(async (): Promise<boolean> => {
+    const pending = pendingGeneratedSaveRef.current;
+    const state = useAppStore.getState();
+    if (
+      !pending ||
+      retrySaveBusyRef.current ||
+      pending.authEpoch !== state.authEpoch ||
+      state.generatedPost?.saveOperationId !== pending.operationId
+    )
+      return false;
+    retrySaveBusyRef.current = pending.operationId;
+    setSavingGeneratedPost(true);
+    setGeneratedPost(
+      { ...state.generatedPost, saveStatus: "saving" },
+      { archive: false },
+    );
+    try {
+      const recovered = await pending.recover();
+      const current = useAppStore.getState();
+      if (
+        current.authEpoch !== pending.authEpoch ||
+        current.generatedPost?.saveOperationId !== pending.operationId
+      )
+        return false;
+      setPostImage(recovered);
+      setError(null);
+      pendingGeneratedSaveRef.current = null;
+      return true;
+    } catch (error) {
+      const current = useAppStore.getState();
+      if (
+        current.authEpoch === pending.authEpoch &&
+        current.generatedPost?.saveOperationId === pending.operationId
+      ) {
+        setGeneratedPost(
+          { ...current.generatedPost, saveStatus: "failed" },
+          { archive: false },
+        );
+        toastError(
+          toUiMessage(
+            error,
+            "Your generated post is still here. Check your connection and retry saving.",
+          ),
+        );
+      }
+      return false;
+    } finally {
+      if (retrySaveBusyRef.current === pending.operationId) {
+        retrySaveBusyRef.current = null;
+        setSavingGeneratedPost(false);
+      }
+    }
+  }, [setGeneratedPost, setError, toastError]);
 
   const advanceGenerationStage = useCallback(
     (run: GenerationRun, stage: GenerationStage) => {
@@ -565,6 +627,11 @@ export const useGeneration = () => {
     cleanupTimers();
     abortActiveVideoPolls();
     releaseRunFromPreviousWorkspace();
+    if (pendingGeneratedSaveRef.current?.authEpoch !== authEpoch) {
+      pendingGeneratedSaveRef.current = null;
+      retrySaveBusyRef.current = null;
+      setSavingGeneratedPost(false);
+    }
   }, [
     abortActiveVideoPolls,
     authEpoch,
@@ -934,52 +1001,59 @@ export const useGeneration = () => {
       // because the returned id is the secure status-polling handle and the
       // manager needs the exact image/caption they are approving.
       if (currentDealer) {
-        let releaseLinkAttempted = false;
-        const persistPost = async () => {
-          const captured = variables.meta?.capturedRelease;
+        const captured = variables.meta?.capturedRelease;
+        const saveInput: LogPostInput = {
+          dealerId: currentDealer.id,
+          style: variables.style,
+          tone: variables.tone,
+          // Release linking uses the protected exact signer name. Public
+          // copy uses finalPost.customerDisplayName and never this value.
+          customerName: captured?.customerName || variables.customerName,
+          customerIdentityRequired: variables.meta?.customerIdentityRequired,
+          scenarioId: variables.meta?.scenarioId,
+          vin: variables.meta?.vin,
+          // The release route flips this true only after its protected
+          // signature file has been durably stored. Starting false avoids a
+          // false consent claim if that second write fails.
+          hasRelease: false,
+          hasVideo: false,
+          requiresApproval: !!currentDealer.requires_approval,
+          caption: finalPost.text,
+          disclosures: finalPost.disclosures,
+          imageDataUrl: finalPost.image,
+          captionSource: finalPost.captionSource,
+          generationTier: finalPost.aiMeta?.selectedTier,
+          generationModel: finalPost.aiMeta?.model,
+          generationFallbackCount: finalPost.aiMeta?.fallbackCount,
+          generationLastSuccessAt: finalPost.aiMeta?.lastSuccessfulGenerationAt,
+          modelPolicyVersion: finalPost.aiMeta?.modelPolicyVersion,
+          captionAttemptId: finalPost.aiMeta?.caption.attemptId,
+          imageAttemptId: finalPost.aiMeta?.image.attemptId,
+          platformIds: finalPost.platformIds,
+          mediaOutputMode: finalPost.mediaOutputMode,
+          primaryFormatId: finalPost.primaryFormatId,
+          imageAspectRatio: finalPost.imageAspectRatio,
+          websiteDraft: finalPost.websiteDraft,
+          grounding: {
+            dealerName: currentDealer.name,
+            oemAffiliation: currentDealer.oem_affiliation,
+            vehicleDescription: variables.meta?.websiteVehicleDescription,
+            salespersonName: useAppStore.getState().currentPerson?.name,
+          },
+        };
+        saveInput.saveOperationId = variables.run.saveOperationId;
+        finalPost.saveOperationId = variables.run.saveOperationId;
+        finalPost.saveStatus = "saving";
+        const persistPost = async (recover = false) => {
           assertOperationAuthEpoch(variables.authEpoch);
-          const post = await logPost(
-            {
-              dealerId: currentDealer.id,
-              style: variables.style,
-              tone: variables.tone,
-              // Release linking uses the protected exact signer name. Public
-              // copy uses finalPost.customerDisplayName and never this value.
-              customerName: captured?.customerName || variables.customerName,
-              customerIdentityRequired: variables.meta?.customerIdentityRequired,
-              scenarioId: variables.meta?.scenarioId,
-              vin: variables.meta?.vin,
-              // The release route flips this true only after its protected
-              // signature file has been durably stored. Starting false avoids a
-              // false consent claim if that second write fails.
-              hasRelease: false,
-              hasVideo: false,
-              requiresApproval: !!currentDealer.requires_approval,
-              caption: finalPost.text,
-              disclosures: finalPost.disclosures,
-              imageDataUrl: finalPost.image,
-              captionSource: finalPost.captionSource,
-              generationTier: finalPost.aiMeta?.selectedTier,
-              generationModel: finalPost.aiMeta?.model,
-              generationFallbackCount: finalPost.aiMeta?.fallbackCount,
-              generationLastSuccessAt: finalPost.aiMeta?.lastSuccessfulGenerationAt,
-              modelPolicyVersion: finalPost.aiMeta?.modelPolicyVersion,
-              captionAttemptId: finalPost.aiMeta?.caption.attemptId,
-              imageAttemptId: finalPost.aiMeta?.image.attemptId,
-              platformIds: finalPost.platformIds,
-              mediaOutputMode: finalPost.mediaOutputMode,
-              primaryFormatId: finalPost.primaryFormatId,
-              imageAspectRatio: finalPost.imageAspectRatio,
-              websiteDraft: finalPost.websiteDraft,
-              grounding: {
-                dealerName: currentDealer.name,
-                oemAffiliation: currentDealer.oem_affiliation,
-                vehicleDescription: variables.meta?.websiteVehicleDescription,
-                salespersonName: useAppStore.getState().currentPerson?.name,
-              },
-            },
-            variables.authEpoch,
-          );
+          let post = recover
+            ? await pipeline.reconcilePostSave(saveInput, variables.authEpoch)
+            : null;
+          if (!post) post = await logPost(saveInput, variables.authEpoch);
+          if (!post)
+            throw new Error(
+              "The generated post was not confirmed saved. Keep it open and retry saving.",
+            );
           assertOperationAuthEpoch(variables.authEpoch);
           let releaseStatus: NonNullable<GeneratedPost["releaseStatus"]> =
             post?.release_required && post.release_status !== "saved"
@@ -996,7 +1070,6 @@ export const useGeneration = () => {
           if (captured && releaseId && post) {
             const { linkReleaseToPostWithRetry } =
               await import("../services/photoReleases");
-            releaseLinkAttempted = true;
             try {
               const linked = await linkReleaseToPostWithRetry(releaseId, post.id, {
                 requestAuthEpoch: variables.authEpoch,
@@ -1032,6 +1105,33 @@ export const useGeneration = () => {
           return { post, releaseStatus, releaseLinkStatus, unlinkedReleaseId };
         };
 
+        const restoredPost = (
+          outcome: Awaited<ReturnType<typeof persistPost>>,
+        ): GeneratedPost => {
+          const saved = outcome.post;
+          return {
+            ...finalPost,
+            saveStatus: "saved",
+            postId: saved.id,
+            postRevision: saved.updated,
+            imageReviewRequired: Boolean(saved.image_review_required),
+            approvalStatus:
+              saved.approval_status ||
+              (currentDealer.requires_approval ? "pending" : "n_a"),
+            releaseStatus: outcome.releaseStatus,
+            releaseLinkStatus: outcome.releaseLinkStatus,
+            releaseId: outcome.unlinkedReleaseId,
+            websiteDraft: saved.website_draft || finalPost.websiteDraft,
+            websitePublication:
+              saved.website_publication || finalPost.websitePublication,
+          };
+        };
+        pendingGeneratedSaveRef.current = {
+          authEpoch: variables.authEpoch,
+          operationId: variables.run.saveOperationId,
+          recover: async () => restoredPost(await persistPost(true)),
+        };
+
         // Await the small first-party persistence request for every generated
         // post. Besides making metrics truthful, this gives subsequent video
         // and release updates an owner-scoped post id.
@@ -1051,11 +1151,31 @@ export const useGeneration = () => {
         let persisted: Awaited<typeof persistence>;
         try {
           persisted = await persistence;
-        } finally {
-          if (capturedForPost && !releaseLinkAttempted) {
-            unmarkReleaseLinked(capturedForPost, releaseIdForPost);
+        } catch (_error) {
+          // A lost response may follow a committed create. Keep this immutable
+          // result and its release reservation; reconcile the same operation
+          // before another save, never call the provider or sign again.
+          if (
+            variables.authEpoch !== useAppStore.getState().authEpoch ||
+            variables.run.cancelled
+          )
+            return;
+          finalPost.saveStatus = "failed";
+          finalPost.approvalStatus = "submission_failed";
+          if (capturedForPost) {
+            finalPost.releaseStatus = "save_failed";
+            finalPost.releaseId = releaseIdForPost;
           }
+          setError(null);
+          setPostImage(finalPost);
+          setStep(AppStep.RESULT);
+          return;
         }
+        if (
+          pendingGeneratedSaveRef.current?.operationId === variables.run.saveOperationId
+        )
+          pendingGeneratedSaveRef.current = null;
+        finalPost.saveStatus = "saved";
         if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
         // Cancelled while saving: the post stays in My work, the result
         // screen never opens for it.
@@ -1164,6 +1284,7 @@ export const useGeneration = () => {
       if (supersededRun) detachRun(supersededRun, "superseded");
       inFlightRef.current = true;
       const run: GenerationRun = {
+        saveOperationId: createGenerationAttemptId(),
         controller: new AbortController(),
         cancelled: false,
         authEpoch: useAppStore.getState().authEpoch,
@@ -2094,6 +2215,8 @@ export const useGeneration = () => {
   );
 
   return {
+    retrySaveGeneratedPost,
+    savingGeneratedPost,
     generationProgress,
     progressMessage,
     generationStage,

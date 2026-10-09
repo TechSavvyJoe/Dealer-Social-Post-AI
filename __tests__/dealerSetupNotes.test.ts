@@ -81,6 +81,10 @@ const patchDealer = (role: string, body: AnyRecord, sessionDealerId = "dealer-1"
       restrictDealerLogoSchema: vi.fn(),
       dealerMutationData: helpers.dealerMutationData,
       dealerLogoFile: () => null,
+      // The route's bounded-media guard is outside the setup-notes policy
+      // tested here; report no capacity rejection for these text-only cases.
+      // The actual admission policy is exercised in mediaStorage tests.
+      respondIfLimited: () => false,
       clientIP: () => "203.0.113.5",
       userAgent: () => "vitest",
       runAuditedTransaction: (

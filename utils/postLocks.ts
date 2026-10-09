@@ -77,7 +77,7 @@ export const deriveIdentityLocked = (
 ): boolean => captions.some((caption) => !checkCaptionIdentity(caption, context));
 
 export type PostLockKind =
-  "image_review" | "identity" | "claim" | "release" | "approval";
+  "save" | "image_review" | "identity" | "claim" | "release" | "approval";
 
 export interface PostLockReason {
   kind: PostLockKind;
@@ -103,6 +103,7 @@ export interface DerivePostLocksInput {
   releaseLinkStatus: GeneratedPost["releaseLinkStatus"];
   releaseId?: string;
   postId?: string;
+  saveStatus?: GeneratedPost["saveStatus"];
   customerDisplayName?: string;
 }
 
@@ -142,6 +143,7 @@ export const derivePostLocks = (input: DerivePostLocksInput): PostLocks => {
     Boolean(input.postId);
   const claimLocked = input.prohibited.length > 0;
   const deliveryLocked =
+    (input.saveStatus !== undefined && input.saveStatus !== "saved") ||
     input.imageReviewRequired ||
     approvalLocked ||
     releaseLocked ||
@@ -241,6 +243,20 @@ export const derivePostLocks = (input: DerivePostLocksInput): PostLocks => {
     releaseTitle,
     releaseMessage,
     approvalMessage,
-    primary: { kind, label, title, message },
+    primary:
+      input.saveStatus !== undefined && input.saveStatus !== "saved"
+        ? {
+            kind: "save",
+            label: "Post not saved",
+            title:
+              input.saveStatus === "saving"
+                ? "Saving your post"
+                : "Your post is ready, but not saved",
+            message:
+              input.saveStatus === "saving"
+                ? "Keep this work open while the save finishes."
+                : "Your image and caption are still here. Retry saving this same post before sharing; no new AI generation is needed.",
+          }
+        : { kind, label, title, message },
   };
 };

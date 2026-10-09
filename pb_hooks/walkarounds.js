@@ -883,7 +883,21 @@ function saveRelease(c, helpers) {
     signed_at: now(),
   });
   form.addFiles("signature_png", signatureFile);
-  form.submit();
+  try {
+    const storage = require(__hooks + "/mediaStorage.js");
+    storage.withMediaWrite(
+      $app.dao(),
+      authorized.context.dealer.id,
+      storage.MEDIA_BYTES.signature,
+      function (tx) {
+        form.setDao(tx);
+        form.submit();
+      },
+    );
+  } catch (error) {
+    if (require(__hooks + "/mediaStorage.js").respondIfLimited(c, error)) return;
+    throw error;
+  }
   audit(
     $app.dao(),
     authorized.project,

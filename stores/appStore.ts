@@ -68,6 +68,7 @@ export type PostBusyReason = "image" | "website" | null;
  * the image the Post screen locks, whether it was just made or reopened.
  */
 export const postImageStaysOffDevice = (post: GeneratedPost): boolean =>
+  (post.saveStatus !== undefined && post.saveStatus !== "saved") ||
   (post.approvalStatus ?? "n_a") !== "n_a" ||
   Boolean(post.imageReviewRequired) ||
   post.releaseStatus === "save_failed";
@@ -776,7 +777,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   startRemix: () => {
-    const { currentDealer, selectedImage, generationParams } = get();
+    const { currentDealer, selectedImage, generationParams, generatedPost, postDraft } =
+      get();
     // Without a capture there is nothing to remix — fall back to a full reset.
     if (!selectedImage) {
       get().reset();
@@ -786,6 +788,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       generatedPost: null,
       error: null,
       step: AppStep.CUSTOMIZE,
+      // A release can back only one post. Keep the photo and vehicle details,
+      // while asking for fresh consent when making a replacement.
+      pendingRelease: null,
+      postDraft: postDraft
+        ? {
+            ...postDraft,
+            replacementReason: generatedPost?.rejectionReason || undefined,
+          }
+        : postDraft,
     });
     if (currentDealer) {
       saveSession({
@@ -827,10 +838,18 @@ export const useAppStore = create<AppState>((set, get) => ({
           const persistedGeneratedPost = matchesPersistedDealer
             ? session?.generatedPost
             : undefined;
-          const restoredGeneratedImage = persistedGeneratedPost
-            ? persistedGeneratedPost.image ||
-              (await loadDealerCreative(dealer.id, "generated"))
-            : null;
+          // The exact original request and signature binding live only in the
+          // running generation hook. A closed app cannot reconstruct that
+          // operation safely from display metadata or offer an inactive retry.
+          const interruptedGeneratedSave = Boolean(
+            persistedGeneratedPost?.saveStatus &&
+            persistedGeneratedPost.saveStatus !== "saved",
+          );
+          const restoredGeneratedImage =
+            persistedGeneratedPost && !interruptedGeneratedSave
+              ? persistedGeneratedPost.image ||
+                (await loadDealerCreative(dealer.id, "generated"))
+              : null;
           const restoredCustomerIdentityRequired =
             resolveRestoredCustomerIdentityRequired(
               persistedGeneratedPost?.customerIdentityRequired,
@@ -889,6 +908,9 @@ export const useAppStore = create<AppState>((set, get) => ({
             postWorkAtRisk: false,
             postBusy: null,
             postReturnStep: null,
+            error: interruptedGeneratedSave
+              ? "Your last generated result was not confirmed saved before this app closed. Check My work before creating a replacement. Your original photo and details are still here."
+              : null,
             step: restoredStep,
             imageQualityTier: session?.imageQualityTier ?? "standard",
             ...(session?.theme

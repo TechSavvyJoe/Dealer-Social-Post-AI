@@ -1,5 +1,427 @@
-import { describe, expect, it } from "vitest";
-import { checkSpinVideo, spinFrameAt, spinSampleTimes, spinZoom } from "./vehicleSpin";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  checkSpinVideo,
+  extractSpinFrames,
+  spinFrameAt,
+  spinSampleTimes,
+  spinZoom,
+  waitForSpinFrame,
+} from "./vehicleSpin";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+const decodingVideo = () => {
+  const video = document.createElement("video");
+  let presented: VideoFrameRequestCallback | undefined;
+  Object.defineProperty(video, "readyState", {
+    value: HTMLMediaElement.HAVE_CURRENT_DATA,
+    configurable: true,
+  });
+  video.play = vi.fn().mockResolvedValue(undefined);
+  video.pause = vi.fn();
+  video.requestVideoFrameCallback = vi.fn((callback: VideoFrameRequestCallback) => {
+    presented = callback;
+    return 7;
+  });
+  video.cancelVideoFrameCallback = vi.fn();
+  return {
+    video,
+    callback: () => presented!,
+    present: (
+      mediaTime = video.currentTime,
+      presentationTime = performance.now() + 1,
+    ) => presented?.(0, { mediaTime, presentationTime } as VideoFrameCallbackMetadata),
+  };
+};
+
+describe("walkaround decoded frame boundary", () => {
+  it.each(["capture", "cancel initialization"])(
+    "positions the stale primed surface safely: %s",
+    async (mode) => {
+      vi.useFakeTimers();
+      const create = document.createElement.bind(document);
+      const video = create("video");
+      const canvas = create("canvas");
+      let clock = 0;
+      let surface = 1 / 6;
+      let seeking = false;
+      const seeks: number[] = [];
+      const captured: number[] = [];
+      const controller = new AbortController();
+      const progress = vi.fn();
+      const completed = vi.fn();
+      let callback: VideoFrameRequestCallback | undefined;
+      Object.defineProperties(video, {
+        duration: { value: 4 },
+        videoWidth: { value: 1280 },
+        videoHeight: { value: 720 },
+        readyState: { value: HTMLMediaElement.HAVE_CURRENT_DATA },
+        seeking: { get: () => seeking },
+        currentTime: {
+          get: () => clock,
+          set: (time: number) => {
+            seeks.push(time);
+            // Match WebKit's exact same-time optimization: it may emit seeked
+            // without asking the media engine to replace the drawable surface.
+            const changed = time !== clock;
+            clock = time;
+            seeking = true;
+            if (mode === "cancel initialization") controller.abort();
+            queueMicrotask(() => {
+              if (changed) surface = time;
+              seeking = false;
+              video.dispatchEvent(new Event("seeked"));
+            });
+          },
+        },
+      });
+      video.load = vi.fn(() => video.dispatchEvent(new Event("loadeddata")));
+      video.pause = vi.fn();
+      video.play = vi.fn(async () => {
+        queueMicrotask(() =>
+          callback?.(0, {
+            mediaTime: 1 / 3,
+            presentationTime: performance.now() + 1,
+          } as VideoFrameCallbackMetadata),
+        );
+      });
+      video.requestVideoFrameCallback = vi.fn((next) => {
+        callback = next;
+        return 1;
+      });
+      video.cancelVideoFrameCallback = vi.fn();
+      vi.spyOn(canvas, "getContext").mockReturnValue({
+        drawImage: () => {
+          expect(seeking).toBe(false);
+          captured.push(surface);
+        },
+      } as unknown as CanvasRenderingContext2D);
+      vi.spyOn(canvas, "toBlob").mockImplementation((done) =>
+        done(new Blob(["decoded frame"], { type: "image/jpeg" })),
+      );
+      vi.spyOn(document, "createElement").mockImplementation(((tag: string) =>
+        tag === "video"
+          ? video
+          : tag === "canvas"
+            ? canvas
+            : create(tag)) as typeof document.createElement);
+      vi.stubGlobal(
+        "URL",
+        class extends URL {
+          static createObjectURL = vi.fn(() => "blob:spin-unit-source");
+          static revokeObjectURL = vi.fn();
+        },
+      );
+      const frames = extractSpinFrames(
+        new File(["video"], "fixture.mp4", { type: "video/mp4" }),
+        { start: 0, end: 4 },
+        { signal: controller.signal, onProgress: progress },
+      ).then(completed);
+      const canceled =
+        mode === "cancel initialization"
+          ? expect(frames).rejects.toMatchObject({ name: "AbortError" })
+          : undefined;
+      await vi.advanceTimersByTimeAsync(5000);
+      if (canceled) {
+        await canceled;
+        expect(seeks).toEqual([1 / 12]);
+        expect(captured).toEqual([]);
+        expect(canvas.toBlob).not.toHaveBeenCalled();
+        expect(progress).not.toHaveBeenCalled();
+        expect(completed).not.toHaveBeenCalled();
+        // A late prime callback and seek event must not restart extraction.
+        callback?.(0, {
+          mediaTime: 1 / 3,
+          presentationTime: performance.now() + 1,
+        } as VideoFrameCallbackMetadata);
+        video.dispatchEvent(new Event("seeked"));
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(seeks).toEqual([1 / 12]);
+        expect(video.requestVideoFrameCallback).toHaveBeenCalledOnce();
+        expect(canvas.toBlob).not.toHaveBeenCalled();
+        expect(progress).not.toHaveBeenCalled();
+        expect(completed).not.toHaveBeenCalled();
+      } else {
+        await frames;
+        expect(completed).toHaveBeenCalledWith(expect.any(Array));
+        expect(completed.mock.calls[0][0]).toHaveLength(48);
+        expect(captured).toEqual(spinSampleTimes(0, 4, 4));
+        expect(seeks.slice(0, 2)).toEqual([1 / 12, 0]);
+      }
+      expect(video.play).toHaveBeenCalledOnce();
+      expect(video.pause).toHaveBeenCalled();
+      expect(video.cancelVideoFrameCallback).toHaveBeenCalledWith(1);
+      expect(video.load).toHaveBeenCalledTimes(2);
+      expect(video.hasAttribute("src")).toBe(false);
+      expect(video.isConnected).toBe(false);
+      expect(URL.revokeObjectURL).toHaveBeenCalledOnce();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:spin-unit-source");
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+  it.each(["between paints", "at seeked", "same time"])(
+    "recovers from delayed target data %s without requiring another seeked event",
+    async (phase) => {
+      vi.useFakeTimers();
+      const { video } = decodingVideo();
+      const target = 1.25;
+      if (phase === "same time") video.currentTime = target;
+      const readyState = (state: number) =>
+        Object.defineProperty(video, "readyState", {
+          value: state,
+          configurable: true,
+        });
+      if (phase !== "between paints") readyState(HTMLMediaElement.HAVE_METADATA);
+      const controller = new AbortController();
+      const finished = vi.fn();
+      const waiting = waitForSpinFrame(video, controller.signal, target).then(finished);
+      void waiting.catch(() => {});
+      try {
+        if (phase !== "same time") video.dispatchEvent(new Event("seeked"));
+        await vi.advanceTimersByTimeAsync(17);
+        readyState(HTMLMediaElement.HAVE_METADATA);
+        await vi.advanceTimersByTimeAsync(20);
+        expect(finished).not.toHaveBeenCalled();
+        readyState(HTMLMediaElement.HAVE_CURRENT_DATA);
+        await vi.advanceTimersByTimeAsync(40);
+        expect(finished).toHaveBeenCalledOnce();
+        expect(video.play).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        controller.abort();
+        await waiting.catch(() => {});
+      }
+    },
+  );
+  it("does not reassign an unchanged target while waiting for its decoded data", async () => {
+    vi.useFakeTimers();
+    const { video } = decodingVideo();
+    const target = 1.25;
+    const assign = vi.fn();
+    Object.defineProperty(video, "currentTime", { get: () => target, set: assign });
+    Object.defineProperty(video, "readyState", {
+      value: HTMLMediaElement.HAVE_METADATA,
+      configurable: true,
+    });
+    const controller = new AbortController();
+    const waiting = waitForSpinFrame(video, controller.signal, target);
+    void waiting.catch(() => {});
+    try {
+      expect(assign).not.toHaveBeenCalled();
+      Object.defineProperty(video, "readyState", {
+        value: HTMLMediaElement.HAVE_CURRENT_DATA,
+      });
+      await vi.advanceTimersByTimeAsync(40);
+      await waiting;
+    } finally {
+      controller.abort();
+      await waiting.catch(() => {});
+    }
+  });
+  it("resets consecutive readiness when the target changes during paint observation", async () => {
+    vi.useFakeTimers();
+    const { video } = decodingVideo();
+    const finished = vi.fn();
+    const waiting = waitForSpinFrame(video, undefined, 1.25).then(finished);
+    video.dispatchEvent(new Event("seeked"));
+    await vi.advanceTimersByTimeAsync(17);
+    video.currentTime = 2;
+    await vi.advanceTimersByTimeAsync(20);
+    expect(finished).not.toHaveBeenCalled();
+    video.currentTime = 1.25;
+    await vi.advanceTimersByTimeAsync(15);
+    expect(finished).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(20);
+    await waiting;
+    expect(finished).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("retains the original deadline and cancels readiness polling when data never arrives", async () => {
+    vi.useFakeTimers();
+    const { video } = decodingVideo();
+    Object.defineProperty(video, "readyState", {
+      value: HTMLMediaElement.HAVE_METADATA,
+    });
+    const waiting = waitForSpinFrame(video, undefined, 1.25);
+    const rejected = expect(waiting).rejects.toThrow("too long");
+    video.dispatchEvent(new Event("seeked"));
+    await vi.advanceTimersByTimeAsync(20000);
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
+    video.dispatchEvent(new Event("seeked"));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("rejects queued old presentations while priming a drawable surface", async () => {
+    const { video, present } = decodingVideo();
+    const finished = vi.fn();
+    const waiting = waitForSpinFrame(video).then(finished);
+    present(0, -1);
+    await Promise.resolve();
+    expect(finished).not.toHaveBeenCalled();
+    expect(video.requestVideoFrameCallback).toHaveBeenCalledTimes(2);
+    present(0);
+    await waiting;
+    expect(finished).toHaveBeenCalledOnce();
+  });
+  it.each(["before", "after"])(
+    "does not let a previous pipeline presentation delivered %s seeked bypass the active seek and paint boundary",
+    async (delivery) => {
+      vi.useFakeTimers();
+      const { video, present, callback } = decodingVideo();
+      const prime = waitForSpinFrame(video);
+      const stale = callback();
+      present();
+      await prime;
+      const finished = vi.fn();
+      const waiting = waitForSpinFrame(video, undefined, 1 / 12).then(finished);
+      const oldPresentation = () =>
+        stale(0, {
+          mediaTime: 0,
+          presentationTime: performance.now() + 1,
+        } as VideoFrameCallbackMetadata);
+      if (delivery === "before") oldPresentation();
+      await vi.advanceTimersByTimeAsync(40);
+      expect(finished).not.toHaveBeenCalled();
+      video.dispatchEvent(new Event("seeked"));
+      if (delivery === "after") oldPresentation();
+      await Promise.resolve();
+      expect(finished).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(40);
+      await waiting;
+      expect(video.requestVideoFrameCallback).toHaveBeenCalledOnce();
+      expect(video.play).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+  it.each([1 / 12, 1 / 6, 47 / 12])(
+    "accepts quantized same-frame or final-frame sample %s with no new presentation or playback",
+    async (target) => {
+      vi.useFakeTimers();
+      const { video } = decodingVideo();
+      const waiting = waitForSpinFrame(video, undefined, target);
+      expect(video.currentTime).toBe(target);
+      video.dispatchEvent(new Event("seeked"));
+      await vi.advanceTimersByTimeAsync(40);
+      await waiting;
+      expect(video.play).not.toHaveBeenCalled();
+      expect(video.requestVideoFrameCallback).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+  it("requires target data and rejects a mismatched seeked event", async () => {
+    vi.useFakeTimers();
+    const { video } = decodingVideo();
+    const finished = vi.fn();
+    const waiting = waitForSpinFrame(video, undefined, 1.25).then(finished);
+    video.currentTime = 0;
+    video.dispatchEvent(new Event("seeked"));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(finished).not.toHaveBeenCalled();
+    video.currentTime = 1.25;
+    Object.defineProperty(video, "readyState", {
+      value: HTMLMediaElement.HAVE_METADATA,
+      configurable: true,
+    });
+    video.dispatchEvent(new Event("seeked"));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(finished).not.toHaveBeenCalled();
+    Object.defineProperty(video, "readyState", {
+      value: HTMLMediaElement.HAVE_CURRENT_DATA,
+    });
+    video.dispatchEvent(new Event("seeked"));
+    await vi.advanceTimersByTimeAsync(40);
+    await waiting;
+  });
+  it("does not accept an initial callback before drawable decoded data exists", async () => {
+    const { video, present } = decodingVideo();
+    Object.defineProperty(video, "readyState", {
+      value: HTMLMediaElement.HAVE_METADATA,
+      configurable: true,
+    });
+    const finished = vi.fn();
+    const waiting = waitForSpinFrame(video).then(finished);
+    present();
+    await Promise.resolve();
+    expect(finished).not.toHaveBeenCalled();
+    Object.defineProperty(video, "readyState", {
+      value: HTMLMediaElement.HAVE_CURRENT_DATA,
+    });
+    present();
+    await waiting;
+    expect(finished).toHaveBeenCalledOnce();
+  });
+  it("ignores a canceled operation's callback after another prime begins", async () => {
+    const { video, present, callback } = decodingVideo();
+    const controller = new AbortController();
+    const previous = waitForSpinFrame(video, controller.signal);
+    const stale = callback();
+    const rejected = expect(previous).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await rejected;
+    const finished = vi.fn();
+    const next = waitForSpinFrame(video).then(finished);
+    stale(0, {
+      mediaTime: 0,
+      presentationTime: performance.now() + 1,
+    } as VideoFrameCallbackMetadata);
+    await Promise.resolve();
+    expect(finished).not.toHaveBeenCalled();
+    present();
+    await next;
+    expect(finished).toHaveBeenCalledOnce();
+  });
+  it("waits beyond loadeddata until the initial decoder presents a frame", async () => {
+    const { video, present } = decodingVideo();
+    const finished = vi.fn();
+    const waiting = waitForSpinFrame(video).then(finished);
+    video.dispatchEvent(new Event("loadeddata"));
+    await Promise.resolve();
+    expect(finished).not.toHaveBeenCalled();
+    expect(video.play).toHaveBeenCalledOnce();
+    present();
+    await waiting;
+    expect(finished).toHaveBeenCalledOnce();
+    expect(video.pause).toHaveBeenCalledTimes(2);
+    expect(video.cancelVideoFrameCallback).toHaveBeenCalledWith(7);
+  });
+  it("cancels paint turns if a paused seek is aborted", async () => {
+    vi.useFakeTimers();
+    const { video } = decodingVideo();
+    const controller = new AbortController();
+    const waiting = waitForSpinFrame(video, controller.signal, 47 / 12);
+    const rejected = expect(waiting).rejects.toThrow("cancelled");
+    video.dispatchEvent(new Event("seeked"));
+    await vi.advanceTimersByTimeAsync(17);
+    controller.abort();
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
+    video.dispatchEvent(new Event("seeked"));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each(["abort", "timeout"])(
+    "stops decoding and clears the callback after %s",
+    async (reason) => {
+      vi.useFakeTimers();
+      const { video, present } = decodingVideo();
+      const controller = new AbortController();
+      const waiting = waitForSpinFrame(video, controller.signal);
+      const rejected = expect(waiting).rejects.toThrow(
+        reason === "abort" ? "cancelled" : "too long",
+      );
+      if (reason === "abort") controller.abort();
+      else await vi.advanceTimersByTimeAsync(20000);
+      await rejected;
+      present();
+      expect(video.pause).toHaveBeenCalledTimes(2);
+      expect(video.cancelVideoFrameCallback).toHaveBeenCalledWith(7);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+});
 
 describe("walkaround frame planning", () => {
   it("samples one full turn without repeating the last angle", () => {

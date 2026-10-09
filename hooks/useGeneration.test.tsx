@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   generatePostVideo: vi.fn(),
   loadGeminiService: vi.fn(),
   logPost: vi.fn(),
+  reconcilePostSave: vi.fn(),
   linkReleaseToPostWithRetry: vi.fn(),
   renderFormat: vi.fn(async (source: string) => source),
   /** The signature upload inside the consent gate; resolves `{ id }` or nothing. */
@@ -87,6 +88,7 @@ vi.mock("../components/ui/Toast", () => ({
 
 vi.mock("../services/posts", () => ({
   logPost: mocks.logPost,
+  reconcilePostSave: mocks.reconcilePostSave,
 }));
 
 vi.mock("../services/photoReleases", () => ({
@@ -211,6 +213,8 @@ const renderGeneration = (
 describe("useGeneration model-tier and provenance wiring", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.logPost.mockReset();
+    mocks.reconcilePostSave.mockReset();
     Object.assign(mocks.store, {
       currentDealer: { id: "dealer-1", name: "Example Motors" },
       selectedImage: "data:image/png;base64,b3JpZ2luYWw=",
@@ -234,7 +238,12 @@ describe("useGeneration model-tier and provenance wiring", () => {
     mocks.generateSocialPost.mockResolvedValue(generatedResult);
     mocks.generateFunSocialPostImage.mockResolvedValue("data:image/png;base64,ZnVu");
     mocks.editSocialPostImage.mockResolvedValue("data:image/png;base64,ZWRpdA==");
-    mocks.logPost.mockResolvedValue(null);
+    mocks.logPost.mockResolvedValue({
+      id: "post-default",
+      updated: "revision-default",
+      approval_status: "n_a",
+    });
+    mocks.reconcilePostSave.mockResolvedValue(null);
     mocks.linkReleaseToPostWithRetry.mockResolvedValue({
       id: "release-stored-1",
       post_id: "post-77",
@@ -298,6 +307,106 @@ describe("useGeneration model-tier and provenance wiring", () => {
     );
     expect(mocks.renderFormat).toHaveBeenCalledTimes(4);
 
+    cleanup();
+  });
+
+  it.each([true, false])(
+    "recovers a failed save without another provider or signature call (already committed: %s)",
+    async (committed) => {
+      mocks.store.currentDealer = {
+        id: "dealer-1",
+        name: "Example Motors",
+        requires_approval: true,
+      };
+      const captured: CapturedRelease = {
+        customerName: "Alex",
+        signaturePngDataUrl: "data:image/png;base64,c2ln",
+        vin: "",
+      };
+      mocks.logPost
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce({
+          id: "recovered-post",
+          updated: "revision-created",
+          approval_status: "pending",
+          release_required: true,
+          release_status: "pending",
+        });
+      mocks.reconcilePostSave.mockResolvedValueOnce(
+        committed
+          ? {
+              id: "recovered-post",
+              updated: "revision-created",
+              approval_status: "pending",
+              release_required: true,
+              release_status: "pending",
+            }
+          : null,
+      );
+      const { result, cleanup } = renderGeneration();
+      await act(async () => {
+        await result.current.handleGenerate(
+          StyleOption.Modern,
+          ToneOption.Professional,
+          "Alex",
+          undefined,
+          undefined,
+          { capturedRelease: captured },
+        );
+      });
+      const failed = mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as GeneratedPost;
+      expect(failed).toMatchObject({
+        image: generatedResult.image,
+        saveStatus: "failed",
+        approvalStatus: "submission_failed",
+      });
+      expect(failed.saveOperationId).toMatch(/^[A-Za-z0-9_-]{16,80}$/);
+      expect(mocks.setStep).toHaveBeenLastCalledWith(AppStep.RESULT);
+      mocks.store.generatedPost = failed;
+      const originalInput = mocks.logPost.mock.calls[0][0];
+      await act(async () => {
+        await expect(result.current.retrySaveGeneratedPost()).resolves.toBe(true);
+      });
+      expect(mocks.reconcilePostSave).toHaveBeenCalledWith(originalInput, 1);
+      expect(mocks.logPost).toHaveBeenCalledTimes(committed ? 1 : 2);
+      if (!committed) expect(mocks.logPost.mock.calls[1][0]).toBe(originalInput);
+      expect(mocks.generateSocialPost).toHaveBeenCalledTimes(1);
+      expect(mocks.linkReleaseToPostWithRetry).toHaveBeenCalledWith(
+        "release-stored-1",
+        "recovered-post",
+        expect.objectContaining({ requestAuthEpoch: 1 }),
+      );
+      expect(mocks.setGeneratedPost.mock.calls.at(-1)?.[0]).toMatchObject({
+        image: failed.image,
+        saveOperationId: failed.saveOperationId,
+        saveStatus: "saved",
+        postId: "recovered-post",
+        postRevision: "revision-linked-1",
+        approvalStatus: "pending",
+        releaseStatus: "saved",
+      });
+      cleanup();
+    },
+  );
+
+  it("does not retry a generated save after the signed-in workspace changes", async () => {
+    mocks.logPost.mockRejectedValueOnce(new Error("Lost response"));
+    const { result, cleanup } = renderGeneration();
+    await act(async () => {
+      await result.current.handleGenerate(
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Alex",
+      );
+    });
+    mocks.store.generatedPost = mocks.setGeneratedPost.mock.calls.at(-1)?.[0];
+    mocks.store.authEpoch = 2;
+    await act(async () => {
+      await expect(result.current.retrySaveGeneratedPost()).resolves.toBe(false);
+    });
+    expect(mocks.reconcilePostSave).not.toHaveBeenCalled();
+    expect(mocks.logPost).toHaveBeenCalledTimes(1);
+    expect(mocks.generateSocialPost).toHaveBeenCalledTimes(1);
     cleanup();
   });
 
@@ -1776,7 +1885,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       cleanup();
     });
 
-    it("leaves the release unspent when no post came back to link it to", async () => {
+    it("reserves the release while a missing save response is unresolved", async () => {
       const captured = signedRelease();
       mocks.saveRelease.mockResolvedValueOnce({ id: "release-no-post-1" });
       mocks.logPost.mockResolvedValueOnce(null);
@@ -1794,7 +1903,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       });
 
       expect(mocks.linkReleaseToPostWithRetry).not.toHaveBeenCalled();
-      expect(isReleaseAlreadyLinked(captured)).toBe(false);
+      expect(isReleaseAlreadyLinked(captured)).toBe(true);
 
       cleanup();
     });
@@ -2020,9 +2129,11 @@ describe("useGeneration model-tier and provenance wiring", () => {
       expect(mocks.setGeneratedPost.mock.calls.at(-1)?.[0]).toMatchObject({
         approvalStatus: "submission_failed",
       });
-      expect(mocks.setError).toHaveBeenLastCalledWith(
-        expect.stringContaining("could not be submitted for manager approval"),
-      );
+      expect(mocks.setGeneratedPost.mock.calls.at(-1)?.[0]).toMatchObject({
+        saveStatus: "failed",
+        image: generatedResult.image,
+      });
+      expect(mocks.setError).toHaveBeenLastCalledWith(null);
       expect(mocks.setStep).toHaveBeenLastCalledWith(AppStep.RESULT);
 
       cleanup();

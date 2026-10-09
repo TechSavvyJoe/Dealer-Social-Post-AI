@@ -349,10 +349,23 @@ async function seedRestoredPost(
   );
 }
 
-async function signRelease(page: Page, customerName: string) {
+async function signRelease(
+  page: Page,
+  customerName: string,
+  method: "draw" | "type" = "draw",
+) {
   const dialog = page.getByRole("dialog", { name: "Customer photo release" });
   await expect(dialog).toBeVisible();
   await dialog.getByLabel("Customer's full name").fill(customerName);
+  if (method === "type") {
+    await dialog.getByRole("button", { name: "Type name instead" }).click();
+    await dialog.getByLabel("Type the customer’s full legal name").fill(customerName);
+    await dialog.getByRole("checkbox").check();
+    await expect(dialog.getByText("Electronic signature ready")).toBeVisible();
+    await dialog.getByRole("button", { name: "Save signature" }).click();
+    await expect(dialog).toBeHidden();
+    return;
+  }
   const pad = dialog.getByRole("img", { name: /Draw the customer's signature/ });
   await pad.scrollIntoViewIfNeeded();
   const box = await pad.boundingBox();
@@ -367,6 +380,7 @@ async function signRelease(page: Page, customerName: string) {
     );
   }
   await page.mouse.up();
+  await expect(dialog.getByText("Signed", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Save signature" }).click();
   await expect(dialog).toBeHidden();
 }
@@ -758,6 +772,127 @@ test("Create post stores the signature first, Cancel keeps the draft, and the re
   }
 });
 
+for (const committed of [false, true]) {
+  test(`generated post recovers a ${committed ? "lost save response" : "failed save"} without another AI call`, async ({
+    page,
+  }, info) => {
+    test.setTimeout(150_000);
+    const writes: Record<string, string>[] = [];
+    const recovered = {
+      id: "qa-recovered-post",
+      dealer: dealer.id,
+      salesperson_id: person.id,
+      salesperson_name: person.name,
+      scenario_id: "customer_delivery",
+      platform_ids: ["facebook_feed", "instagram_feed"],
+      media_output_mode: "photo",
+      primary_format_id: "feed_portrait",
+      image_aspect_ratio: "4:5",
+      approval_status: "n_a",
+      release_required: true,
+      release_status: "pending",
+      has_release: false,
+      created: "2026-10-06 12:00:00.000Z",
+      updated: "2026-10-06 12:00:00.000Z",
+    };
+    await recordSharing(page);
+    const state = await fixture(page, "salesperson", (request, path) => {
+      if (request.method() === "POST" && path === "/api/app/photo_releases")
+        return { json: { id: "qa-recovery-release", customer_name: "Alex Johnson" } };
+      if (
+        request.method() === "POST" &&
+        path === "/api/app/photo_releases/qa-recovery-release/link-post"
+      )
+        return {
+          json: {
+            id: "qa-recovery-release",
+            post: recovered.id,
+            post_revision: DRAFT_REVISION,
+          },
+        };
+      if (path.startsWith("/api/proxy/"))
+        return {
+          json: geminiText(
+            request.headers()["x-generation-task"] === "caption"
+              ? GENERATED_CAPTION
+              : "{}",
+          ),
+        };
+      if (request.method() === "GET" && path.startsWith("/api/app/post-operations/"))
+        return committed
+          ? { json: { ...recovered, caption: writes[0]?.caption || "" } }
+          : {
+              status: 404,
+              json: {
+                code: "POST_SAVE_NOT_FOUND",
+                error: "This generated result has not been saved",
+              },
+            };
+      if (request.method() === "POST" && path === "/api/app/posts") {
+        writes.push(multipartFields(request));
+        return writes.length === 1
+          ? { status: 503, json: { error: "The save response was interrupted" } }
+          : { json: { ...recovered, caption: writes[0].caption } };
+      }
+      return undefined;
+    });
+    await page
+      .getByLabel("Take a photo for Delivery", { exact: true })
+      .setInputFiles({ name: "delivery.jpg", mimeType: "image/jpeg", buffer: photo });
+    await page.getByRole("button", { name: "Get customer's signature" }).click();
+    await signRelease(page, "Alex Johnson", "type");
+    await page.getByRole("button", { name: "Create post", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByText("Your post is ready, but not saved")).toBeVisible();
+    const previewBytes = () =>
+      page.getByRole("img", { name: "Post image" }).evaluate(async (element) => {
+        const source = (element as HTMLImageElement).src;
+        const bytes = await (await fetch(source)).arrayBuffer();
+        return Array.from(new Uint8Array(bytes));
+      });
+    const image = await previewBytes();
+    expect(image.length).toBeGreaterThan(0);
+    const providerCalls = state.calls.filter((call) =>
+      call.includes(" /api/proxy/"),
+    ).length;
+    expect(providerCalls).toBeGreaterThan(0);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].save_operation_id).toMatch(/^[a-f0-9]{32,64}$/);
+    expect(writes[0].save_payload_digest).toMatch(/^[a-f0-9]{64}$/);
+    await quality(page);
+    await shot(
+      page,
+      committed ? "save-response-recovery" : "save-failure-recovery",
+      info.project.name,
+    );
+    await page.getByRole("button", { name: "Retry saving post", exact: true }).click();
+    await expect(page.getByText("Your post is ready, but not saved")).toHaveCount(0);
+    const phone = (page.viewportSize()?.width ?? 1440) < 1200;
+    const shareButton = page.getByRole("button", {
+      name: phone ? "Share to Instagram" : "Copy caption",
+      exact: true,
+    });
+    await expect(shareButton).toBeEnabled({ timeout: 15_000 });
+    expect(await previewBytes()).toEqual(image);
+    expect(state.calls.filter((call) => call.includes(" /api/proxy/"))).toHaveLength(
+      providerCalls,
+    );
+    expect(
+      state.calls.filter((call) => call === "POST /api/app/photo_releases"),
+    ).toHaveLength(1);
+    expect(writes).toHaveLength(committed ? 1 : 2);
+    for (const write of writes) {
+      expect(write.save_operation_id).toBe(writes[0].save_operation_id);
+      expect(write.save_payload_digest).toBe(writes[0].save_payload_digest);
+    }
+    await shareButton.click();
+    await expect.poll(() => state.shares.length).toBe(1);
+    expect(state.shares[0].expected_post_revision).toBe(DRAFT_REVISION);
+  });
+}
+
 test("installed iPhone fills its canvas with a stale viewport and reachable image/video actions", async ({
   page,
 }, info) => {
@@ -857,11 +992,19 @@ test("installed iPhone fills its canvas with a stale viewport and reachable imag
   await expect(page.getByLabel("Post video", { exact: true })).toBeInViewport();
   await versions.getByRole("button", { name: "Image", exact: true }).click();
   await expect(
+    versions.getByRole("button", { name: "Image", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
     page.getByRole("img", { name: "Post image", exact: true }),
   ).toBeInViewport();
-  await page
-    .getByRole("group", { name: "Image and video previews", exact: true })
-    .evaluate((rail) => rail.scrollTo({ left: 0 }));
+  const previews = page.getByRole("group", {
+    name: "Image and video previews",
+    exact: true,
+  });
+  await expect
+    .poll(() => previews.evaluate((rail) => rail.scrollLeft / rail.clientWidth))
+    .toBeGreaterThanOrEqual(0.9);
+  await previews.evaluate((rail) => rail.scrollTo({ left: 0 }));
   await expect(
     versions.getByRole("button", { name: "Video", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");

@@ -6,6 +6,8 @@ import { spinFrameAt, spinZoom } from "../utils/vehicleSpin";
 export interface VehicleSpinViewerProps {
   frames: string[];
   title: string;
+  /** Changes for a new recording/project; background refinements keep it stable. */
+  projectKey?: string | number;
   onAngleChange?: (index: number) => void;
   selectionLabel?: string;
   onSelectVehicle?: (point: { x: number; y: number }) => void;
@@ -14,6 +16,7 @@ export interface VehicleSpinViewerProps {
 export const VehicleSpinViewer: React.FC<VehicleSpinViewerProps> = ({
   frames,
   title,
+  projectKey,
   onAngleChange,
   onSelectVehicle,
   selectionLabel = "Tap the middle of the vehicle to select it",
@@ -41,7 +44,8 @@ export const VehicleSpinViewer: React.FC<VehicleSpinViewerProps> = ({
     setIndex(0);
     setZoom(1);
     setPan({ x: 0, y: 0 });
-  }, [frames.length]);
+    pointers.current.clear();
+  }, [frames.length, projectKey]);
   useEffect(() => {
     if (onSelectVehicle) {
       setZoom(1);
@@ -59,6 +63,21 @@ export const VehicleSpinViewer: React.FC<VehicleSpinViewerProps> = ({
     setZoom(next);
     if (next === 1) setPan({ x: 0, y: 0 });
   };
+  useEffect(() => {
+    const node = area.current;
+    if (!node) return;
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      setZoom((current) => {
+        const next = spinZoom(current + (event.deltaY < 0 ? 0.15 : -0.15));
+        if (next === 1) setPan({ x: 0, y: 0 });
+        return next;
+      });
+    };
+    node.addEventListener("wheel", wheel, { passive: false });
+    return () => node.removeEventListener("wheel", wheel);
+  }, []);
   const distance = () => {
     const [first, second] = [...pointers.current.values()];
     return first && second ? Math.hypot(first.x - second.x, first.y - second.y) : 0;
@@ -147,10 +166,6 @@ export const VehicleSpinViewer: React.FC<VehicleSpinViewerProps> = ({
         onPointerUp={endPointer}
         onPointerCancel={endPointer}
         onLostPointerCapture={endPointer}
-        onWheel={(event) => {
-          if (event.ctrlKey || event.metaKey)
-            changeZoom(zoom + (event.deltaY < 0 ? 0.15 : -0.15));
-        }}
         onClick={(event) => {
           if (!onSelectVehicle || !picture.current) return;
           const bounds = picture.current.getBoundingClientRect();
@@ -241,7 +256,7 @@ export const VehicleSpinViewer: React.FC<VehicleSpinViewerProps> = ({
           </div>
         </div>
         <input
-          className="mt-1 w-full accent-brand-ink"
+          className="mt-1 min-h-11 w-full accent-brand-ink"
           type="range"
           min={0}
           max={Math.max(0, frames.length - 1)}

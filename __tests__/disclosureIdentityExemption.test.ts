@@ -45,6 +45,52 @@ import {
 } from "../services/posts";
 
 type AnyRecord = Record<string, unknown>;
+const productionPostSaveModule = { exports: {} as Record<string, unknown> };
+new Function(
+  "module",
+  "exports",
+  readFileSync(resolve(process.cwd(), "pb_hooks/postSaveOperations.js"), "utf8"),
+)(productionPostSaveModule, productionPostSaveModule.exports);
+const productionPostSaveOperations = productionPostSaveModule.exports as {
+  validOperation(value: unknown): boolean;
+  failure(code: string, status: number, message: string): Error;
+};
+
+// These route tests exercise disclosure and identity policy. Keep admission
+// decisions outside their scope, with the production limits spelled out here;
+// mediaStorage's real capacity behavior has dedicated backend tests.
+const identityTestMediaStorage = {
+  MEDIA_BYTES: { creative: 8 * 1024 * 1024, signature: 512000 },
+  ensureStorageRoom: () => {},
+  respondIfLimited: () => false,
+  withMediaWrite: (
+    _dao: unknown,
+    _dealer: string,
+    _bytes: number,
+    write: (dao: unknown) => void,
+  ) => write(_dao),
+};
+const identityTestPostSaveOperations = {
+  validOperation: productionPostSaveOperations.validOperation,
+  failure: productionPostSaveOperations.failure,
+  withFence: (_dao: unknown, _dealer: string, callback: (dao: unknown) => unknown) =>
+    callback(_dao),
+  find: () => null,
+  // runSave deliberately omits save_operation_id, so ledger methods are not
+  // part of these identity tests and must remain unreachable.
+  fingerprint: () => {
+    throw new Error("identity fixture unexpectedly used a save operation");
+  },
+  reserve: () => {
+    throw new Error("identity fixture unexpectedly reserved a save operation");
+  },
+  complete: () => {
+    throw new Error("identity fixture unexpectedly completed a save operation");
+  },
+  response: () => {
+    throw new Error("identity fixture unexpectedly replayed a save operation");
+  },
+};
 
 type IdentityReview = {
   publicLabel: string;
@@ -458,6 +504,7 @@ const fakeRecord = (id: string, values: AnyRecord) => {
   const record = {
     id,
     values,
+    refreshId: () => {},
     getString: (field: string) => (values[field] ?? "").toString(),
     getBool: (field: string) => Boolean(values[field]),
     get: (field: string) => values[field],
@@ -510,6 +557,8 @@ const routeContext = (
     if (path.endsWith("/revisionCompatibility.js")) return globals.revisionObservation;
     if (path.endsWith("/helpers.js")) return globals.helpers;
     if (path.endsWith("/requestPolicies.js")) return policies;
+    if (path.endsWith("/postSaveOperations.js")) return identityTestPostSaveOperations;
+    if (path.endsWith("/mediaStorage.js")) return identityTestMediaStorage;
     if (path.endsWith("/websitePublications.js")) {
       return { ...website, ...websiteOverrides };
     }
@@ -579,6 +628,7 @@ const runSave = (body: AnyRecord) => {
     ) {
       return {
         setFullManageAccess: vi.fn(),
+        setDao: vi.fn(),
         loadData: (data: AnyRecord) => Object.assign(record.values, data),
         addFiles: vi.fn(),
         submit: () => {

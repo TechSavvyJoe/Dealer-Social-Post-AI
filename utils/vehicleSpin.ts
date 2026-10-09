@@ -110,10 +110,18 @@ export const openSpinVideo = async (file: File, signal?: AbortSignal) => {
   video.muted = true;
   video.playsInline = true;
   video.preload = "auto";
+  // WebKit may report loadeddata for a detached video while its drawable
+  // surface is still empty. Keep the decoder attached while preparing frames.
+  video.setAttribute("aria-hidden", "true");
+  video.tabIndex = -1;
+  video.style.cssText =
+    "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0.001;pointer-events:none";
+  document.body.appendChild(video);
   const close = () => {
     video.pause();
     video.removeAttribute("src");
     video.load();
+    video.remove();
     URL.revokeObjectURL(url);
   };
   try {
@@ -149,6 +157,114 @@ export const openSpinVideo = async (file: File, signal?: AbortSignal) => {
   }
 };
 
+/** Prime the drawable surface once; subsequent samples use the active paused seek. */
+export const waitForSpinFrame = (
+  video: HTMLVideoElement,
+  signal?: AbortSignal,
+  targetTime?: number,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    checkSpinAbort(signal);
+    let settled = false;
+    let frameCallback: number | undefined;
+    let animationFrame: number | undefined;
+    const presentationStarted = performance.now();
+    const drawable = () =>
+      !video.seeking && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    const done = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (frameCallback !== undefined) video.cancelVideoFrameCallback(frameCallback);
+      if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
+      video.removeEventListener("error", failed);
+      video.removeEventListener("playing", playing);
+      video.removeEventListener("seeked", seeked);
+      signal?.removeEventListener("abort", aborted);
+      video.pause();
+      if (error) reject(error);
+      else resolve();
+    };
+    const failed = () =>
+      done(
+        new Error(
+          "This video could not be decoded. Try a camera recording saved as MP4.",
+        ),
+      );
+    const aborted = () => done(abortError());
+    const afterPaint = (ready: () => boolean) => {
+      if (settled) return;
+      if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
+      let readyPaints = 0;
+      const paint = () => {
+        if (settled) return;
+        readyPaints = ready() ? readyPaints + 1 : 0;
+        if (readyPaints === 2) {
+          done();
+          return;
+        }
+        // Target data may become available after a paint without another media
+        // event. Keep observing within the same deadline, rather than stranding
+        // a drawable frame until the watchdog rejects it.
+        animationFrame = requestAnimationFrame(paint);
+      };
+      animationFrame = requestAnimationFrame(paint);
+    };
+    const targetSelected = () =>
+      targetTime !== undefined && Math.abs(video.currentTime - targetTime) <= 0.001;
+    const atTarget = () => drawable() && targetSelected();
+    const seeked = () => {
+      // A changed target still needs its completed seek boundary. Transiently
+      // missing data may then recover while the paint observer is active.
+      if (!video.seeking && targetSelected()) afterPaint(atTarget);
+    };
+    // The seeking algorithm waits for target data and decoding before seeked.
+    // Once the surface is primed, paused seek + paint handles quantized/VFR
+    // frames and the source tail without requiring a future presentation.
+    const playing = () => afterPaint(drawable);
+    const timer = setTimeout(
+      () =>
+        done(
+          new Error("The video picture took too long to decode. Try a shorter clip."),
+        ),
+      20000,
+    );
+    video.addEventListener("error", failed, { once: true });
+    signal?.addEventListener("abort", aborted, { once: true });
+    video.pause();
+    try {
+      if (targetTime !== undefined) {
+        video.addEventListener("seeked", seeked);
+        // Do not reassign the same timestamp just because decoding is pending.
+        // Poll the primed surface, checking seeking/readiness on every paint.
+        if (targetSelected()) afterPaint(atTarget);
+        else video.currentTime = targetTime;
+        return;
+      }
+      // loadeddata alone can leave WebKit's initial drawable surface empty.
+      // Only the one-time prime uses playback and compositor synchronization.
+      const presented: VideoFrameRequestCallback = (_now, metadata) => {
+        if (settled) return;
+        if (
+          !Number.isFinite(metadata.mediaTime) ||
+          !Number.isFinite(metadata.presentationTime) ||
+          metadata.presentationTime < presentationStarted ||
+          !drawable()
+        ) {
+          frameCallback = video.requestVideoFrameCallback(presented);
+          return;
+        }
+        done();
+      };
+      if (typeof video.requestVideoFrameCallback === "function")
+        frameCallback = video.requestVideoFrameCallback(presented);
+      else video.addEventListener("playing", playing, { once: true });
+      void video.play().catch(failed);
+    } catch {
+      failed();
+    }
+  });
+
 export const canvasJpeg = (canvas: HTMLCanvasElement, quality = 0.86): Promise<Blob> =>
   new Promise((resolve, reject) =>
     canvas.toBlob(
@@ -178,17 +294,16 @@ export const extractSpinFrames = async (
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("Your browser could not open the video editor.");
     const frames: Blob[] = [];
+    await waitForSpinFrame(source.video, options.signal);
+    // Prime playback can leave a later drawable frame while the logical clock
+    // still equals the first sample. WebKit may skip the media engine for a
+    // seek to that same time. Position through the next planned in-range sample
+    // once, so the loop's first seek back really replaces the primed surface.
+    if (Math.abs(source.video.currentTime - times[0]) <= 0.001)
+      await waitForSpinFrame(source.video, options.signal, times[1]);
     for (let index = 0; index < times.length; index++) {
       checkSpinAbort(options.signal);
-      if (Math.abs(source.video.currentTime - times[index]) > 0.001)
-        await mediaEvent(
-          source.video,
-          "seeked",
-          () => {
-            source.video.currentTime = times[index];
-          },
-          options.signal,
-        );
+      await waitForSpinFrame(source.video, options.signal, times[index]);
       context.drawImage(source.video, 0, 0, canvas.width, canvas.height);
       let frame = await canvasJpeg(canvas);
       if (frame.size > 450000) frame = await canvasJpeg(canvas, 0.65);

@@ -1,0 +1,46 @@
+name: Studio decoder probe
+
+on:
+  pull_request:
+    paths:
+      - "utils/vehicleSpin*"
+      - "components/VehicleSpinStudio.tsx"
+      - "components/PostScreen.tsx"
+      - "components/post/PostPreviewCard.tsx"
+      - "e2e/vehicle-spin-refinement.spec.ts"
+      - "e2e/streamlined-flow.spec.ts"
+      - ".github/workflows/studio-decoder-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  webkit-decoder-probe:
+    name: WebKit decoder probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps webkit
+      - name: Repeat the 6 fps and installed-phone preview fixtures on WebKit
+        run: >-
+          npx playwright test e2e/vehicle-spin-refinement.spec.ts e2e/streamlined-flow.spec.ts
+          --grep "6fps vehicle import builds all 48 quantized samples with decoded pixels|installed iPhone fills its canvas with a stale viewport and reachable image/video actions"
+          --project=webkit-desktop-1440 --project=webkit-phone-390
+          --repeat-each=10 --retries=0 --workers=1
+          --trace=retain-on-failure --reporter=line
+        env:
+          CI: true
+      - name: Retain decoder diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: studio-decoder-probe-test-results
+          path: test-results/
+          retention-days: 7

@@ -8011,6 +8011,7 @@ function retryPublication(post) {
 }
 
 module.exports = {
+  base64EncodeReader,
   groundedIdentityPhrase,
   WEBSITE_DRAFT_SCHEMA_VERSION,
   WEBSITE_BODY_LIMITS,

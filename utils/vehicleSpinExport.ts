@@ -42,6 +42,108 @@ const lines = (
   });
 };
 
+/** Decode the exact output before enabling sharing, including WebM duration repair. */
+export const verifySpinVideo = (
+  file: File,
+  expected: { width: number; height: number; duration: number },
+  signal: AbortSignal,
+): Promise<void> => {
+  checkSpinAbort(signal);
+  const video = document.createElement("video");
+  const url = URL.createObjectURL(file);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let decoded = false;
+    let checkingDuration = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", aborted);
+      video.removeEventListener("loadeddata", loaded);
+      video.removeEventListener("durationchange", durationChanged);
+      video.removeEventListener("timeupdate", durationChanged);
+      video.removeEventListener("error", failed);
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      video.remove();
+      URL.revokeObjectURL(url);
+      if (error) reject(error);
+      else resolve();
+    };
+    const failed = () =>
+      finish(
+        new Error(
+          "The exported video could not be played. Create it again before sharing.",
+        ),
+      );
+    const aborted = () =>
+      finish(new DOMException("Processing cancelled", "AbortError"));
+    const inspect = () => {
+      if (!decoded) return;
+      if (
+        video.videoWidth !== expected.width ||
+        video.videoHeight !== expected.height
+      ) {
+        finish(
+          new Error(
+            "The exported video has the wrong layout. Create it again before sharing.",
+          ),
+        );
+        return;
+      }
+      if (!Number.isFinite(video.duration)) {
+        // Chromium's recorded WebM can initially report Infinity. Seeking past
+        // the end makes its demuxer discover the actual end timestamp.
+        if (!checkingDuration) {
+          checkingDuration = true;
+          try {
+            video.currentTime = 1e10;
+          } catch {
+            failed();
+          }
+        }
+        return;
+      }
+      if (video.duration < 7 || Math.abs(video.duration - expected.duration) > 1.5) {
+        finish(
+          new Error(
+            "The exported video is incomplete. Create it again before sharing.",
+          ),
+        );
+        return;
+      }
+      finish();
+    };
+    const loaded = () => {
+      decoded = true;
+      inspect();
+    };
+    const durationChanged = () => inspect();
+    const timer = setTimeout(failed, 20_000);
+    signal.addEventListener("abort", aborted, { once: true });
+    video.addEventListener("loadeddata", loaded);
+    video.addEventListener("durationchange", durationChanged);
+    video.addEventListener("timeupdate", durationChanged);
+    video.addEventListener("error", failed);
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute("aria-hidden", "true");
+    video.tabIndex = -1;
+    video.style.cssText =
+      "position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;";
+    document.body.appendChild(video);
+    try {
+      video.src = url;
+      video.load();
+    } catch {
+      failed();
+    }
+  });
+};
+
 /** Render only saved, approval-checked frames and facts supplied by the caller. */
 export const exportSpinVideo = async (
   frames: Blob[],
@@ -120,10 +222,18 @@ export const exportSpinVideo = async (
     }
   };
   const stream = canvas.captureStream(30);
-  const recorder = new MediaRecorder(stream, {
-    mimeType: encoding.mimeType,
-    videoBitsPerSecond: 8000000,
-  });
+  let recorder: MediaRecorder;
+  try {
+    recorder = new MediaRecorder(stream, {
+      mimeType: encoding.mimeType,
+      videoBitsPerSecond: 8000000,
+    });
+  } catch {
+    stream.getTracks().forEach((track) => track.stop());
+    throw new Error(
+      "This device could not start the video encoder. Try again on another device.",
+    );
+  }
   const chunks: Blob[] = [];
   let failure: Error | null = null;
   const stopped = new Promise<void>((resolve) => {
@@ -151,6 +261,7 @@ export const exportSpinVideo = async (
   };
   document.addEventListener("visibilitychange", hidden);
   options.signal.addEventListener("abort", stop, { once: true });
+  let recordingStarted = 0;
   try {
     for (let index = 0; index < frames.length; index++) {
       checkSpinAbort(options.signal);
@@ -161,10 +272,14 @@ export const exportSpinVideo = async (
       } finally {
         bitmap.close();
       }
-      if (index === 0) recorder.start(1000);
+      if (index === 0) {
+        recorder.start(1000);
+        recordingStarted = performance.now();
+      }
       await new Promise((resolve) => setTimeout(resolve, 8000 / frames.length));
       options.onProgress((index + 1) / frames.length);
     }
+    const recordedDuration = (performance.now() - recordingStarted) / 1000;
     stop();
     await stopped;
     checkSpinAbort(options.signal);
@@ -176,7 +291,19 @@ export const exportSpinVideo = async (
         .replace(/[^a-z0-9]+/gi, "-")
         .replace(/^-|-$/g, "")
         .slice(0, 80) || "vehicle";
-    return new File([blob], name + "-360." + encoding.extension, { type: blob.type });
+    const file = new File([blob], name + "-360." + encoding.extension, {
+      type: blob.type,
+    });
+    await verifySpinVideo(
+      file,
+      {
+        width: canvas.width,
+        height: canvas.height,
+        duration: recordedDuration,
+      },
+      options.signal,
+    );
+    return file;
   } finally {
     stop();
     stream.getTracks().forEach((track) => track.stop());
