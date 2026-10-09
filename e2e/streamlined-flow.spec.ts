@@ -176,6 +176,9 @@ function defaultReply(
       },
     };
   }
+  if (method === "GET" && path === "/api/app/studio-capabilities") {
+    return { json: { walkaround: false } };
+  }
   if (method === "GET" && path === "/api/app/connections") {
     const service = (
       id: "gemini" | "anthropic" | "openai" | "website" | "walkaround",

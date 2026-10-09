@@ -47,13 +47,23 @@ const makeFixture = (): ConnectionsResponse => ({
     { id: "dealer-2", name: "Southside Motors" },
   ],
   services: [
-    connection("gemini", "needs_test", { credentialConfigured: { apiKey: true } }),
+    connection("gemini", "needs_test", {
+      credentialConfigured: { apiKey: true },
+      capabilities: [
+        { id: "text", label: "Caption access", state: "not_tested" },
+        { id: "images", label: "Image generation", state: "not_tested" },
+        { id: "video", label: "AI video generation", state: "not_tested" },
+      ],
+    }),
     connection("anthropic", "off", { configured: false, enabled: false }),
     connection("openai", "needs_test"),
     connection("website", "needs_setup", { configured: false, enabled: false }),
     connection("website", "needs_test", {
       dealerId: "dealer-2",
-      settings: { siteUrl: "https://south.example", destinationId: "south" },
+      settings: { origin: "https://south.example", destinationId: "south" },
+      capabilities: [
+        { id: "website", label: "Private website draft", state: "not_tested" },
+      ],
     }),
     connection("walkaround", "needs_test"),
   ],
@@ -187,6 +197,11 @@ describe("guided system connections", () => {
         const current = structuredClone(fixture);
         if (getCount > 1)
           current.services[0] = connection("gemini", "ready", {
+            capabilities: [
+              { id: "text", label: "Caption access", state: "verified" },
+              { id: "images", label: "Image generation", state: "not_tested" },
+              { id: "video", label: "AI video generation", state: "not_tested" },
+            ],
             lastVerifiedAt: "2026-10-09T12:00:00Z",
           });
         return jsonResponse(current);
@@ -203,7 +218,7 @@ describe("guided system connections", () => {
       ),
     );
     expect(await within(gemini).findByText("Caption access verified")).toBeVisible();
-    expect(within(gemini).getByText(/Verified/)).toBeVisible();
+    expect(within(gemini).getByText("Caption access: Verified")).toBeVisible();
   });
 
   it("loads named website proofs and only enables tests after a proof is selected", async () => {
@@ -267,6 +282,77 @@ describe("guided system connections", () => {
     expect(
       within(gemini).getByRole("button", { name: "Save connection" }),
     ).toBeDisabled();
+  });
+
+  it("saves canonical website origin fields and clears secrets when switching dealerships", async () => {
+    const user = userEvent.setup();
+    const requestBodies: Record<string, unknown>[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (
+        String(input) === "/api/app/connections/website" &&
+        init?.method === "PATCH"
+      ) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        requestBodies.push(body);
+        if ("siteUrl" in (body.settings as Record<string, unknown>))
+          return jsonResponse({ error: "Unsupported setting" }, 400);
+        return jsonResponse(
+          connection("website", "needs_test", {
+            dealerId: "dealer-2",
+            revision: 3,
+            settings: body.settings as ManagedConnection["settings"],
+            credentialConfigured: { sharedSecret: false },
+          }),
+        );
+      }
+      return jsonResponse(makeFixture());
+    });
+    mount();
+    const website = await screen.findByRole("article", {
+      name: /Customer website drafts/,
+    });
+    await user.click(within(website).getByRole("button", { name: "Set up" }));
+    await user.type(
+      within(website).getByLabelText("Website connection key"),
+      "north-secret",
+    );
+    await user.selectOptions(within(website).getByLabelText("Dealership"), "dealer-2");
+    expect(within(website).getByLabelText("Website connection key")).toHaveValue("");
+    await user.clear(within(website).getByLabelText("Approved website address"));
+    await user.type(
+      within(website).getByLabelText("Approved website address"),
+      "https://new-south.example",
+    );
+    await user.click(within(website).getByRole("button", { name: "Save connection" }));
+    await waitFor(() => expect(requestBodies).toHaveLength(1));
+    expect(requestBodies[0]).toMatchObject({
+      dealerId: "dealer-2",
+      settings: { origin: "https://new-south.example", destinationId: "south" },
+      credentials: {},
+    });
+    expect(requestBodies[0]).not.toHaveProperty("settings.siteUrl");
+  });
+
+  it("preserves an enabled optional provider and omits blank credentials on save", async () => {
+    const user = userEvent.setup();
+    const fixture = makeFixture();
+    fixture.services.find((item) => item.service === "openai")!.credentialConfigured = {
+      apiKey: true,
+    };
+    let savedBody: Record<string, unknown> | undefined;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/app/connections/openai" && init?.method === "PATCH") {
+        savedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return jsonResponse(connection("openai", "needs_test"));
+      }
+      return jsonResponse(fixture);
+    });
+    mount();
+    const openai = await screen.findByRole("article", { name: /OpenAI fallback/ });
+    await user.click(within(openai).getByRole("button", { name: "Set up" }));
+    await user.click(within(openai).getByRole("button", { name: "Save connection" }));
+    await waitFor(() => expect(savedBody).toBeDefined());
+    expect(savedBody).toMatchObject({ enabled: true, credentials: {} });
   });
 
   it("clears a typed secret when setup is closed", async () => {

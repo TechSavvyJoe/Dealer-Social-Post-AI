@@ -120,6 +120,7 @@ try {
           VERCEL_TO_FLY_PROXY_SECRET: proxy,
           GEMINI_API_KEY: "synthetic-provider-key",
           CONNECTIONS_ENCRYPTION_KEY: encryptionKey,
+          CONNECTIONS_ALLOWED_ORIGINS: "https://synthetic-destination.example",
           SAFE_HTTP_ALLOW_LOOPBACK_TEST: "true",
         },
         stdio: ["ignore", "pipe", "pipe"],
@@ -200,11 +201,74 @@ try {
     },
   });
   await api("/api/collections/managed_connections/records", { status: 403 });
+  const dealer = (
+    await api("/api/app/dealers", {
+      cookie: admin,
+      method: "POST",
+      data: { name: "Synthetic Connections Store", requires_approval: true },
+    })
+  ).value;
+  const secondDealer = (
+    await api("/api/app/dealers", {
+      cookie: admin,
+      method: "POST",
+      data: { name: "Synthetic Other Store", requires_approval: true },
+    })
+  ).value;
+  const website = (
+    await api("/api/app/connections/website", {
+      cookie: admin,
+      method: "PATCH",
+      data: {
+        dealerId: dealer.id,
+        expectedRevision: 0,
+        enabled: true,
+        confirmApply: true,
+        settings: {
+          origin: "https://synthetic-destination.example",
+          destinationId: "synthetic-store",
+        },
+        credentials: {
+          sharedSecret: "synthetic-website-secret-at-least-32-characters",
+        },
+      },
+    })
+  ).value;
+  assert.equal(website.settings.origin, "https://synthetic-destination.example");
+  assert.equal(website.state, "needs_test");
+  assert.equal(website.credentialConfigured.sharedSecret, true);
+  assert(!JSON.stringify(website).includes("synthetic-website-secret"));
+  await api("/api/app/connections/website", {
+    cookie: admin,
+    method: "PATCH",
+    status: 400,
+    data: {
+      dealerId: dealer.id,
+      expectedRevision: 1,
+      enabled: true,
+      confirmApply: true,
+      settings: {
+        siteUrl: "https://synthetic-destination.example",
+        destinationId: "synthetic-store",
+      },
+      credentials: {},
+    },
+  });
+  const scoped = (await api("/api/app/connections", { cookie: admin })).value.services;
+  assert.equal(
+    scoped.find((row) => row.service === "website" && row.dealerId === secondDealer.id)
+      .configured,
+    false,
+  );
+  checks.push(
+    "real website setup uses canonical origin and rejects unknown fields",
+    "website configuration stays isolated to selected dealership",
+  );
   const probe = (await api("/__connections/probe")).value;
   assert.equal(probe.redirectBlocked, true);
   assert.equal(redirectedRequests, 0);
   assert.equal(probe.audit.ok, true);
-  assert.equal(probe.audit.count, 1);
+  assert.equal(probe.audit.count, 2);
   assert.equal(probe.echo.authorization, "Bearer synthetic");
   assert.match(probe.echo.body, /café/);
   // Search the actual SQLite file, not merely the status DTO, for plaintext.
@@ -324,7 +388,7 @@ sys.exit(os.waitstatus_to_exitcode(status))`,
   // insufficient for restore acceptance.
   await startBackend(randomBytes(24).toString("base64"));
   const wrongKey = (await api("/__connections/probe")).value;
-  assert.deepEqual(wrongKey.audit, { ok: false, count: 1 });
+  assert.deepEqual(wrongKey.audit, { ok: false, count: 2 });
   assert.equal(wrongKey.runtimeBlocked, true);
   const wrongConfig = (
     await api("/api/app/connections", { cookie: admin })
@@ -338,10 +402,10 @@ sys.exit(os.waitstatus_to_exitcode(status))`,
   await startBackend(key);
   assert.deepEqual((await api("/__connections/probe")).value.audit, {
     ok: true,
-    count: 1,
+    count: 2,
   });
   const tampered = (await api("/__connections/tamper", { method: "POST" })).value;
-  assert.deepEqual(tampered.audit, { ok: false, count: 1 });
+  assert.deepEqual(tampered.audit, { ok: false, count: 2 });
   assert.equal(tampered.blocked, true);
   checks.push("authenticated tampered envelope rejects restore and runtime fallback");
   console.log(JSON.stringify({ status: "passed", pocketbase: "0.22.55", checks }));

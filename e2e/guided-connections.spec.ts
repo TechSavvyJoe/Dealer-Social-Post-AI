@@ -42,9 +42,9 @@ const makeConnections = (): ConnectionsResponse => ({
     connection("gemini", "needs_setup", {
       revision: 0,
       capabilities: [
-        { id: "caption_text", label: "Caption generation", state: "not_tested" },
-        { id: "image_generation", label: "Image generation", state: "not_tested" },
-        { id: "video_generation", label: "Video generation", state: "not_tested" },
+        { id: "text", label: "Caption access", state: "not_tested" },
+        { id: "images", label: "Image generation", state: "not_tested" },
+        { id: "video", label: "AI video generation", state: "not_tested" },
       ],
     }),
     connection("anthropic", "off", { configured: false, enabled: false }),
@@ -60,12 +60,12 @@ const makeConnections = (): ConnectionsResponse => ({
       configured: true,
       enabled: true,
       settings: {
-        siteUrl: "https://southside.example",
+        origin: "https://southside.example",
         destinationId: "southside-private-drafts",
       },
       credentialConfigured: { sharedSecret: true },
       capabilities: [
-        { id: "websiteReady", label: "Private draft delivery", state: "not_tested" },
+        { id: "website", label: "Private website draft", state: "not_tested" },
       ],
     }),
     connection("walkaround", "off", { configured: false, enabled: false }),
@@ -207,14 +207,14 @@ async function installAdminApi(page: Page) {
       target.nextAction = "No action needed.";
       if (service === "gemini") {
         target.capabilities = [
-          { id: "caption_text", label: "Caption generation", state: "verified" },
-          { id: "image_generation", label: "Image generation", state: "not_tested" },
-          { id: "video_generation", label: "Video generation", state: "not_tested" },
+          { id: "text", label: "Caption access", state: "verified" },
+          { id: "images", label: "Image generation", state: "not_tested" },
+          { id: "video", label: "AI video generation", state: "not_tested" },
         ];
       }
       if (service === "website") {
         target.capabilities = [
-          { id: "websiteReady", label: "Private draft delivery", state: "verified" },
+          { id: "website", label: "Private website draft", state: "verified" },
         ];
       }
       return route.fulfill(json(target));
@@ -299,9 +299,9 @@ test.describe("guided system connections", () => {
     await expect(gemini.getByText("Testing", { exact: true })).toBeVisible();
     await gemini.getByRole("button", { name: "Test connection" }).click();
     await expect(gemini.getByText("Caption access verified")).toBeVisible();
-    await expect(gemini.getByText("Caption generation: Verified")).toBeVisible();
+    await expect(gemini.getByText("Caption access: Verified")).toBeVisible();
     await expect(gemini.getByText("Image generation: Not tested")).toBeVisible();
-    await expect(gemini.getByText("Video generation: Not tested")).toBeVisible();
+    await expect(gemini.getByText("AI video generation: Not tested")).toBeVisible();
     const geminiTests = requests.filter(
       (request) => request.path === "/api/app/connections/gemini/test",
     );
@@ -342,7 +342,7 @@ test.describe("guided system connections", () => {
     ).toBeVisible();
     await website.getByRole("button", { name: "Test connection" }).click();
     await expect(website.getByText("Ready")).toBeVisible();
-    await expect(website.getByText("Private draft delivery: Verified")).toBeVisible();
+    await expect(website.getByText("Private website draft: Verified")).toBeVisible();
 
     const websiteTests = requests.filter(
       (request) => request.path === "/api/app/connections/website/test",

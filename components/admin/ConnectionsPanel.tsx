@@ -88,7 +88,7 @@ const SERVICES: ServiceInfo[] = [
     scope: "dealer",
     credentialFields: [{ key: "sharedSecret", label: "Website connection key" }],
     settingFields: [
-      { key: "siteUrl", label: "Approved website address", type: "url" },
+      { key: "origin", label: "Approved website address", type: "url" },
       { key: "destinationId", label: "Website destination ID" },
     ],
     proofLabel: "Released post ID for private test",
@@ -133,6 +133,7 @@ const emptyCredentials = (): Record<string, string> => ({});
 
 const initialSettings = (connection?: ManagedConnection) => ({
   ...(connection?.settings ?? {}),
+  enabled: connection?.enabled ?? false,
 });
 
 const inputClass =
@@ -189,6 +190,9 @@ function ServiceCard({
   }, [connection]);
   useEffect(() => {
     setProofId("");
+    setCredentials(emptyCredentials());
+    setError("");
+    setNotice("");
     testAttemptRef.current = null;
   }, [dealerId]);
   useEffect(() => {
@@ -252,7 +256,9 @@ function ServiceCard({
             ([key, value]) => key !== "enabled" && value !== undefined,
           ),
         ) as Record<string, string | boolean>,
-        credentials,
+        credentials: Object.fromEntries(
+          Object.entries(credentials).filter(([, value]) => value.trim().length > 0),
+        ),
       });
       if (useAppStore.getState().authEpoch !== requestAuthEpoch) return;
       forgetCredentials();
@@ -457,6 +463,7 @@ function ServiceCard({
               <select
                 className={inputClass}
                 value={dealerId}
+                disabled={busy !== null}
                 onChange={(event) => setDealerId(event.target.value)}
               >
                 <option value="">Choose a dealership</option>

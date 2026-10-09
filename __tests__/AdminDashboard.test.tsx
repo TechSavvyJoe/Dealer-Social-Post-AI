@@ -45,9 +45,7 @@ const connections = {
       enabled: true,
       revision: 2,
       state: "needs_test" as const,
-      capabilities: [
-        { id: "caption_text", label: "Caption generation", state: "not_tested" },
-      ],
+      capabilities: [{ id: "text", label: "Caption access", state: "not_tested" }],
       nextAction: "Run a text test.",
       settings: {},
       credentialConfigured: { apiKey: true },
@@ -87,9 +85,7 @@ const verifiedConnections = {
       ? {
           ...service,
           state: "ready" as const,
-          capabilities: [
-            { id: "caption_text", label: "Caption generation", state: "verified" },
-          ],
+          capabilities: [{ id: "text", label: "Caption access", state: "verified" }],
           nextAction: "No action needed.",
         }
       : service,
