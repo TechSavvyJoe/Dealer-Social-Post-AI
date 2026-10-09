@@ -247,13 +247,13 @@ describe("system admin hub", () => {
   it("refreshes guided connection verification and shows the server result", async () => {
     mount();
     fireEvent.click(screen.getByRole("tab", { name: "Connections" }));
-    expect(await screen.findByText("0 of 1 required services verified.")).toBeVisible();
+    expect(await screen.findByText("0 / 1 checks verified")).toBeVisible();
     expect(connectionCalls()).toBe(1);
     expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
     await waitFor(() => expect(connectionCalls()).toBe(2));
-    expect(await screen.findByText("1 of 1 required services verified.")).toBeVisible();
+    expect(await screen.findByText("1 / 1 checks verified")).toBeVisible();
     expect(screen.getByRole("article", { name: "Google Gemini" })).toHaveTextContent(
       "Caption access verified",
     );

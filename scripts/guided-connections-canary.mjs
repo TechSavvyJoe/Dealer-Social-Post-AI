@@ -342,27 +342,41 @@ try {
 pid,fd=pty.fork()
 if pid==0:
  os.execv(sys.argv[1],sys.argv[1:])
-output=b'';confirmed=False;deadline=time.monotonic()+25
+output=b'';pending=b'';confirmed=False;cursor_queries=0;timed_out=False
+started=time.monotonic();deadline=started+25;last_output=started
+query=bytes([27])+b'[6n';position=bytes([27])+b'[1;1R'
 while time.monotonic()<deadline:
- ready,_,_=select.select([fd],[],[],0.2)
+ ready,_,_=select.select([fd],[],[],0.05)
  if ready:
   try: chunk=os.read(fd,65536)
   except OSError: break
   if not chunk: break
-  output+=chunk
-  for _ in range(chunk.count(b'\\x1b[6n')): os.write(fd,b'\\x1b[1;1R')
-  if b'(y/N)' in output and not confirmed:
-   os.write(fd,b'y\\r');confirmed=True
+  last_output=time.monotonic();output=(output+chunk)[-8192:]
+  pending+=chunk
+  while query in pending:
+   before,pending=pending.split(query,1)
+   os.write(fd,position);cursor_queries+=1
+  pending=pending[-(len(query)-1):]
+ elif b'(y/N)' in output and not confirmed and time.monotonic()-last_output>=0.1:
+  # The prompt may precede several cursor queries. Answer all of those before
+  # injecting the confirmation, so a cursor-position reader cannot consume it.
+  os.write(fd,b'y'+bytes([13]));confirmed=True
  done,status=os.waitpid(pid,os.WNOHANG)
- if done:
-  sys.stdout.buffer.write(output);sys.exit(os.waitstatus_to_exitcode(status))
+ if done: break
 else:
- os.kill(pid,9)
+ timed_out=True;os.kill(pid,9)
  _,status=os.waitpid(pid,0)
-sys.stdout.buffer.write(output)
 try: _,status=os.waitpid(pid,0)
 except ChildProcessError: pass
-sys.exit(os.waitstatus_to_exitcode(status))`,
+sys.stdout.buffer.write(output)
+code=os.waitstatus_to_exitcode(status)
+if timed_out:
+ sys.stderr.write('Scratch down PTY watchdog expired after 25s; cursor_queries='+str(cursor_queries)+'; confirmed='+str(confirmed)+'\\n')
+ sys.exit(124)
+if code<0:
+ sys.stderr.write('Scratch down process terminated by signal '+str(-code)+'\\n')
+ sys.exit(128-code)
+sys.exit(code)`,
       resolve(binary),
       "migrate",
       "down",
@@ -373,7 +387,17 @@ sys.exit(os.waitstatus_to_exitcode(status))`,
     ],
     { encoding: "utf8", timeout: 30_000, env: { PATH: process.env.PATH } },
   );
-  assert.equal(down.status, 0, "Scratch down migration failed");
+  assert.equal(
+    down.status,
+    0,
+    "Scratch down migration failed: " +
+      JSON.stringify({
+        signal: down.signal,
+        error: down.error?.code,
+        diagnostics: down.stderr?.slice(-1000),
+        output: down.stdout?.slice(-1500),
+      }),
+  );
   assert.equal(
     sql(
       "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('managed_connections','connection_verifications')",
