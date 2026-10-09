@@ -78,7 +78,7 @@ const SERVICES: ServiceInfo[] = [
   {
     id: "openai",
     title: "OpenAI fallback",
-    description: "Backup for supported text tasks.",
+    description: "Backup image generation for supported posts.",
     optional: true,
     scope: "global",
     credentialFields: [{ key: "apiKey", label: "OpenAI API key" }],
@@ -1024,7 +1024,7 @@ export const ConnectionsPanel: React.FC<{
               </summary>
               <div className="space-y-2.5 border-t border-hairline p-3">
                 <p className="px-1 text-xs text-ink-2">
-                  Optional text providers. Off services do not affect readiness.
+                  Optional providers. Off services do not affect readiness.
                 </p>
                 {SERVICES.filter(
                   (service) => service.id === "anthropic" || service.id === "openai",
