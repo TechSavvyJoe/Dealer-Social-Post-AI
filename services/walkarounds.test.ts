@@ -13,6 +13,7 @@ import {
   validateWalkaroundClips,
   startYouTubeConnection,
 } from "./walkarounds";
+import type { DecodedVehicle } from "./vinDecoder";
 
 const videoFile = (
   name = "walkaround.mp4",
@@ -22,6 +23,34 @@ const videoFile = (
   const file = new File([new Uint8Array(16)], name, { type, lastModified: 123 });
   if (size !== undefined) Object.defineProperty(file, "size", { value: size });
   return file;
+};
+
+const projectResponse = () =>
+  new Response(
+    JSON.stringify({
+      id: "project-1",
+      audience: "inventory",
+      captureMode: "one_take",
+      productionState: "draft",
+      publicationState: "not_requested",
+      reviewRevision: 0,
+      approvalRequired: false,
+    }),
+    { status: 201, headers: { "Content-Type": "application/json" } },
+  );
+
+const decodedVehicle: DecodedVehicle = {
+  vin: "1HGCM82633A004352",
+  year: "2003",
+  make: "Honda",
+  model: "Accord",
+  trim: "EX",
+  bodyClass: "Coupe",
+  engineDisplacementL: "3.0",
+  doors: "2",
+  plantCountry: "United States",
+  summary: "2003 Honda Accord EX",
+  empty: false,
 };
 
 describe("walkaround client contracts", () => {
@@ -103,6 +132,73 @@ describe("walkaround client contracts", () => {
     await expect(
       createWalkaroundProject({ audience: "inventory", captureMode: "one_take" }),
     ).rejects.toThrow("invalid project");
+  });
+
+  it("sends confirmed manufacturer facts only when the VIN still matches", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(projectResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createWalkaroundProject({
+      audience: "inventory",
+      captureMode: "one_take",
+      vin: " 1hgcm82633a004352 ",
+      decodedVehicle: { ...decodedVehicle, fuelType: "  " },
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.vehicleSnapshot).toEqual({
+      vinOrStock: "1hgcm82633a004352",
+      year: "2003",
+      make: "Honda",
+      model: "Accord",
+      trim: "EX",
+      bodyClass: "Coupe",
+      engineDisplacementL: "3.0",
+      doors: "2",
+      plantCountry: "United States",
+    });
+  });
+
+  it("omits decoded facts when the user changes the VIN", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(projectResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createWalkaroundProject({
+      audience: "inventory",
+      captureMode: "one_take",
+      vin: "2HGCM82633A004352",
+      decodedVehicle,
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.vehicleSnapshot).toEqual({ vinOrStock: "2HGCM82633A004352" });
+  });
+
+  it("omits unverified lookup facts even if the VIN still matches", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(projectResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    await createWalkaroundProject({
+      audience: "inventory",
+      captureMode: "one_take",
+      vin: decodedVehicle.vin,
+      decodedVehicle: { ...decodedVehicle, empty: true },
+    });
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.vehicleSnapshot).toEqual({ vinOrStock: decodedVehicle.vin });
+  });
+
+  it("keeps legacy stock-number input valid without decoded facts", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(projectResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createWalkaroundProject({
+      audience: "inventory",
+      captureMode: "one_take",
+      vin: "  STOCK-84 ",
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.vehicleSnapshot).toEqual({ vinOrStock: "STOCK-84" });
   });
 
   it("normalizes worker metadata aliases for the review editor", async () => {

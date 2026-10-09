@@ -382,6 +382,27 @@ describe("PostDetails", () => {
     ).toBeTruthy();
   });
 
+  it.each([
+    ["service", "service_promotion"],
+    ["promotions", "model_year_end"],
+    ["community", "community_event"],
+    ["team", "team_anniversary"],
+  ] as const)(
+    "offers optional VIN scanning for %s image and video details",
+    (categoryId, scenarioId) => {
+      useAppStore.setState({ postDraft: { categoryId, scenarioId } });
+      renderDetails();
+      fireEvent.click(screen.getByRole("button", { name: /^Vehicle/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Use scanned vehicle" }));
+      expect(useAppStore.getState().postDraft?.decodedVehicle?.vin).toBe(
+        "1FTFW1E50NFA99999",
+      );
+      expect(screen.getByRole("button", { name: /^Vehicle/ })).toHaveTextContent(
+        "2024 Ford F-150",
+      );
+    },
+  );
+
   it("asks for the signature again when the vehicle changes after signing", () => {
     useAppStore.setState({
       pendingRelease: {

@@ -1,3 +1,5 @@
+import { withRequestDeadline } from "../utils/requestDeadline";
+
 /**
  * NHTSA VIN decoder.
  *
@@ -67,12 +69,18 @@ interface NhtsaRow {
   PlantCountry?: string;
   ErrorCode?: string;
   ErrorText?: string;
+  VIN?: string;
+  SuggestedVIN?: string;
 }
 
 const emptyIfDash = (v?: string): string | undefined => {
-  if (!v) return undefined;
+  if (typeof v !== "string") return undefined;
   const trimmed = v.trim();
-  if (!trimmed || trimmed === "Not Applicable" || trimmed === "0") return undefined;
+  if (
+    !trimmed ||
+    /^(?:not applicable|not available|unknown|n\/a|null|0|-+)$/i.test(trimmed)
+  )
+    return undefined;
   return trimmed;
 };
 
@@ -99,67 +107,69 @@ const buildSummary = (d: Omit<DecodedVehicle, "summary" | "empty">): string => {
   return tail.length ? `${head} — ${tail.join(", ")}` : head;
 };
 
-/**
- * Decode a VIN via NHTSA vPIC. Always resolves (never throws on bad data); the
- * caller should inspect `empty` and `summary` to decide whether to use it.
- */
-export const decodeVin = async (vin: string): Promise<DecodedVehicle> => {
+/** Decode known manufacturer facts; caller cancellation propagates unchanged. */
+export const decodeVin = async (
+  vin: string,
+  signal?: AbortSignal,
+): Promise<DecodedVehicle> => {
+  signal?.throwIfAborted();
   const cleaned = normalizeVin(vin);
-
-  if (!isValidVin(cleaned)) {
-    return {
-      vin: cleaned,
-      summary: "Invalid VIN",
-      empty: true,
-    };
-  }
-
+  if (!isValidVin(cleaned))
+    return { vin: cleaned, summary: "Invalid VIN", empty: true };
   const url = `${NHTSA_ENDPOINT}/${encodeURIComponent(cleaned)}?format=json`;
   let json: { Results?: NhtsaRow[] } | undefined;
-
-  // 8s timeout. Use AbortSignal.timeout where available (Chrome 103+,
-  // Safari 17.4+). Older iPads / Safari fall back to AbortController.
-  const controller =
-    typeof AbortController !== "undefined" ? new AbortController() : null;
-  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-  let signal: AbortSignal | undefined;
-  if (
-    typeof AbortSignal !== "undefined" &&
-    typeof (AbortSignal as any).timeout === "function"
-  ) {
-    signal = (AbortSignal as any).timeout(8000);
-  } else if (controller) {
-    timeoutHandle = setTimeout(() => controller.abort(), 8000);
-    signal = controller.signal;
-  }
-
   try {
-    const res = await fetch(url, {
-      method: "GET",
-      headers: { Accept: "application/json" },
+    json = await withRequestDeadline(
       signal,
-    });
-    if (!res.ok) {
-      throw new Error(`NHTSA returned ${res.status}`);
-    }
-    json = await res.json();
-  } catch (err) {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
+      async (requestSignal) => {
+        const response = await fetch(url, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          signal: requestSignal,
+        });
+        if (!response.ok) throw new Error("Vehicle lookup is unavailable.");
+        const result = await response.json();
+        requestSignal.throwIfAborted();
+        return result;
+      },
+      8000,
+    );
+    signal?.throwIfAborted();
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason;
     return {
       vin: cleaned,
-      summary: `Could not decode VIN (${
-        err instanceof Error ? err.message : "network error"
-      })`,
+      summary: "Could not look up this VIN. Check your connection and try again.",
       empty: true,
     };
-  } finally {
-    if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 
-  const row = json?.Results?.[0];
+  const row =
+    Array.isArray(json?.Results) && json.Results.length === 1
+      ? json.Results[0]
+      : undefined;
   if (!row) {
     return { vin: cleaned, summary: "No NHTSA record for this VIN", empty: true };
   }
+
+  // vPIC can decode partial/corrected VINs. Those facts must never be attached
+  // to a different vehicle merely because the response includes a make/model.
+  const errors =
+    typeof row.ErrorCode === "string"
+      ? row.ErrorCode.split(/[;,]/).map((code) => code.trim())
+      : [];
+  if (
+    !errors.length ||
+    errors.some((code) => code !== "0") ||
+    (typeof row.VIN === "string" && normalizeVin(row.VIN) !== cleaned) ||
+    (typeof row.SuggestedVIN === "string" && row.SuggestedVIN.trim())
+  )
+    return {
+      vin: cleaned,
+      summary:
+        "This VIN could not be verified. Check all 17 characters on the vehicle and try again.",
+      empty: true,
+    };
 
   const decoded: Omit<DecodedVehicle, "summary" | "empty"> = {
     vin: cleaned,

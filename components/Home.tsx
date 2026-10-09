@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Images, LoaderCircle, Rotate3D, Upload } from "lucide-react";
+import { ChevronRight, Images, LoaderCircle, Rotate3D, Upload } from "lucide-react";
 import type { BrandCategoryId, GeneratedPost, ImageSelection } from "../types";
 import { useAppStore } from "../stores/appStore";
 import { homeTilesForDealer, type HomeTile } from "../services/storeDefaults";
@@ -162,10 +162,12 @@ export const Home: React.FC<HomeProps> = ({
 
         {onOpenSpin && (
           <Button
-            variant="ghost"
+            variant="secondary"
+            size="md"
             fullWidth
-            className="mt-2 justify-start"
+            className="mt-2 min-h-[52px] justify-start gap-3 border-brand-ink bg-panel-raised px-4 text-base text-ink [&>span:nth-child(2)]:flex-1 [&>span:nth-child(2)]:text-left"
             leftIcon={<Rotate3D />}
+            rightIcon={<ChevronRight />}
             onClick={onOpenSpin}
           >
             360° vehicle studio
