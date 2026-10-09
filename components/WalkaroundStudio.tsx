@@ -7,6 +7,7 @@ import {
   Copy,
   Film,
   RefreshCw,
+  ScanLine,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -40,6 +41,8 @@ import {
   WalkaroundReleaseModal,
   type CapturedWalkaroundRelease,
 } from "./WalkaroundReleaseModal";
+import { VinScanner } from "./VinScanner";
+import { normalizeVin, type DecodedVehicle } from "../services/vinDecoder";
 
 interface WalkaroundStudioProps {
   dealerId: string;
@@ -95,6 +98,10 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
     React.useState<WalkaroundCaptureMode>("one_take");
   const [clips, setClips] = React.useState<PendingClip[]>([]);
   const [vin, setVin] = React.useState("");
+  const [decodedVehicle, setDecodedVehicle] = React.useState<DecodedVehicle | null>(
+    null,
+  );
+  const [vinScannerOpen, setVinScannerOpen] = React.useState(false);
   const [customerLabel, setCustomerLabel] = React.useState("");
   const [identifiableNonEmployee, setIdentifiableNonEmployee] = React.useState(false);
   const [capturedRelease, setCapturedRelease] =
@@ -125,6 +132,10 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
   );
   const [reeditInstructions, setReeditInstructions] = React.useState("");
   const currentProjectKey = `dealer-social:walkaround-current:v1:${dealerId}`;
+  const confirmedVehicle =
+    decodedVehicle && normalizeVin(vin) === normalizeVin(decodedVehicle.vin)
+      ? decodedVehicle
+      : null;
 
   const validation = React.useMemo(
     () => validateWalkaroundClips(clips, captureMode),
@@ -322,6 +333,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
         audience,
         captureMode,
         vin: vin.trim() || undefined,
+        decodedVehicle: confirmedVehicle || undefined,
         containsIdentifiableNonEmployee: identifiableNonEmployee,
       });
       setProject(created);
@@ -592,14 +604,37 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
           </label>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="text-sm font-medium text-surface-200">
-              VIN or stock number (optional)
-              <input
-                className={`${inputClass} mt-2`}
-                value={vin}
-                onChange={(event) => setVin(event.target.value)}
-              />
-            </label>
+            <div className="text-sm font-medium text-surface-200">
+              <label htmlFor="walkaround-vin">VIN or stock number (optional)</label>
+              <div className="mt-2 flex min-w-0 gap-2">
+                <input
+                  id="walkaround-vin"
+                  className={`${inputClass} mt-0 min-w-0 flex-1`}
+                  value={vin}
+                  onChange={(event) => {
+                    const nextVin = event.target.value;
+                    setVin(nextVin);
+                    setDecodedVehicle((current) =>
+                      current && normalizeVin(nextVin) !== normalizeVin(current.vin)
+                        ? null
+                        : current,
+                    );
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy || Boolean(project)}
+                  leftIcon={<ScanLine />}
+                  onClick={() => {
+                    if (!busy && !project) setVinScannerOpen(true);
+                  }}
+                >
+                  Scan VIN
+                </Button>
+              </div>
+            </div>
             {audience === "customer" && (
               <label className="text-sm font-medium text-surface-200">
                 Customer label (optional, no contact details)
@@ -611,6 +646,44 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
               </label>
             )}
           </div>
+
+          {confirmedVehicle && (
+            <section
+              className="rounded-xl border border-hairline bg-surface-900/65 p-3 text-sm text-surface-200"
+              aria-label="Confirmed VIN vehicle"
+            >
+              <p className="font-semibold text-surface-100">
+                Confirmed vehicle: {confirmedVehicle.summary}
+              </p>
+              <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
+                {(
+                  [
+                    ["Year", confirmedVehicle.year],
+                    ["Make", confirmedVehicle.make],
+                    ["Model", confirmedVehicle.model],
+                    ["Trim", confirmedVehicle.trim],
+                    ["Body", confirmedVehicle.bodyClass],
+                    ["Engine", confirmedVehicle.engineDisplacementL],
+                    ["Cylinders", confirmedVehicle.engineCylinders],
+                    ["Fuel", confirmedVehicle.fuelType],
+                    ["Drive", confirmedVehicle.driveType],
+                    ["Transmission", confirmedVehicle.transmissionStyle],
+                    ["Doors", confirmedVehicle.doors],
+                    ["Series", confirmedVehicle.series],
+                    ["Vehicle type", confirmedVehicle.vehicleType],
+                    ["Plant country", confirmedVehicle.plantCountry],
+                  ] as const
+                )
+                  .filter(([, value]) => Boolean(value?.trim()))
+                  .map(([label, value]) => (
+                    <div key={label}>
+                      <dt className="inline text-surface-400">{label}: </dt>
+                      <dd className="inline">{value}</dd>
+                    </div>
+                  ))}
+              </dl>
+            </section>
+          )}
 
           <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-primary-400/45 bg-primary-500/[0.07] p-5 text-center focus-within:ring-2 focus-within:ring-primary-400">
             <Upload className="mb-2 h-6 w-6 text-primary-300" aria-hidden="true" />
@@ -1289,6 +1362,16 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
         onCaptured={(release) => {
           setCapturedRelease(release);
           setCustomerLabel(release.signedName);
+        }}
+      />
+      <VinScanner
+        isOpen={vinScannerOpen && !busy && !project}
+        onClose={() => setVinScannerOpen(false)}
+        onVehicleDecoded={(vehicle) => {
+          if (busy || project) return;
+          setVin(vehicle.vin);
+          setDecodedVehicle(vehicle);
+          setVinScannerOpen(false);
         }}
       />
     </div>

@@ -335,16 +335,14 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
         ) : null}
 
         <div className="space-y-3 lg:pb-8">
-          {defaults.vehicleRelevant ? (
-            <DetailRow
-              icon={<ScanLine />}
-              label="Vehicle"
-              badge={<Badge variant="neutral">Optional</Badge>}
-              value={draft.decodedVehicle?.summary || "Scan VIN"}
-              valueClassName="max-w-[55%]"
-              onClick={() => setVinOpen(true)}
-            />
-          ) : null}
+          <DetailRow
+            icon={<ScanLine />}
+            label="Vehicle"
+            badge={<Badge variant="neutral">Optional</Badge>}
+            value={draft.decodedVehicle?.summary || "Scan VIN"}
+            valueClassName="max-w-[55%]"
+            onClick={() => setVinOpen(true)}
+          />
 
           {defaults.releaseRequired ? (
             <DetailRow

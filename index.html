@@ -213,6 +213,17 @@
           padding-left: 0;
           padding-right: 0;
         }
+        /* Desktop's document owns scrolling. Non-overflowing body/main
+           scrollports must pass wheel gestures to it; the mobile containment
+           rules otherwise block Chromium's wheel while the scrollbar works.
+           Scope these selectors above the late-loaded mobile base styles. */
+        html:not([data-app-display="standalone"]) body {
+          overscroll-behavior-y: auto;
+        }
+        html:not([data-app-display="standalone"]) #main-content {
+          overflow-y: visible;
+          overscroll-behavior-y: auto;
+        }
       }
       /* Installed iOS can retain a short browser viewport and clip a fixed
          body. Keep the shell in normal flow, size its full-screen canvas in

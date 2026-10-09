@@ -189,6 +189,8 @@ const AppContent: React.FC = () => {
   }, [currentDealer?.id, currentPerson?.id, isImpersonating]);
   useEffect(() => {
     mainRef.current?.scrollTo?.({ top: 0 });
+    if (mainRef.current && getComputedStyle(mainRef.current).overflowY === "visible")
+      window.scrollTo({ top: 0 });
   }, [step]);
   // Leaving My work by any route (browser Back included) spends where its
   // Back would have returned, so a later visit never bounces to a stale step.

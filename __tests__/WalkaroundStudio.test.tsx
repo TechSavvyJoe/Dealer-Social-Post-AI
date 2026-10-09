@@ -1,9 +1,66 @@
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { WalkaroundStudio } from "../components/WalkaroundStudio";
+import { decodeVin, type DecodedVehicle } from "../services/vinDecoder";
+
+vi.mock("../services/vinDecoder", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/vinDecoder")>();
+  return { ...actual, decodeVin: vi.fn() };
+});
+
+const confirmedVehicle: DecodedVehicle = {
+  vin: "1HGCM82633A004352",
+  year: "2003",
+  make: "Honda",
+  model: "Accord",
+  trim: "EX",
+  bodyClass: "Coupe",
+  engineDisplacementL: "3.0",
+  summary: "2003 Honda Accord EX Coupe",
+  empty: false,
+};
 
 describe("WalkaroundStudio", () => {
+  it("shows confirmed VIN facts and clears them when the entered vehicle changes", async () => {
+    vi.mocked(decodeVin).mockResolvedValue(confirmedVehicle);
+    render(
+      <WalkaroundStudio
+        dealerId="dealer-1"
+        dealerName="Example Ford"
+        requiresApproval={false}
+        onBack={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Scan VIN" }));
+    fireEvent.click(screen.getByRole("button", { name: "Type VIN" }));
+    fireEvent.change(screen.getByLabelText("VIN (17 characters)"), {
+      target: { value: confirmedVehicle.vin },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Decode VIN" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use this vehicle" }));
+
+    expect(screen.getByLabelText("VIN or stock number (optional)")).toHaveValue(
+      confirmedVehicle.vin,
+    );
+    expect(screen.getByLabelText("Confirmed VIN vehicle")).toHaveTextContent(
+      "Confirmed vehicle: 2003 Honda Accord EX Coupe",
+    );
+    expect(screen.getByText("Make:")).toBeInTheDocument();
+    expect(screen.getByText("Honda")).toBeInTheDocument();
+
+    const vinInput = screen.getByLabelText("VIN or stock number (optional)");
+    fireEvent.change(vinInput, {
+      target: { value: ` ${confirmedVehicle.vin.toLowerCase()} ` },
+    });
+    expect(screen.getByLabelText("Confirmed VIN vehicle")).toBeInTheDocument();
+    fireEvent.change(vinInput, { target: { value: "STOCK-84" } });
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Confirmed VIN vehicle")).not.toBeInTheDocument(),
+    );
+  });
+
   it("shows separate capture choices and locks customer processing behind release proof", () => {
     render(
       <WalkaroundStudio

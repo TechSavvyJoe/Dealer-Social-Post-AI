@@ -1,12 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Images, Rotate3D, Upload, X } from "lucide-react";
+import { Camera, Images, Rotate3D, ScanLine, Upload, X } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 import { toUiMessage } from "../utils/errorMessages";
 import { buildEmployeeDisclosure } from "../utils/complianceDisclosures";
 import { useSpinFrameUrls } from "../hooks/useSpinFrameUrls";
 import { VehicleSpinViewer } from "./VehicleSpinViewer";
 import { Button } from "./ui/Button";
-import { decodeVin, isValidVin, normalizeVin } from "../services/vinDecoder";
+import { VinScanner } from "./VinScanner";
+import {
+  decodeVin,
+  isValidVin,
+  normalizeVin,
+  type DecodedVehicle,
+} from "../services/vinDecoder";
 import {
   deleteVehicleSpin,
   getVehicleSpin,
@@ -56,6 +62,11 @@ export const VehicleSpinStudio: React.FC<{
 }> = ({ onDirtyChange }) => {
   const dealer = useAppStore((state) => state.currentDealer);
   const [vehicle, setVehicle] = useState<SpinVehicle>({ ...EMPTY_VEHICLE });
+  const [vinScannerOpen, setVinScannerOpen] = useState(false);
+  const [vinAutofill, setVinAutofill] = useState<Pick<
+    SpinVehicle,
+    "vin" | "title" | "highlights"
+  > | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [projectKey, setProjectKey] = useState(0);
   const [sourceUrl, setSourceUrl] = useState("");
@@ -98,6 +109,9 @@ export const VehicleSpinStudio: React.FC<{
   const videoFrames = useMemo(() => (exported ? [exported] : []), [exported]);
   const videoUrls = useSpinFrameUrls(videoFrames);
   const locked = Boolean(spin);
+  useEffect(() => {
+    if (locked || busy) setVinScannerOpen(false);
+  }, [locked, busy]);
   const dirty = Boolean(
     ((file || frames.length > 0) && !spin) ||
     (spin?.state === "uploading" && frames.length) ||
@@ -167,6 +181,8 @@ export const VehicleSpinStudio: React.FC<{
     }
   };
   const reset = () => {
+    setVinScannerOpen(false);
+    setVinAutofill(null);
     setProjectKey((current) => current + 1);
     setFile(null);
     setSourceAspectRatio(16 / 9);
@@ -205,6 +221,7 @@ export const VehicleSpinStudio: React.FC<{
           return;
         reset();
         setVehicle(vehicle);
+        setVinAutofill(vinAutofill);
         setFile(chosen);
         setSourceAspectRatio(source.width / source.height);
         setDuration(source.duration);
@@ -332,8 +349,44 @@ export const VehicleSpinStudio: React.FC<{
     );
   };
   const changeVehicle = (key: keyof SpinVehicle, value: string | string[]) => {
-    setVehicle((current) => ({ ...current, [key]: value }));
+    const changedVin = key === "vin" && vinAutofill && value !== vinAutofill.vin;
+    setVehicle((current) => ({
+      ...current,
+      ...(changedVin
+        ? {
+            title: current.title === vinAutofill.title ? "" : current.title,
+            highlights:
+              JSON.stringify(current.highlights) ===
+              JSON.stringify(vinAutofill.highlights)
+                ? []
+                : current.highlights,
+          }
+        : {}),
+      [key]: value,
+    }));
+    if (changedVin) setVinAutofill(null);
     setReviewed(false);
+  };
+  const applyVinDetails = (result: DecodedVehicle) => {
+    if (locked || busy || result.empty) return;
+    const details = {
+      vin: result.vin,
+      title: [result.year, result.make, result.model, result.trim]
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, 120),
+      highlights: [
+        result.driveType,
+        result.fuelType,
+        result.engineDisplacementL && result.engineDisplacementL + "L engine",
+      ]
+        .filter(Boolean)
+        .slice(0, 4) as string[],
+    };
+    setVehicle((current) => ({ ...current, ...details }));
+    setVinAutofill(details);
+    setReviewed(false);
+    setNotice("VIN details loaded. Confirm the trim and equipment before saving.");
   };
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-8 pt-5 sm:px-6">
@@ -863,41 +916,32 @@ export const VehicleSpinStudio: React.FC<{
                 />
               </label>
               {!locked && (
-                <Button
-                  variant="secondary"
-                  disabled={!isValidVin(vehicle.vin) || Boolean(busy)}
-                  onClick={() =>
-                    void run("Looking up vehicle", async (signal) => {
-                      const result = await decodeVin(vehicle.vin);
-                      if (signal.aborted) return;
-                      if (result.empty)
-                        throw new Error(
-                          "VIN details were unavailable. Enter the verified vehicle details manually.",
-                        );
-                      setVehicle((current) => ({
-                        ...current,
-                        title: [result.year, result.make, result.model, result.trim]
-                          .filter(Boolean)
-                          .join(" ")
-                          .slice(0, 120),
-                        highlights: [
-                          result.driveType,
-                          result.fuelType,
-                          result.engineDisplacementL &&
-                            result.engineDisplacementL + "L engine",
-                        ]
-                          .filter(Boolean)
-                          .slice(0, 4) as string[],
-                      }));
-                      setReviewed(false);
-                      setNotice(
-                        "VIN details loaded. Confirm the trim and equipment before saving.",
-                      );
-                    })
-                  }
-                >
-                  Look up VIN
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    leftIcon={<ScanLine />}
+                    onClick={() => setVinScannerOpen(true)}
+                  >
+                    Scan VIN
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={!isValidVin(vehicle.vin) || Boolean(busy)}
+                    onClick={() =>
+                      void run("Looking up vehicle", async (signal) => {
+                        const result = await decodeVin(vehicle.vin, signal);
+                        if (signal.aborted) return;
+                        if (result.empty)
+                          throw new Error(
+                            "VIN details were unavailable. Enter the verified vehicle details manually.",
+                          );
+                        applyVinDetails(result);
+                      })
+                    }
+                  >
+                    Look up VIN
+                  </Button>
+                </div>
               )}
               <label className="block text-sm text-ink-2">
                 Vehicle name
@@ -1278,6 +1322,11 @@ export const VehicleSpinStudio: React.FC<{
           </div>
         )}
       </section>
+      <VinScanner
+        isOpen={vinScannerOpen && !locked && !busy}
+        onClose={() => setVinScannerOpen(false)}
+        onVehicleDecoded={applyVinDetails}
+      />
     </div>
   );
 };

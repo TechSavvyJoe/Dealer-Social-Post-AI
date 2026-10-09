@@ -1,5 +1,6 @@
 import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
 import { readApiError } from "./apiErrors";
+import { isValidVin, normalizeVin, type DecodedVehicle } from "./vinDecoder";
 
 export const WALKAROUND_LIMITS = {
   maxClips: 12,
@@ -411,18 +412,51 @@ export const createWalkaroundProject = (input: {
   audience: WalkaroundAudience;
   captureMode: WalkaroundCaptureMode;
   vin?: string;
+  decodedVehicle?: DecodedVehicle;
   containsIdentifiableNonEmployee?: boolean;
-}): Promise<WalkaroundProject> =>
-  appJson<unknown>("/api/app/walkarounds", {
+}): Promise<WalkaroundProject> => {
+  const vinOrStock = input.vin?.trim() || "not_provided";
+  const vehicleSnapshot: Record<string, string> = { vinOrStock };
+  const vehicleFacts = [
+    ["year", "year"],
+    ["make", "make"],
+    ["model", "model"],
+    ["trim", "trim"],
+    ["bodyClass", "bodyClass"],
+    ["engineCylinders", "engineCylinders"],
+    ["engineDisplacementL", "engineDisplacementL"],
+    ["fuelType", "fuelType"],
+    ["driveType", "driveType"],
+    ["transmissionStyle", "transmissionStyle"],
+    ["doors", "doors"],
+    ["series", "series"],
+    ["vehicleType", "vehicleType"],
+    ["plantCountry", "plantCountry"],
+  ] as const satisfies ReadonlyArray<readonly [string, keyof DecodedVehicle]>;
+  if (
+    input.decodedVehicle &&
+    !input.decodedVehicle.empty &&
+    isValidVin(vinOrStock) &&
+    normalizeVin(vinOrStock) === normalizeVin(input.decodedVehicle.vin)
+  ) {
+    for (const [snapshotKey, factKey] of vehicleFacts) {
+      const value = input.decodedVehicle[factKey];
+      if (typeof value === "string" && value.trim()) {
+        vehicleSnapshot[snapshotKey] = value.trim();
+      }
+    }
+  }
+  return appJson<unknown>("/api/app/walkarounds", {
     method: "POST",
     body: JSON.stringify({
       audience: input.audience,
       captureMode: input.captureMode,
       scenarioId: input.audience === "customer" ? "customer_walkaround" : "new_arrival",
-      vehicleSnapshot: { vinOrStock: input.vin?.trim() || "not_provided" },
+      vehicleSnapshot,
       containsIdentifiableNonEmployee: Boolean(input.containsIdentifiableNonEmployee),
     }),
   }).then(parseProject);
+};
 
 export const saveWalkaroundRelease = (
   projectId: string,
