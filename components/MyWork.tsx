@@ -205,7 +205,10 @@ export const MyWork: React.FC<MyWorkProps> = ({
             }
           />
           <div className="flex items-center gap-2">
-            <label htmlFor="saved-post-review" className="shrink-0 text-sm text-ink-2">
+            <label
+              htmlFor="saved-post-review"
+              className="sr-only shrink-0 text-sm text-ink-2 sm:not-sr-only"
+            >
               Review
             </label>
             <div className="relative min-w-0 flex-1">
