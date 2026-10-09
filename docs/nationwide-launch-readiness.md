@@ -73,7 +73,7 @@ not close business, physical-device, provider-quality, or operational evidence g
 
 ## Studio refinement release
 
-The next release adds recovery for generated posts whose initial save failed or
+This release adds recovery for generated posts whose initial save failed or
 whose save response was lost. A browser keeps the completed image, caption and
 existing signature while it reconciles the original save operation. Repeating
 that operation cannot create a second post or trigger another AI generation.
@@ -107,7 +107,10 @@ replacement path that keeps source details but requires a new customer signature
 
 The vehicle studio adds precise trim controls, cancellation that preserves the
 previous recording, a fresh viewer state after rebuilding, and decoded output
-checks before an export is offered. Synthetic still-vehicle browser fixtures
+checks before an export is offered. The decoder primes its drawable surface once,
+then waits for each paused seek and paint boundary without imposing a frame-rate
+floor. A four-second, 6 fps synthetic fixture uses a changing timing band to check
+first, repeated, middle and final samples. Synthetic still-vehicle browser fixtures
 prove decoding, controls and visible pixels; they do not prove complete real
 walkaround coverage, reconstruction quality or physical iPhone performance.
 An image sequence from a walkaround is not a reconstructed 3D model.

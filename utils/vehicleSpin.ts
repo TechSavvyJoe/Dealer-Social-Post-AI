@@ -157,7 +157,7 @@ export const openSpinVideo = async (file: File, signal?: AbortSignal) => {
   }
 };
 
-/** Wait for a presented decoded frame, including the initial frame at time 0. */
+/** Prime the drawable surface once; subsequent samples use the active paused seek. */
 export const waitForSpinFrame = (
   video: HTMLVideoElement,
   signal?: AbortSignal,
@@ -168,6 +168,9 @@ export const waitForSpinFrame = (
     let settled = false;
     let frameCallback: number | undefined;
     let animationFrame: number | undefined;
+    const presentationStarted = performance.now();
+    const drawable = () =>
+      !video.seeking && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
     const done = (error?: Error) => {
       if (settled) return;
       settled = true;
@@ -176,7 +179,7 @@ export const waitForSpinFrame = (
       if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
       video.removeEventListener("error", failed);
       video.removeEventListener("playing", playing);
-      video.removeEventListener("seeked", play);
+      video.removeEventListener("seeked", seeked);
       signal?.removeEventListener("abort", aborted);
       video.pause();
       if (error) reject(error);
@@ -189,16 +192,27 @@ export const waitForSpinFrame = (
         ),
       );
     const aborted = () => done(abortError());
-    const play = () => {
-      void video.play().catch(failed);
-    };
-    // Older browsers have no frame callback. The playing event establishes
-    // decoded data; two paint turns let their media surface catch up.
-    const playing = () => {
+    const afterPaint = (ready: () => boolean) => {
+      if (settled) return;
+      if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
       animationFrame = requestAnimationFrame(() => {
-        animationFrame = requestAnimationFrame(() => done());
+        if (settled) return;
+        animationFrame = requestAnimationFrame(() => {
+          if (!settled && ready()) done();
+        });
       });
     };
+    const atTarget = () =>
+      drawable() &&
+      targetTime !== undefined &&
+      Math.abs(video.currentTime - targetTime) <= 0.001;
+    const seeked = () => {
+      if (atTarget()) afterPaint(atTarget);
+    };
+    // The seeking algorithm waits for target data and decoding before seeked.
+    // Once the surface is primed, paused seek + paint handles quantized/VFR
+    // frames and the source tail without requiring a future presentation.
+    const playing = () => afterPaint(drawable);
     const timer = setTimeout(
       () =>
         done(
@@ -208,33 +222,36 @@ export const waitForSpinFrame = (
     );
     video.addEventListener("error", failed, { once: true });
     signal?.addEventListener("abort", aborted, { once: true });
-    const frameCallbacks = typeof video.requestVideoFrameCallback === "function";
-    const seeking =
-      targetTime !== undefined && Math.abs(video.currentTime - targetTime) > 0.001;
-    const presented: VideoFrameRequestCallback = (_now, metadata) => {
-      if (settled) return;
-      // A delayed callback for the previous angle must not satisfy this seek.
-      // This allows neighboring camera frames, within the shortest angle
-      // spacing (4 seconds / 48 samples), so adjacent samples cannot alias.
-      if (
-        targetTime !== undefined &&
-        (!Number.isFinite(metadata.mediaTime) ||
-          Math.abs(metadata.mediaTime - targetTime) > 0.05)
-      ) {
-        frameCallback = video.requestVideoFrameCallback(presented);
+    video.pause();
+    try {
+      if (targetTime !== undefined) {
+        video.addEventListener("seeked", seeked);
+        if (atTarget()) afterPaint(atTarget);
+        else video.currentTime = targetTime;
         return;
       }
-      done();
-    };
-    if (frameCallbacks) frameCallback = video.requestVideoFrameCallback(presented);
-    else video.addEventListener("playing", playing, { once: true });
-    // Register before seeking: Safari presents paused seek frames, but a
-    // callback registered after seeked would wait for subsequent playback.
-    // Only the initial unpresented frame needs muted playback to prime decoding.
-    if (seeking) {
-      if (!frameCallbacks) video.addEventListener("seeked", play, { once: true });
-      video.currentTime = targetTime;
-    } else play();
+      // loadeddata alone can leave WebKit's initial drawable surface empty.
+      // Only the one-time prime uses playback and compositor synchronization.
+      const presented: VideoFrameRequestCallback = (_now, metadata) => {
+        if (settled) return;
+        if (
+          !Number.isFinite(metadata.mediaTime) ||
+          !Number.isFinite(metadata.presentationTime) ||
+          metadata.presentationTime < presentationStarted ||
+          !drawable()
+        ) {
+          frameCallback = video.requestVideoFrameCallback(presented);
+          return;
+        }
+        done();
+      };
+      if (typeof video.requestVideoFrameCallback === "function")
+        frameCallback = video.requestVideoFrameCallback(presented);
+      else video.addEventListener("playing", playing, { once: true });
+      void video.play().catch(failed);
+    } catch {
+      failed();
+    }
   });
 
 export const canvasJpeg = (canvas: HTMLCanvasElement, quality = 0.86): Promise<Blob> =>
@@ -266,6 +283,7 @@ export const extractSpinFrames = async (
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("Your browser could not open the video editor.");
     const frames: Blob[] = [];
+    await waitForSpinFrame(source.video, options.signal);
     for (let index = 0; index < times.length; index++) {
       checkSpinAbort(options.signal);
       await waitForSpinFrame(source.video, options.signal, times[index]);

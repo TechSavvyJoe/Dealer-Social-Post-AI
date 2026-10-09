@@ -286,9 +286,11 @@ describe("telemetry privacy", () => {
     expect(helpers).toContain('"x-generation-attempt-id"');
     expect(migration).toContain('name: "attempt_id"');
     expect(migration).toContain('name: "consumed_post"');
-    expect(postRoute).toContain(
-      'findRecordsByFilter(\n            "generation_events"',
+    expect(postRoute).toMatch(
+      /findRecordsByFilter\(\s*"generation_events",\s*"owner_session_hash = \{:owner\} && dealer = \{:dealer\} && attempt_id = \{:attempt\}"/,
     );
+    expect(postRoute).toContain('"GENERATION_ATTEMPT_ALREADY_USED"');
+    expect(postRoute).toContain('"consumed_post"');
     expect(postRoute).toMatch(/latestCaptionSuccess\s*\?\s*"ai"/);
     expect(postRoute).toContain("latestImageSuccess.getString");
     expect(postRoute).toContain("latestAnySuccess.getString");

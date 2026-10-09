@@ -209,6 +209,14 @@ describe("the reason reaches the salesperson", () => {
     expect(queue).toContain("QUICK_REASONS");
     expect(queue).toContain("Pricing claim needs a disclosure");
     // The send button stays disabled until there is something to send.
-    expect(queue).toContain("disabled={Boolean(busy[post.id]) || !reason.trim()}");
+    const rejectButton = queue.slice(
+      queue.indexOf('onClick={() => handleAction(post, "rejected")}'),
+      queue.indexOf(">\n                          Send rejection"),
+    );
+    expect(rejectButton).toContain("!reason.trim()");
+    // A failed queue load is not an up-to-date review surface. Keep both
+    // decisions disabled until the list is current again.
+    expect(rejectButton).toContain("Boolean(error)");
+    expect(rejectButton).toContain("loading");
   });
 });

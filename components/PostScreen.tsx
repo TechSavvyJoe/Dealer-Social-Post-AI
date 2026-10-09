@@ -1569,13 +1569,22 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           : "pb-[calc(126px+env(safe-area-inset-bottom))]"
       }`}
     >
-      <h1 className="sr-only lg:hidden">Your post</h1>
+      {!isDesktopLayout ? (
+        <h1 className="sr-only">
+          {savePending ? "Finish saving your post" : "Your post"}
+        </h1>
+      ) : null}
       <div className="mx-auto grid w-full max-w-[1160px] gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
         <section
           className="mx-auto w-full max-w-[640px] lg:mx-0"
           ref={previewSectionRef}
           aria-label="Post preview"
         >
+          {!isDesktopLayout && savePending && banner ? (
+            <div className="mb-3">
+              <LockBanner {...banner} />
+            </div>
+          ) : null}
           {!isDesktopLayout &&
           !preparedDelivery.websiteOnly &&
           availableChannels.length > 0 ? (
@@ -1614,18 +1623,24 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           className="mx-auto flex w-full min-w-0 max-w-[640px] flex-col gap-6 lg:mx-0 lg:max-w-none"
           aria-label="Post actions"
         >
-          <header className="hidden lg:block">
-            <h1 className="font-display text-4xl font-semibold text-ink">
-              Ready to share
-            </h1>
-            <p className="mt-2 max-w-sm text-sm leading-6 text-ink-2">
-              {isDesktopLayout
-                ? `Download saves the ${mediaNoun} and copies your caption. Open ${handoffAppLabel} to finish your post.`
-                : `Pick where it's going, then share it to ${selectedChannel.label}.`}
-            </p>
-          </header>
+          {isDesktopLayout ? (
+            <header className="hidden lg:block">
+              <h1 className="font-display text-4xl font-semibold text-ink">
+                {savePending ? "Finish saving your post" : "Ready to share"}
+              </h1>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-ink-2">
+                {savePending
+                  ? "Your image and caption are ready. Save this result before sharing."
+                  : isDesktopLayout
+                    ? `Download saves the ${mediaNoun} and copies your caption. Open ${handoffAppLabel} to finish your post.`
+                    : `Pick where it's going, then share it to ${selectedChannel.label}.`}
+              </p>
+            </header>
+          ) : null}
 
-          {banner ? <LockBanner {...banner} /> : null}
+          {banner && (isDesktopLayout || !savePending) ? (
+            <LockBanner {...banner} />
+          ) : null}
 
           {isDesktopLayout &&
           !preparedDelivery.websiteOnly &&
