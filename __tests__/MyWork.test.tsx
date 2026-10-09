@@ -51,6 +51,10 @@ const history = (overrides: Record<string, unknown> = {}) => ({
   openingId: null,
   websiteRetryingId: null,
   retryWebsite: vi.fn(),
+  query: "",
+  setQuery: vi.fn(),
+  statusFilter: "all",
+  setStatusFilter: vi.fn(),
   ...overrides,
 });
 

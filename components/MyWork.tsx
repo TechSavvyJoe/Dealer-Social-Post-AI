@@ -7,6 +7,8 @@ import {
   Image as ImageIcon,
   Loader2,
   RefreshCw,
+  Search,
+  X,
 } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 import { fetchPostCreativeDataUrl, type PostRecord } from "../services/posts";
@@ -26,11 +28,14 @@ import {
 import { toUiMessage } from "../utils/errorMessages";
 import type { GeneratedPost, ImageSelection } from "../types";
 import { Button } from "./ui/Button";
+import { Input } from "./ui/Input";
 import { Skeleton } from "./ui/Skeleton";
 import { DeviceRecoveryGrid } from "./work/DeviceRecoveryGrid";
 
 interface MyWorkProps {
   onBack: () => void;
+  /** The app shell already supplies Back; embedded uses keep their own. */
+  headerHasNavigation?: boolean;
   onOpenPost: (post: GeneratedPost) => void;
   onReusePhoto: (selection: ImageSelection) => void;
 }
@@ -55,7 +60,12 @@ const RetryNotice: React.FC<{ message: string; onRetry: () => void }> = ({
   </div>
 );
 
-export const MyWork: React.FC<MyWorkProps> = ({ onBack, onOpenPost, onReusePhoto }) => {
+export const MyWork: React.FC<MyWorkProps> = ({
+  onBack,
+  headerHasNavigation = false,
+  onOpenPost,
+  onReusePhoto,
+}) => {
   const dealer = useAppStore((s) => s.currentDealer);
   const person = useAppStore((s) => s.currentPerson);
   const role = useAppStore((s) => s.role);
@@ -71,6 +81,10 @@ export const MyWork: React.FC<MyWorkProps> = ({ onBack, onOpenPost, onReusePhoto
     websiteRetryingId,
     retryWebsite,
     identityGrounding,
+    query,
+    setQuery,
+    statusFilter,
+    setStatusFilter,
   } = usePostHistoryList();
   const [opening, setOpening] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -137,15 +151,17 @@ export const MyWork: React.FC<MyWorkProps> = ({ onBack, onOpenPost, onReusePhoto
       className="mx-auto w-full max-w-3xl px-4 pb-12 pt-3 sm:px-6 lg:pt-8"
       aria-labelledby="my-work-heading"
     >
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label="Back"
-        className="-ml-3"
-        onClick={onBack}
-      >
-        <ArrowLeft className="h-5 w-5" />
-      </Button>
+      {!headerHasNavigation && (
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Back"
+          className="-ml-3"
+          onClick={onBack}
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+      )}
       <h1
         id="my-work-heading"
         className="mt-1 font-display text-3xl font-semibold text-ink sm:text-4xl"
@@ -163,7 +179,63 @@ export const MyWork: React.FC<MyWorkProps> = ({ onBack, onOpenPost, onReusePhoto
         >
           Saved posts
         </h2>
-        {error && <RetryNotice message={error} onRetry={() => void load()} />}
+        <div className="mt-3 space-y-3">
+          <Input
+            type="search"
+            aria-label="Search saved posts"
+            placeholder={
+              team ? "Name, VIN, caption or teammate" : "Name, VIN or caption"
+            }
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            leftIcon={<Search aria-hidden="true" />}
+            aria-describedby="saved-post-search-scope"
+            fullWidth
+            rightAction={
+              query ? (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => setQuery("")}
+                  className="grid min-h-11 min-w-11 place-items-center rounded-sm hover:text-ink"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              ) : undefined
+            }
+          />
+          <div className="flex items-center gap-2">
+            <label htmlFor="saved-post-review" className="shrink-0 text-sm text-ink-2">
+              Review
+            </label>
+            <select
+              id="saved-post-review"
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as typeof statusFilter)
+              }
+              className="min-h-11 min-w-0 flex-1 rounded-sm border border-strong bg-panel-raised px-3 text-base text-ink"
+            >
+              <option value="all">All posts</option>
+              <option value="pending">Waiting for approval</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Changes requested</option>
+              <option value="n_a">No review needed</option>
+            </select>
+          </div>
+          <p id="saved-post-search-scope" className="text-caption text-ink-2">
+            {loading
+              ? "Loading posts…"
+              : `${filtered.length} of ${items.length} loaded posts`}
+            {nextCursor ? " · Load older posts to search further." : ""}
+          </p>
+        </div>
+        {error && (
+          <RetryNotice
+            message={error}
+            onRetry={() => void load(nextCursor || undefined)}
+          />
+        )}
         {openError && (
           <RetryNotice
             message={openError}
@@ -196,12 +268,32 @@ export const MyWork: React.FC<MyWorkProps> = ({ onBack, onOpenPost, onReusePhoto
           // above is the whole story, so "No posts yet" would be a false claim.
           error ? null : (
             <div className="mt-3 border-t border-hairline py-8">
-              <p className="text-base font-medium text-ink">No posts yet</p>
-              <p className="mt-1 text-sm text-ink-2">
-                {team
-                  ? "Posts your team makes will show here."
-                  : "Pick a category on Home to make your first post."}
+              <p className="text-base font-medium text-ink">
+                {query.trim() || statusFilter !== "all"
+                  ? "No matching posts"
+                  : "No posts yet"}
               </p>
+              <p className="mt-1 text-sm text-ink-2">
+                {query.trim() || statusFilter !== "all"
+                  ? nextCursor
+                    ? "Try another search or load older posts below."
+                    : "Try another search or clear your filters."
+                  : team
+                    ? "Posts your team makes will show here."
+                    : "Pick a category on Home to make your first post."}
+              </p>
+              {query.trim() || statusFilter !== "all" ? (
+                <Button
+                  variant="secondary"
+                  className="mt-3"
+                  onClick={() => {
+                    setQuery("");
+                    setStatusFilter("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : null}
             </div>
           )
         ) : (
@@ -366,6 +458,7 @@ export const MyWork: React.FC<MyWorkProps> = ({ onBack, onOpenPost, onReusePhoto
             <Button
               variant="secondary"
               loading={loadingMore}
+              disabled={loading || loadingMore}
               onClick={() => void load(nextCursor)}
               leftIcon={<ChevronDown />}
             >
