@@ -7,6 +7,11 @@ import {
   CircleHelp,
   ExternalLink,
   KeyRound,
+  Sparkles,
+  Film,
+  Globe2,
+  Layers3,
+  Circle,
   RefreshCw,
   TestTube2,
 } from "lucide-react";
@@ -54,7 +59,7 @@ const SERVICES: ServiceInfo[] = [
   {
     id: "gemini",
     title: "Google Gemini",
-    description: "AI generation for captions, images, and video.",
+    description: "Captions, branded images, and AI video.",
     scope: "global",
     credentialFields: [{ key: "apiKey", label: "Gemini API key" }],
     settingFields: [],
@@ -63,7 +68,7 @@ const SERVICES: ServiceInfo[] = [
   {
     id: "anthropic",
     title: "Anthropic fallback",
-    description: "Optional backup for supported text tasks.",
+    description: "Backup for supported text tasks.",
     optional: true,
     scope: "global",
     credentialFields: [{ key: "apiKey", label: "Anthropic API key" }],
@@ -73,7 +78,7 @@ const SERVICES: ServiceInfo[] = [
   {
     id: "openai",
     title: "OpenAI fallback",
-    description: "Optional backup for supported text tasks.",
+    description: "Backup for supported text tasks.",
     optional: true,
     scope: "global",
     credentialFields: [{ key: "apiKey", label: "OpenAI API key" }],
@@ -83,7 +88,7 @@ const SERVICES: ServiceInfo[] = [
   {
     id: "website",
     title: "Customer website drafts",
-    description: "Send private post drafts to a dealership website for review.",
+    description: "Private post drafts for website review.",
     optional: true,
     scope: "dealer",
     credentialFields: [{ key: "sharedSecret", label: "Website connection key" }],
@@ -98,7 +103,7 @@ const SERVICES: ServiceInfo[] = [
   {
     id: "walkaround",
     title: "Walkaround video service",
-    description: "Private uploads, video processing, and YouTube delivery.",
+    description: "Private uploads, processing, and YouTube delivery.",
     optional: true,
     scope: "global",
     credentialFields: [],
@@ -127,6 +132,21 @@ const statusLabel: Record<ManagedConnection["state"], string> = {
   testing: "Testing",
   ready: "Ready",
   attention: "Needs attention",
+};
+
+const serviceIcons = {
+  gemini: Sparkles,
+  anthropic: Layers3,
+  openai: Layers3,
+  website: Globe2,
+  walkaround: Film,
+};
+
+const capabilityLabel = (id: string, label: string) => {
+  if (id === "text" || id === "captions") return "Captions";
+  if (id === "images" || id === "image") return "Images";
+  if (id === "video") return "AI video";
+  return label.replace(/ generation| access/gi, "");
 };
 
 const emptyCredentials = (): Record<string, string> => ({});
@@ -238,6 +258,10 @@ function ServiceCard({
       ? "Caption access verified"
       : statusLabel[currentState];
   const optionalOff = Boolean(service.optional && connection?.state === "off");
+  const ServiceIcon = serviceIcons[service.id];
+  const needsSetup = !connection?.configured || optionalOff;
+  const needsProof = Boolean(service.proofLabel && !proofId.trim());
+  const setupIsPrimary = needsSetup || needsProof;
   const dealerLabel = dealers.find((dealer) => dealer.id === dealerId)?.name;
 
   const save = async () => {
@@ -348,100 +372,170 @@ function ServiceCard({
   return (
     <article
       aria-labelledby={`connection-${service.id}-title`}
-      className="rounded-md border border-hairline bg-panel px-4 py-4 sm:px-5"
+      className="overflow-hidden rounded-md border border-hairline bg-panel"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3
-              id={`connection-${service.id}-title`}
-              className="text-base font-semibold text-ink"
-            >
-              {service.title}
-            </h3>
-            <span
-              className={cn(
-                "rounded-sm border px-2 py-0.5 text-xs font-semibold",
-                statusTone,
-              )}
-            >
-              {cardStatus}
-            </span>
+      <div className="p-4 sm:px-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-hairline bg-panel-raised text-ink-2">
+            <ServiceIcon className="h-[18px] w-[18px]" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+              <h3
+                id={`connection-${service.id}-title`}
+                className="text-sm font-semibold text-ink sm:text-base"
+              >
+                {service.title}
+              </h3>
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[11px] font-medium leading-4",
+                  statusTone,
+                )}
+              >
+                <span
+                  className="h-1.5 w-1.5 rounded-full bg-current"
+                  aria-hidden="true"
+                />
+                {cardStatus}
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-ink-2 sm:text-sm">
+              {service.description}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 sm:pl-12">
+          <div
+            className={cn(
+              "min-w-0 flex-1",
+              connection?.capabilities.length && "basis-full sm:basis-auto",
+            )}
+          >
             {service.optional ? (
-              <span className="text-xs text-ink-2">Optional</span>
+              <span className="mb-1.5 block text-[11px] text-ink-2">
+                Optional
+                {service.scope === "dealer" && dealerLabel ? ` · ${dealerLabel}` : ""}
+              </span>
+            ) : null}
+            {connection?.capabilities.length ? (
+              <ul
+                className="flex flex-wrap gap-1.5"
+                aria-label={`${service.title} capability verification`}
+              >
+                {connection.capabilities.map((capability) => (
+                  <li
+                    key={capability.id}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[11px] leading-4",
+                      capability.state === "verified"
+                        ? "border-success-ink/25 bg-success-fill text-success-ink"
+                        : "border-hairline text-ink-2",
+                    )}
+                    aria-label={`${capability.label}: ${capability.state === "verified" ? "Verified" : "Not tested"}`}
+                    title={`${capability.label}: ${capability.state === "verified" ? "Verified" : "Not tested"}`}
+                  >
+                    {capability.state === "verified" ? (
+                      <Check className="h-3 w-3" aria-hidden="true" />
+                    ) : (
+                      <Circle className="h-2.5 w-2.5" aria-hidden="true" />
+                    )}
+                    {capability.state === "verified"
+                      ? `${capability.label}: Verified`
+                      : capabilityLabel(capability.id, capability.label)}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="text-xs text-ink-2">
+                {optionalOff
+                  ? "Off by choice"
+                  : service.scope === "global"
+                    ? "Shared across dealerships"
+                    : dealerLabel
+                      ? `For ${dealerLabel}`
+                      : "Select a dealership to configure"}
+              </span>
+            )}
+            {connection?.capabilities.some(
+              (capability) => capability.state !== "verified",
+            ) ? (
+              <p className="mt-1.5 flex items-center gap-1.5 text-[10px] text-ink-2">
+                <Circle className="h-2.5 w-2.5" aria-hidden="true" /> Not tested
+              </p>
+            ) : null}
+            {connection?.lastVerifiedAt && ready ? (
+              <p className="mt-1.5 text-[11px] text-ink-2">
+                Verified {new Date(connection.lastVerifiedAt).toLocaleString()}
+              </p>
             ) : null}
           </div>
-          <p className="text-sm text-ink-2">{service.description}</p>
-          <p className="text-sm text-ink-2">{service.help}</p>
-          {service.scope === "dealer" && dealerLabel ? (
-            <p className="text-sm font-medium text-ink">For {dealerLabel}</p>
-          ) : null}
-          {connection?.lastVerifiedAt && ready ? (
-            <p className="text-xs text-ink-2">
-              Verified {new Date(connection.lastVerifiedAt).toLocaleString()}
-            </p>
-          ) : null}
-          {connection?.nextAction ? (
-            <p className="text-sm text-ink">Next: {connection.nextAction}</p>
-          ) : null}
-          {service.id === "website" &&
-          connection?.errorCode === "CONNECTION_DRAFT_PENDING" ? (
-            <p className="text-sm text-ink-2" role="status">
-              Draft delivery is still pending. Test this same saved draft again to
-              confirm receipt.
-            </p>
-          ) : null}
-          {connection?.capabilities.length ? (
-            <ul
-              className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-2"
-              aria-label={`${service.title} capability verification`}
+          <div className="ml-auto flex shrink-0 gap-1.5">
+            <Button
+              variant={setupIsPrimary ? "primary" : "secondary"}
+              size="sm"
+              className="min-h-11 px-3 sm:min-h-9"
+              leftIcon={<KeyRound />}
+              aria-expanded={open}
+              aria-controls={`connection-${service.id}-setup`}
+              onClick={() => {
+                if (open) clearSetup();
+                setOpen((value) => !value);
+              }}
             >
-              {connection.capabilities.map((capability) => (
-                <li key={capability.id}>
-                  {capability.label}:{" "}
-                  {capability.state === "verified" ? "Verified" : "Not tested"}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+              {ready ? "Manage" : "Set up"}
+            </Button>
+            <Button
+              variant={setupIsPrimary || ready ? "ghost" : "primary"}
+              size="sm"
+              className="min-h-11 px-3 sm:min-h-9"
+              leftIcon={<TestTube2 />}
+              disabled={
+                !connection ||
+                busy !== null ||
+                ((service.scope === "dealer" || service.id === "walkaround") &&
+                  !dealerId) ||
+                Boolean(service.proofLabel && !proofId.trim())
+              }
+              loading={busy === "test"}
+              onClick={() => void runTest()}
+            >
+              Test
+            </Button>
+          </div>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            leftIcon={<KeyRound />}
-            aria-expanded={open}
-            onClick={() => {
-              if (open) clearSetup();
-              setOpen((value) => !value);
-            }}
-          >
-            {ready ? "Manage" : "Set up"}
-          </Button>
-          <Button
-            variant={ready ? "ghost" : "primary"}
-            size="sm"
-            leftIcon={<TestTube2 />}
-            disabled={
-              !connection ||
-              busy !== null ||
-              ((service.scope === "dealer" || service.id === "walkaround") &&
-                !dealerId) ||
-              Boolean(service.proofLabel && !proofId.trim())
-            }
-            loading={busy === "test"}
-            onClick={() => void runTest()}
-          >
-            Test
-          </Button>
-        </div>
+        {service.id === "website" &&
+        connection?.errorCode === "CONNECTION_DRAFT_PENDING" ? (
+          <p className="mt-3 text-xs text-ink-2" role="status">
+            Draft receipt is pending. Retest the same saved draft to confirm delivery.
+          </p>
+        ) : null}
+        {!open && error ? (
+          <p role="alert" className="mt-3 text-sm text-error-ink">
+            {error}
+          </p>
+        ) : null}
+        {!open && notice ? (
+          <p role="status" className="mt-3 text-xs text-ink-2">
+            {notice}
+          </p>
+        ) : null}
+        {!open && currentState === "attention" && connection?.nextAction ? (
+          <p className="mt-3 text-xs text-warning-ink">{connection.nextAction}</p>
+        ) : null}
       </div>
 
       {open ? (
         <section
-          className="mt-4 border-t border-hairline pt-4"
+          id={`connection-${service.id}-setup`}
+          className="border-t border-hairline bg-panel-raised/40 p-4 sm:px-5"
           aria-label={`${service.title} setup`}
         >
+          <p className="mb-4 max-w-2xl text-xs leading-5 text-ink-2">{service.help}</p>
+          {connection?.nextAction && !optionalOff ? (
+            <p className="mb-4 text-xs text-ink">Next: {connection.nextAction}</p>
+          ) : null}
           {!secureStorageAvailable ? (
             <div
               className="mb-4 flex gap-2 rounded-sm border border-warning-ink/30 bg-warning-fill p-3 text-sm text-warning-ink"
@@ -484,7 +578,9 @@ function ServiceCard({
                 onChange={(event) => updateSetting("enabled", event.target.checked)}
                 className="h-4 w-4 accent-brand-fill"
               />
-              Turn on this optional fallback
+              {service.id === "anthropic" || service.id === "openai"
+                ? "Enable this backup provider"
+                : "Enable this service"}
             </label>
           ) : null}
 
@@ -718,11 +814,6 @@ function ServiceCard({
           </div>
         </section>
       ) : null}
-      {optionalOff ? (
-        <p className="mt-3 text-xs text-ink-2">
-          This optional service is off by choice.
-        </p>
-      ) : null}
     </article>
   );
 }
@@ -782,22 +873,32 @@ export const ConnectionsPanel: React.FC<{
   const allReady = required.length > 0 && readyCount === required.length;
 
   return (
-    <div className="flex flex-wrap items-start gap-x-12 gap-y-8">
-      <main className="flex min-w-0 flex-[999_1_34rem] flex-col gap-6">
-        <header className="space-y-2">
-          <h2 className="font-display text-2xl font-semibold text-ink md:text-3xl">
-            Connections
-          </h2>
-          <p className="max-w-3xl text-sm text-ink-2 md:text-base">
-            Set up shared AI and video services here. Website drafts are configured for
-            one dealership at a time; dealerships connect their own social accounts in
-            Settings.
-          </p>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-2">
-            <span>AI and video infrastructure: centrally managed</span>
-            <span>Website destination: dealership-specific</span>
-            <span>Social accounts: dealership-managed</span>
+    <div className="w-full">
+      <main className="flex min-w-0 flex-col gap-5">
+        <header className="flex items-start justify-between gap-3 border-b border-hairline pb-4">
+          <div className="min-w-0 space-y-1">
+            <h2 className="text-xl font-semibold tracking-tight text-ink md:text-2xl">
+              Connections
+            </h2>
+            <p className="text-sm text-ink-2">
+              Manage shared AI, video, and dealership website services.
+            </p>
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-h-11 shrink-0 px-3 sm:min-h-9 sm:self-end sm:px-2"
+            aria-label="Refresh status"
+            title="Refresh status"
+            leftIcon={<RefreshCw />}
+            loading={query.isFetching}
+            onClick={() => {
+              if (onCheckAgain) onCheckAgain();
+              else void refresh();
+            }}
+          >
+            <span className="sr-only sm:not-sr-only">Refresh status</span>
+          </Button>
         </header>
 
         {query.isPending ? (
@@ -833,15 +934,101 @@ export const ConnectionsPanel: React.FC<{
                 administrator action required.
               </p>
             ) : null}
-            <section aria-labelledby="shared-connections-heading" className="space-y-3">
-              <h3
-                id="shared-connections-heading"
-                className="font-display text-xl font-semibold text-ink"
+            <aside
+              aria-label="Connection readiness"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-sm border border-hairline bg-panel px-3 py-2.5"
+            >
+              <p
+                className="flex items-center gap-2 text-xs font-medium text-ink"
+                role="status"
               >
-                Shared services
-              </h3>
-              {SERVICES.filter((service) => service.scope === "global").map(
-                (service) => (
+                {allReady ? (
+                  <Check className="h-4 w-4 text-success-ink" aria-hidden="true" />
+                ) : (
+                  <Circle className="h-3 w-3 text-ink-2" aria-hidden="true" />
+                )}
+                {readyCount} / {required.length} checks verified
+              </p>
+              <p className="text-xs text-ink-2">Ready requires a successful test.</p>
+            </aside>
+            <section
+              aria-labelledby="shared-connections-heading"
+              className="space-y-2.5"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <h3
+                  id="shared-connections-heading"
+                  className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-2"
+                >
+                  Shared services
+                </h3>
+                <span className="text-[11px] text-ink-2">All dealerships</span>
+              </div>
+              {SERVICES.filter(
+                (service) => service.id === "gemini" || service.id === "walkaround",
+              ).map((service) => (
+                <ServiceCard
+                  key={service.id}
+                  service={service}
+                  connections={serviceMap.get(service.id) ?? []}
+                  dealers={dealerOptions}
+                  secureStorageAvailable={Boolean(data.secureStorageAvailable)}
+                  onRefresh={refresh}
+                  onManageDealer={onManageDealer}
+                  onOpenWalkaround={onOpenWalkaround}
+                />
+              ))}
+            </section>
+            <section
+              aria-labelledby="dealer-connections-heading"
+              className="space-y-2.5"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <h3
+                  id="dealer-connections-heading"
+                  className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-2"
+                >
+                  Dealership connections
+                </h3>
+                <span className="text-[11px] text-ink-2">Per dealership</span>
+              </div>
+              <ServiceCard
+                service={SERVICES.find((service) => service.id === "website")!}
+                connections={serviceMap.get("website") ?? []}
+                dealers={dealerOptions}
+                secureStorageAvailable={Boolean(data.secureStorageAvailable)}
+                onRefresh={refresh}
+                onManageDealer={onManageDealer}
+                onOpenWalkaround={onOpenWalkaround}
+              />
+              <p className="px-1 text-xs text-ink-2">
+                Dealerships manage their social accounts in Settings.
+              </p>
+            </section>
+            <details className="group rounded-md border border-hairline">
+              <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 px-4 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
+                <Layers3 className="h-4 w-4 shrink-0 text-ink-2" aria-hidden="true" />
+                <span className="flex-1">Optional AI backups</span>
+                <span className="text-[11px] font-normal text-ink-2">
+                  {["anthropic", "openai"].every(
+                    (id) =>
+                      serviceMap.get(id as ConnectionServiceId)?.[0]?.state === "off",
+                  )
+                    ? "Off"
+                    : "2 providers"}
+                </span>
+                <ChevronDown
+                  className="h-4 w-4 text-ink-2 transition-transform group-open:rotate-180"
+                  aria-hidden="true"
+                />
+              </summary>
+              <div className="space-y-2.5 border-t border-hairline p-3">
+                <p className="px-1 text-xs text-ink-2">
+                  Optional text providers. Off services do not affect readiness.
+                </p>
+                {SERVICES.filter(
+                  (service) => service.id === "anthropic" || service.id === "openai",
+                ).map((service) => (
                   <ServiceCard
                     key={service.id}
                     service={service}
@@ -852,56 +1039,18 @@ export const ConnectionsPanel: React.FC<{
                     onManageDealer={onManageDealer}
                     onOpenWalkaround={onOpenWalkaround}
                   />
-                ),
-              )}
-            </section>
-            <section aria-labelledby="dealer-connections-heading" className="space-y-3">
-              <h3
-                id="dealer-connections-heading"
-                className="font-display text-xl font-semibold text-ink"
-              >
-                Dealership connections
-              </h3>
-              <p className="text-sm text-ink-2">
-                Choose the dealership whose approved website will receive private
-                drafts.
-              </p>
-              <ServiceCard
-                service={SERVICES.find((service) => service.id === "website")!}
-                connections={serviceMap.get("website") ?? []}
-                dealers={dealerOptions}
-                secureStorageAvailable={Boolean(data.secureStorageAvailable)}
-                onRefresh={refresh}
-                onManageDealer={onManageDealer}
-                onOpenWalkaround={onOpenWalkaround}
-              />
-            </section>
-            {allReady ? (
-              <p
-                className="flex items-center gap-2 text-sm font-medium text-ink"
-                role="status"
-              >
-                <Check className="h-4 w-4" aria-hidden="true" />
-                All required connection checks passed. Capability details appear on each
-                service.
-              </p>
-            ) : (
-              <p className="text-sm text-ink-2" role="status">
-                {readyCount} of {required.length} required connection checks verified. A
-                saved configuration alone does not count as Ready.
-              </p>
-            )}
+                ))}
+              </div>
+            </details>
             <section aria-labelledby="runtime-health-heading" className="space-y-3">
               <div>
                 <h3
                   id="runtime-health-heading"
-                  className="font-display text-xl font-semibold text-ink"
+                  className="text-sm font-semibold text-ink"
                 >
                   Runtime health
                 </h3>
-                <p className="text-sm text-ink-2">
-                  Live service health and recovery information.
-                </p>
+                <p className="text-xs text-ink-2">Live health and recovery.</p>
               </div>
               <SystemHealthPanel />
             </section>
@@ -944,34 +1093,6 @@ export const ConnectionsPanel: React.FC<{
           </>
         ) : null}
       </main>
-      <aside
-        aria-label="Connection readiness"
-        className="flex w-full flex-col gap-3 border-t border-hairline pt-4 md:max-w-[20rem] md:flex-[1_1_16rem] md:border-0 md:pt-1"
-      >
-        <h3 className="text-base font-semibold text-ink">Verification status</h3>
-        <p className="text-sm text-ink-2">
-          {query.isPending
-            ? "Checking verified service status…"
-            : data
-              ? `${readyCount} of ${required.length} required services verified.`
-              : "Connection status unavailable."}
-        </p>
-        <Button
-          variant="secondary"
-          leftIcon={<RefreshCw />}
-          loading={query.isFetching}
-          onClick={() => {
-            if (onCheckAgain) onCheckAgain();
-            else void refresh();
-          }}
-        >
-          Refresh status
-        </Button>
-        <p className="text-xs text-ink-2">
-          A connection is Ready only after its server-side test succeeds. Optional
-          services that are off do not count as faults.
-        </p>
-      </aside>
     </div>
   );
 };

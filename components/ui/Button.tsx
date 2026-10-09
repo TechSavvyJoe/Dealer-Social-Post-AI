@@ -57,7 +57,7 @@ interface ButtonProps extends Omit<
 const baseStyles = cn(
   "inline-flex items-center justify-center gap-2",
   "rounded-sm",
-  "transition-[color,background-color,border-color,opacity,transform] duration-120 ease-out",
+  "transition-[color,background-color,border-color,opacity,transform] duration-120 ease-out motion-reduce:transition-none",
   "active:scale-[0.98] motion-reduce:transform-none",
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none",
   "select-none touch-manipulation",

@@ -115,15 +115,13 @@ describe("guided system connections", () => {
     act(() => useAppStore.setState({ role: "super_admin" }));
     expect(await screen.findByRole("heading", { name: "Connections" })).toBeVisible();
     expect(getCall()).toBeTruthy();
-    expect(
-      await screen.findByText(
-        "1 of 3 required connection checks verified. A saved configuration alone does not count as Ready.",
-      ),
-    ).toBeVisible();
+    expect(await screen.findByText("1 / 3 checks verified")).toBeVisible();
   });
 
   it("keeps optional-off neutral and selects the matching dealership website config", async () => {
     mount();
+    await screen.findByRole("heading", { name: "Connections" });
+    fireEvent.click(await screen.findByText("Optional AI backups"));
     const fallback = await screen.findByRole("article", { name: /Anthropic fallback/ });
     expect(within(fallback).getByText("Off")).toBeVisible();
     expect(within(fallback).getByText("Optional")).toBeVisible();
@@ -348,6 +346,8 @@ describe("guided system connections", () => {
       return jsonResponse(fixture);
     });
     mount();
+    await screen.findByRole("heading", { name: "Connections" });
+    fireEvent.click(await screen.findByText("Optional AI backups"));
     const openai = await screen.findByRole("article", { name: /OpenAI fallback/ });
     await user.click(within(openai).getByRole("button", { name: "Set up" }));
     await user.click(within(openai).getByRole("button", { name: "Save connection" }));

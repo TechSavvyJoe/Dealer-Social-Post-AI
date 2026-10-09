@@ -18,7 +18,14 @@ describe("managed connection service", () => {
 
   it("uses session cookies and no-store for all connection endpoints", async () => {
     setActiveAuthEpoch(4);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ items: [] })));
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ items: [], scope: "guided_setup", services: [], dealers: [] }),
+        ),
+    );
     await getConnections();
     await getConnectionProofs("website", "dealer 1");
     await saveConnection("gemini", {
@@ -46,6 +53,20 @@ describe("managed connection service", () => {
         credentials: { apiKey: "temporary" },
       },
     );
+  });
+
+  it("does not turn an older server inventory into missing connection settings", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        response({
+          scope: "configuration_only",
+          providers: { gemini: { configured: true, enabled: true } },
+          automation: {},
+        }),
+      ),
+    );
+    await expect(getConnections()).rejects.toThrow("waiting for the server update");
   });
 
   it("rejects a response after the signed-in workspace changes", async () => {

@@ -107,6 +107,15 @@ export const getConnections = async (
   if (!response.ok) return responseError(response, requestAuthEpoch);
   const result = (await response.json()) as ConnectionsResponse;
   assertAuthEpoch(requestAuthEpoch);
+  if (
+    result?.scope !== "guided_setup" ||
+    !Array.isArray(result.services) ||
+    !Array.isArray(result.dealers)
+  ) {
+    throw new Error(
+      "Connections setup is waiting for the server update. Refresh status after the release finishes.",
+    );
+  }
   return result;
 };
 

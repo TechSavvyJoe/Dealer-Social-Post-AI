@@ -1161,6 +1161,8 @@ test.describe("Dealer Social Post AI Flow", () => {
           post_revision: body.expected_post_revision,
         });
       }
+      if (request.method() === "GET" && path === "/api/app/studio-capabilities")
+        return reply({ walkaround: false });
       unknown.push(`${request.method()} ${path}`);
       return route.fulfill({ status: 500, body: "{}" });
     });
@@ -1269,7 +1271,9 @@ test.describe("Dealer Social Post AI Flow", () => {
     await page.reload();
 
     const postActions = page.getByRole("region", { name: "Post actions" });
-    await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible({
+      timeout: 15_000,
+    });
     const save = page.getByRole("button", { name: "Save image", exact: true });
     const copy = page.getByRole("button", { name: "Copy caption", exact: true });
     const open = page.getByRole("button", { name: "Open Facebook", exact: true });

@@ -224,12 +224,37 @@ async function installAdminApi(page: Page) {
         json({
           ok: true,
           ts: "2026-10-09T12:00:00.000Z",
-          checks: {},
           version: "e2e",
           releaseSha: "e2e-guided-connections",
           apiContractVersion: "guided-setup-e2e",
           modelPolicyVersion: "5",
-          backup: { configured: false, status: "not_configured" },
+          checks: {
+            pocketbase: true,
+            gemini_key_set: true,
+            proxy_token_set: true,
+            anthropic_key_set: false,
+            openai_key_set: false,
+            claude_fallback_enabled: false,
+            openai_fallback_enabled: false,
+            admin_login_configured: true,
+            pin_pepper_configured: true,
+            turnstile_enforcement_enabled: true,
+            turnstile_secret_set: true,
+            turnstile_site_key_set: true,
+            turnstile_hostnames_configured: true,
+            trusted_proxy_configured: true,
+            legacy_client_compatibility_enabled: false,
+            off_box_backup_configured: true,
+            off_box_restore_ready: true,
+            website_integration_configured: true,
+          },
+          backup: {
+            configured: true,
+            lastVerifiedAt: "2026-10-09T11:00:00.000Z",
+            verifiedReleaseSha: "e2e-guided-connections",
+            maxAgeHours: 168,
+            status: "verified",
+          },
         }),
       );
     }
@@ -262,20 +287,17 @@ test.describe("guided system connections", () => {
     const { requests } = await installAdminApi(page);
     await openConnections(page);
 
+    await page.getByText("Optional AI backups", { exact: true }).click();
     const anthropic = page.getByRole("article", { name: "Anthropic fallback" });
     await expect(anthropic.getByText("Off", { exact: true })).toBeVisible();
-    await expect(
-      anthropic.getByText("This optional service is off by choice."),
-    ).toBeVisible();
+    await expect(anthropic.getByText("Off by choice", { exact: true })).toBeVisible();
     await expect(anthropic.getByRole("alert")).toHaveCount(0);
 
     const walkaround = page.getByRole("article", {
       name: "Walkaround video service",
     });
     await expect(walkaround.getByText("Off", { exact: true })).toBeVisible();
-    await expect(
-      walkaround.getByText("This optional service is off by choice."),
-    ).toBeVisible();
+    await expect(walkaround.getByText("Off by choice", { exact: true })).toBeVisible();
     await walkaround.getByRole("button", { name: "Set up" }).click();
     await walkaround
       .getByLabel("Manage a dealership's YouTube account")
@@ -293,15 +315,15 @@ test.describe("guided system connections", () => {
     await gemini.getByRole("button", { name: "Save connection" }).click();
     await expect(gemini.getByText("Test required")).toBeVisible();
     await expect(gemini.getByLabel("Gemini API key")).toHaveValue("");
-    await expect(gemini.getByText(/Image generation: Not tested/)).toBeVisible();
+    await expect(gemini.getByLabel("Image generation: Not tested")).toBeVisible();
 
     await gemini.getByRole("button", { name: "Test connection" }).click();
     await expect(gemini.getByText("Testing", { exact: true })).toBeVisible();
     await gemini.getByRole("button", { name: "Test connection" }).click();
     await expect(gemini.getByText("Caption access verified")).toBeVisible();
     await expect(gemini.getByText("Caption access: Verified")).toBeVisible();
-    await expect(gemini.getByText("Image generation: Not tested")).toBeVisible();
-    await expect(gemini.getByText("AI video generation: Not tested")).toBeVisible();
+    await expect(gemini.getByLabel("Image generation: Not tested")).toBeVisible();
+    await expect(gemini.getByLabel("AI video generation: Not tested")).toBeVisible();
     const geminiTests = requests.filter(
       (request) => request.path === "/api/app/connections/gemini/test",
     );
@@ -336,12 +358,12 @@ test.describe("guided system connections", () => {
     await website.getByRole("button", { name: "Test connection" }).click();
     await expect(
       website.getByText(
-        "Draft delivery is still pending. Test this same saved draft again to confirm receipt.",
+        "Draft receipt is pending. Retest the same saved draft to confirm delivery.",
         { exact: true },
       ),
     ).toBeVisible();
     await website.getByRole("button", { name: "Test connection" }).click();
-    await expect(website.getByText("Ready")).toBeVisible();
+    await expect(website.getByText("Ready", { exact: true })).toBeVisible();
     await expect(website.getByText("Private website draft: Verified")).toBeVisible();
 
     const websiteTests = requests.filter(
@@ -381,6 +403,12 @@ test.describe("guided system connections", () => {
     expect(JSON.stringify(stateSafeRequests(requests))).not.toContain(
       "e2e-temporary-key",
     );
+    const screenshotPath = testInfo.outputPath("guided-connections-desktop.png");
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach("guided-connections-desktop", {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
   });
 
   test("keeps the setup cards usable on a phone and captures the mobile view", async ({
