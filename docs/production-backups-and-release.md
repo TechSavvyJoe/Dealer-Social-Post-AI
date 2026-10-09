@@ -361,3 +361,9 @@ gh variable list --env production | grep -E 'LEGACY_CLIENT_COMPATIBILITY_ENABLED
 
 Once both are verified `false`/absent in production, delete the flags from `.env.example`, CI,
 and the workflows in a follow-up release.
+
+## Managed connection credentials
+
+System admins configure providers and private dealership destinations through Connections. Credentials are write-only and encrypted in PocketBase. Keep the same dedicated 32-character `CONNECTIONS_ENCRYPTION_KEY` in both protected `production` and `production-backup` GitHub environments. The coordinated release stages it through stdin and applies it with the verified backend deployment. Restore drills reject encrypted records that cannot be decrypted and validated; do not rotate this key without a separate audited migration and recovery plan.
+
+The centrally managed `CONNECTIONS_ALLOWED_ORIGINS` accepts exact HTTPS origins for website and broker destinations. Existing trusted runtime destinations remain accepted. Dealership managers connect their YouTube account through the existing Channels flow; they never configure workers, storage or provider keys. Settings changes invalidate verification and hold queued work bound to the previous destination. Website Ready requires a private draft receipt. Walkaround processing verification requires a completed package, and YouTube verification separately requires private processed playback for the selected dealership. Optional services that are turned off remain neutral. Current production volume size is unchanged.

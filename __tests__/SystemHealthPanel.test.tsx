@@ -126,16 +126,16 @@ describe("SystemHealthPanel readiness diagnostics", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<SystemHealthPanel />);
-    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    expect(await screen.findByText("All systems operational")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh system health" }));
     expect(await screen.findByText("Gateway busy (503)")).toBeInTheDocument();
-    expect(screen.getByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    expect(screen.getByText("All systems operational")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh system health" }));
     expect(await screen.findByText("Network disconnected")).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.queryByText(/Operational — \d+ advisor/)).toBeNull(),
+      expect(screen.queryByText("All systems operational")).toBeNull(),
     );
   });
 
@@ -143,7 +143,7 @@ describe("SystemHealthPanel readiness diagnostics", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(healthyPayload)));
 
     render(<SystemHealthPanel />);
-    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    expect(await screen.findByText("All systems operational")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Details/ }));
 
     expect(screen.getByText("Generation usage · last 7 days")).toBeInTheDocument();
@@ -169,7 +169,7 @@ describe("SystemHealthPanel readiness diagnostics", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(withoutUsage)));
 
     render(<SystemHealthPanel />);
-    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    expect(await screen.findByText("All systems operational")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Details/ }));
 
     expect(
@@ -195,7 +195,7 @@ describe("SystemHealthPanel readiness diagnostics", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(partial)));
 
     render(<SystemHealthPanel />);
-    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    expect(await screen.findByText("All systems operational")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Details/ }));
 
     // Missing windowDays falls back to the server's own 7-day window, missing
@@ -222,14 +222,14 @@ describe("SystemHealthPanel readiness diagnostics", () => {
     );
 
     render(<SystemHealthPanel />);
-    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    expect(await screen.findByText("All systems operational")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh system health" }));
 
     expect(
       await screen.findByText("Health response was not valid JSON (502)."),
     ).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.queryByText(/Operational — \d+ advisor/)).toBeNull(),
+      expect(screen.queryByText("All systems operational")).toBeNull(),
     );
   });
 });

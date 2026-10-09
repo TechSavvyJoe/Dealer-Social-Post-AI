@@ -154,6 +154,7 @@ jobs:
       - name: Restore the archive and verify SQLite, collections, migrations, and startup
         id: restore-evidence
         env:
+          CONNECTIONS_ENCRYPTION_KEY: ${{ secrets.CONNECTIONS_ENCRYPTION_KEY }}
           RELEASE_SHA: ${{ steps.target-release.outputs.sha }}
         run: |
           verified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

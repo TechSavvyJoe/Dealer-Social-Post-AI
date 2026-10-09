@@ -120,6 +120,8 @@ container_id="$(docker run --detach \
   --env ADMIN_LOGIN_USERNAME=restore.admin \
   --env ADMIN_LOGIN_PASSWORD=testRstr7K3X-drill \
   --env GEMINI_API_KEY=test-restore-placeholder \
+  --env CONNECTIONS_ENCRYPTION_KEY \
+  --env CONNECTIONS_RESTORE_CHECK=true \
   --env POCKETBASE_R2_BACKUPS_ENABLED=true \
   --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \
   --env POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA="$release_sha" \

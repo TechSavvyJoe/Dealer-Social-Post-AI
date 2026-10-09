@@ -177,25 +177,82 @@ function defaultReply(
     };
   }
   if (method === "GET" && path === "/api/app/connections") {
-    const connected = { configured: true, enabled: true, verification: "not_tested" };
+    const service = (
+      id: "gemini" | "anthropic" | "openai" | "website" | "walkaround",
+      scope: "global" | "dealer",
+      state: "needs_test" | "off",
+      dealerId?: string,
+    ) => ({
+      service: id,
+      scope,
+      ...(dealerId ? { dealerId } : {}),
+      configured: state !== "off",
+      enabled: state !== "off",
+      revision: state === "off" ? 0 : 1,
+      state,
+      capabilities:
+        id === "gemini"
+          ? [
+              { id: "caption_text", label: "Caption generation", state: "not_tested" },
+              { id: "images", label: "Image generation", state: "not_tested" },
+              { id: "video", label: "Video generation", state: "not_tested" },
+            ]
+          : id === "website"
+            ? [
+                {
+                  id: "websiteReady",
+                  label: "Private draft delivery",
+                  state: "not_tested",
+                },
+              ]
+            : [],
+      nextAction: state === "off" ? "Optional service is off." : "Run a test.",
+      settings: {},
+      credentialConfigured: {},
+    });
     return {
       json: {
-        scope: "configuration_only",
-        providers: {
-          gemini: connected,
-          anthropic: { ...connected, configured: false, enabled: false },
-          openai: connected,
-        },
-        automation: {
-          customer_hub: connected,
-          walkaround: { ...connected, configured: false, enabled: false },
-        },
+        scope: "guided_setup",
+        secureStorageAvailable: true,
+        dealers: [{ id: dealer.id, name: dealer.name }],
+        services: [
+          service("gemini", "global", "needs_test"),
+          service("anthropic", "global", "off"),
+          service("openai", "global", "off"),
+          service("website", "dealer", "off", dealer.id),
+          service("walkaround", "global", "off"),
+        ],
         apiContractVersion: "test",
         modelPolicyVersion: "5",
-        capabilities: { veoNegativePrompt: true },
+        capabilities: { veoNegativePrompt: true, walkaroundStudio: true },
       },
     };
   }
+  if (method === "GET" && path === "/api/app/dealer-connections")
+    return {
+      json: {
+        services: [
+          {
+            service: "website",
+            enabled: false,
+            configured: false,
+            revision: 0,
+            state: "off",
+            capabilities: [],
+          },
+          {
+            service: "walkaround",
+            enabled: false,
+            configured: false,
+            revision: 0,
+            state: "off",
+            capabilities: [
+              { id: "walkaroundStudio", label: "Video studio", state: "not_tested" },
+            ],
+          },
+        ],
+      },
+    };
   return undefined;
 }
 
@@ -1386,10 +1443,14 @@ test("system admin sees AI connections and setup guidance", async ({ page }, inf
   await fixture(page, "super_admin");
   await page.getByRole("tab", { name: "Connections" }).click();
   await expect(
-    page.getByRole("heading", { name: "Providers and automation" }),
+    page.getByRole("heading", { name: "Connections", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Setup instructions" }).first().click();
-  await expect(page.getByText("Set the Gemini key on the backend host.")).toBeVisible();
+  const gemini = page.getByRole("article", { name: "Google Gemini" });
+  await gemini.getByRole("button", { name: "Set up" }).click();
+  await expect(gemini.getByLabel("Gemini API key")).toHaveValue("");
+  await page.getByRole("main").locator("details").last().locator("summary").click();
+  await expect(page.getByText("API contract", { exact: true })).toBeVisible();
+  await expect(page.getByText("walkaroundStudio", { exact: true })).toBeVisible();
   await quality(page);
   await shot(page, "admin-connections", info.project.name);
 });

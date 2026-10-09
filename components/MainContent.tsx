@@ -41,6 +41,9 @@ const LazySpin = React.lazy(() =>
 const LazyWork = React.lazy(() =>
   import("./MyWork").then((m) => ({ default: m.MyWork })),
 );
+const LazyWalkaround = React.lazy(() =>
+  import("./WalkaroundStudio").then((m) => ({ default: m.WalkaroundStudio })),
+);
 export interface MainContentProps {
   displayedStep: AppStep;
   step: AppStep;
@@ -135,13 +138,56 @@ export interface MainContentProps {
   onRequestLogout?: () => void;
   onManagementDirtyChange?: (dirty: boolean) => void;
   onSpinDirtyChange: (dirty: boolean) => void;
+  onWalkaroundDirtyChange: (dirty: boolean) => void;
   onOpenSpin: () => void;
+  onOpenWalkaround: () => void;
 }
 
 export const MainContent: React.FC<MainContentProps> = (props) => {
   const { displayedStep, selectedImage, generatedPost, currentDealer, error } = props;
   const draft = useAppStore((s) => s.postDraft);
   const authEpoch = useAppStore((s) => s.authEpoch);
+  const role = useAppStore((s) => s.role);
+  const [walkaroundEnabled, setWalkaroundEnabled] = React.useState(false);
+  const [walkaroundChecked, setWalkaroundChecked] = React.useState(false);
+  React.useEffect(() => {
+    const controller = new AbortController();
+    let live = true;
+    setWalkaroundEnabled(false);
+    setWalkaroundChecked(false);
+    if (!currentDealer) return () => controller.abort();
+    const requestEpoch = authEpoch;
+    void fetch("/api/app/studio-capabilities", {
+      credentials: "include",
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) return false;
+        const body = (await response.json()) as { walkaround?: unknown };
+        return body.walkaround === true;
+      })
+      .then((enabled) => {
+        if (live && useAppStore.getState().authEpoch === requestEpoch) {
+          setWalkaroundEnabled(enabled);
+          setWalkaroundChecked(true);
+          if (!enabled && useAppStore.getState().step === AppStep.WALKAROUND)
+            useAppStore.getState().setStep(AppStep.HOME);
+        }
+      })
+      .catch(() => {
+        if (live && useAppStore.getState().authEpoch === requestEpoch) {
+          setWalkaroundEnabled(false);
+          setWalkaroundChecked(true);
+          if (useAppStore.getState().step === AppStep.WALKAROUND)
+            useAppStore.getState().setStep(AppStep.HOME);
+        }
+      });
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [authEpoch, currentDealer?.id]);
   React.useEffect(() => {
     if (props.step === AppStep.CREATING) void import("./PostScreen").catch(() => {});
   }, [props.step]);
@@ -172,6 +218,14 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
     case AppStep.DEALER_ADMIN:
       content = (
         <>
+          {walkaroundEnabled && (
+            <button
+              className="mx-4 mt-4 min-h-11 self-start rounded-sm border border-strong px-4 text-sm font-semibold text-ink"
+              onClick={props.onOpenWalkaround}
+            >
+              Walkaround video studio
+            </button>
+          )}
           <button
             className="mx-4 mt-4 min-h-11 self-start rounded-sm border border-strong px-4 text-sm font-semibold text-ink"
             onClick={props.onOpenSpin}
@@ -188,6 +242,24 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
     case AppStep.VEHICLE_SPIN:
       content = <LazySpin key={authEpoch} onDirtyChange={props.onSpinDirtyChange} />;
       break;
+    case AppStep.WALKAROUND:
+      content =
+        walkaroundEnabled && currentDealer ? (
+          <LazyWalkaround
+            key={`${authEpoch}:${currentDealer.id}`}
+            dealerId={currentDealer.id}
+            dealerName={currentDealer.name}
+            requiresApproval={Boolean(currentDealer.requires_approval)}
+            canManageYouTube={role === "dealer_admin" || role === "super_admin"}
+            onDirtyChange={props.onWalkaroundDirtyChange}
+            onBack={props.onBackFromWork || props.onReset}
+          />
+        ) : walkaroundChecked ? (
+          fallback("This studio is unavailable for this dealership.")
+        ) : (
+          fallback("Checking studio availability…")
+        );
+      break;
     case AppStep.HOME:
       content = (
         <LazyHome
@@ -195,6 +267,8 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
             props.onPhotoPicked || ((selection) => props.onImageSelected(selection))
           }
           onOpenSpin={props.onOpenSpin}
+          walkaroundEnabled={walkaroundEnabled}
+          onOpenWalkaround={props.onOpenWalkaround}
           onShowHistory={() => props.onShowHistory?.()}
           onOpenPost={openPost}
         />

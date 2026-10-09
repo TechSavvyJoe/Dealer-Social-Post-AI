@@ -34,19 +34,66 @@ import { ToastProvider } from "../components/ui/Toast";
 import { useAppStore } from "../stores/appStore";
 
 const connections = {
-  scope: "configuration_only",
-  providers: {
-    gemini: { configured: true, enabled: true, verification: "not_tested" },
-    anthropic: { configured: false, enabled: false, verification: "not_tested" },
-    openai: { configured: false, enabled: false, verification: "not_tested" },
-  },
-  automation: {
-    customer_hub: { configured: true, enabled: true, verification: "not_tested" },
-    walkaround: { configured: true, enabled: true, verification: "not_tested" },
-  },
-  apiContractVersion: "2026-test",
+  scope: "guided_setup" as const,
+  secureStorageAvailable: true,
+  dealers: [{ id: "dealer-1", name: "Northside Motors" }],
+  services: [
+    {
+      service: "gemini" as const,
+      scope: "global" as const,
+      configured: true,
+      enabled: true,
+      revision: 2,
+      state: "needs_test" as const,
+      capabilities: [
+        { id: "caption_text", label: "Caption generation", state: "not_tested" },
+      ],
+      nextAction: "Run a text test.",
+      settings: {},
+      credentialConfigured: { apiKey: true },
+    },
+    ...(["anthropic", "openai", "walkaround"] as const).map((service) => ({
+      service,
+      scope: "global" as const,
+      configured: false,
+      enabled: false,
+      revision: 0,
+      state: "off" as const,
+      capabilities: [],
+      nextAction: "Optional service is off.",
+      settings: {},
+      credentialConfigured: {},
+    })),
+    {
+      service: "website" as const,
+      scope: "dealer" as const,
+      dealerId: "dealer-1",
+      configured: false,
+      enabled: false,
+      revision: 0,
+      state: "off" as const,
+      capabilities: [],
+      nextAction: "Optional service is off.",
+      settings: {},
+      credentialConfigured: {},
+    },
+  ],
   modelPolicyVersion: "5",
-  capabilities: {},
+};
+const verifiedConnections = {
+  ...connections,
+  services: connections.services.map((service) =>
+    service.service === "gemini"
+      ? {
+          ...service,
+          state: "ready" as const,
+          capabilities: [
+            { id: "caption_text", label: "Caption generation", state: "verified" },
+          ],
+          nextAction: "No action needed.",
+        }
+      : service,
+  ),
 };
 
 const northside: Dealer = {
@@ -82,6 +129,8 @@ const connectionCalls = () =>
     .mocked(fetch)
     .mock.calls.filter(([url]) => String(url).endsWith("/api/app/connections")).length;
 
+let connectionFetchCount = 0;
+
 const mount = () => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -109,6 +158,7 @@ const openRow = async (name: string) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  connectionFetchCount = 0;
   mocks.getDealers.mockResolvedValue([northside, lakeside]);
   mocks.addDealerWithFile.mockResolvedValue({ id: "dealer-9" });
   mocks.updateDealerWithFile.mockResolvedValue({ id: "dealer-1" });
@@ -116,7 +166,17 @@ beforeEach(() => {
   mocks.listPeoplePage.mockResolvedValue({ items: [], total: 0 });
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue({ ok: true, json: async () => connections }),
+    vi.fn().mockImplementation(async (url: unknown) => {
+      if (String(url).endsWith("/api/app/connections")) {
+        connectionFetchCount += 1;
+        return {
+          ok: true,
+          json: async () =>
+            connectionFetchCount > 1 ? verifiedConnections : connections,
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    }),
   );
   useAppStore.setState({
     currentDealer: { id: "system-dealer", name: "SYSTEM ADMIN" },
@@ -188,19 +248,19 @@ describe("system admin hub", () => {
     expect(within(adminsPanel).getByRole("button", { name: "Refresh" })).toBeVisible();
   });
 
-  it("checks the connection status again from the Connections aside", async () => {
+  it("refreshes guided connection verification and shows the server result", async () => {
     mount();
     fireEvent.click(screen.getByRole("tab", { name: "Connections" }));
-    expect(
-      await screen.findByText(
-        "3 of 3 required services configured and enabled. 0 of 2 optional fallbacks on.",
-      ),
-    ).toBeVisible();
+    expect(await screen.findByText("0 of 1 required services verified.")).toBeVisible();
     expect(connectionCalls()).toBe(1);
     expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
     await waitFor(() => expect(connectionCalls()).toBe(2));
+    expect(await screen.findByText("1 of 1 required services verified.")).toBeVisible();
+    expect(screen.getByRole("article", { name: "Google Gemini" })).toHaveTextContent(
+      "Caption access verified",
+    );
   });
 
   it("opens a board row's Admins and Users on that store", async () => {

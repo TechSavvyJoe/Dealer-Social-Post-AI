@@ -86,10 +86,80 @@ function isManager(context) {
   );
 }
 
+function runtimeValue(name) {
+  if (typeof __hooks !== "undefined")
+    return require(__hooks + "/connectionConfig.js").runtimeValue(name);
+  try {
+    return ($os.getenv(name) || "").toString();
+  } catch (_e) {
+    return "";
+  }
+}
+
+function infrastructureSnapshot() {
+  if (typeof __hooks === "undefined") return null;
+  return require(__hooks + "/connectionConfig.js").runtimeSnapshot("walkaround");
+}
+
+function channelIdentity(connection) {
+  if (!connection) return "";
+  return $security
+    .sha256(
+      connection.id +
+        "\n" +
+        connection.getString("channel_id") +
+        "\n" +
+        connection.getString("credential_reference"),
+    )
+    .toLowerCase();
+}
+
+function projectConfigurationMatches(project, snapshot, connection) {
+  if (!snapshot) return typeof __hooks === "undefined";
+  if (
+    !snapshot.enabled ||
+    !snapshot.configured ||
+    project.getString("destination_identity") !== snapshot.identity ||
+    Number(project.get("config_revision") || 0) !== Number(snapshot.revision)
+  )
+    return false;
+  const boundChannel = project.getString("youtube_identity");
+  return (
+    !boundChannel || (!!connection && boundChannel === channelIdentity(connection))
+  );
+}
+
+function taskConfigurationMatches(task, project, snapshot, connection) {
+  if (!projectConfigurationMatches(project, snapshot, connection)) return false;
+  const payload = safeJson(task.getString("payload"), {});
+  return (
+    (typeof __hooks === "undefined" && !snapshot) ||
+    (task.getString("dealer") === project.getString("dealer") &&
+      payload.configIdentity === project.getString("destination_identity") &&
+      Number(payload.configRevision || 0) ===
+        Number(project.get("config_revision") || 0) &&
+      (!payload.youtubeIdentity ||
+        payload.youtubeIdentity === project.getString("youtube_identity")))
+  );
+}
+
+function requireProjectConfiguration(c, project) {
+  const snapshot = infrastructureSnapshot();
+  const connection = youtubeConnection($app.dao(), project.getString("dealer"));
+  if (!projectConfigurationMatches(project, snapshot, connection)) {
+    c.json(409, {
+      error: "This project's connection settings changed. Existing work is on hold.",
+      code: "WALKAROUND_CONFIG_CHANGED",
+    });
+    return false;
+  }
+  return true;
+}
+
 function featureEnabled() {
   try {
     return (
-      ($os.getenv("WALKAROUND_STUDIO_ENABLED") || "")
+      (runtimeValue("WALKAROUND_STUDIO_ENABLED") || "")
         .toString()
         .trim()
         .toLowerCase() === "true"
@@ -201,6 +271,7 @@ function projectForContext(c, helpers, options) {
     c.json(403, { error: "Manager access required" });
     return null;
   }
+  if (!requireProjectConfiguration(c, project)) return null;
   return { context: context, project: project };
 }
 
@@ -382,12 +453,15 @@ function serializeProject(project, dao, includeUpload) {
 function uploadBrokerConfig() {
   let base = "";
   let token = "";
+  const snapshotConfig = infrastructureSnapshot();
+  const value = (name) =>
+    snapshotConfig ? snapshotConfig.values[name] || "" : runtimeValue(name);
   try {
-    base = ($os.getenv("WALKAROUND_UPLOAD_BROKER_URL") || "")
+    base = (value("WALKAROUND_UPLOAD_BROKER_URL") || "")
       .toString()
       .trim()
       .replace(/\/+$/, "");
-    token = ($os.getenv("WALKAROUND_UPLOAD_BROKER_TOKEN") || "").toString();
+    token = (value("WALKAROUND_UPLOAD_BROKER_TOKEN") || "").toString();
   } catch (_e) {
     return null;
   }
@@ -397,18 +471,21 @@ function uploadBrokerConfig() {
     token !== token.trim()
   )
     return null;
-  return { base: base, token: token };
+  return { base: base, token: token, snapshot: snapshotConfig };
 }
 
 function youtubeBrokerConfig() {
   let base = "",
     token = "";
+  const snapshotConfig = infrastructureSnapshot();
+  const value = (name) =>
+    snapshotConfig ? snapshotConfig.values[name] || "" : runtimeValue(name);
   try {
-    base = ($os.getenv("WALKAROUND_YOUTUBE_BROKER_URL") || "")
+    base = (value("WALKAROUND_YOUTUBE_BROKER_URL") || "")
       .toString()
       .trim()
       .replace(/\/+$/, "");
-    token = ($os.getenv("WALKAROUND_YOUTUBE_BROKER_TOKEN") || "").toString();
+    token = (value("WALKAROUND_YOUTUBE_BROKER_TOKEN") || "").toString();
   } catch (_e) {
     return null;
   }
@@ -418,11 +495,32 @@ function youtubeBrokerConfig() {
     token !== token.trim()
   )
     return null;
-  return { base: base, token: token };
+  return { base: base, token: token, snapshot: snapshotConfig };
 }
 
 function brokerRequest(config, path, payload, idempotencyKey) {
-  const response = $http.send({
+  if (!/^\/v1\/[a-z0-9/-]+$/.test(path)) throw new Error("BROKER_PATH_INVALID");
+  if (config.snapshot) {
+    const current = infrastructureSnapshot();
+    if (!current.enabled || current.identity !== config.snapshot.identity)
+      throw new Error("WALKAROUND_CONFIG_CHANGED");
+    if (payload && payload.projectId) {
+      const project = $app
+        .dao()
+        .findRecordById("walkaround_projects", payload.projectId);
+      if (
+        !projectConfigurationMatches(
+          project,
+          config.snapshot,
+          youtubeConnection($app.dao(), project.getString("dealer")),
+        )
+      )
+        throw new Error("WALKAROUND_CONFIG_CHANGED");
+    }
+  }
+  const response = (
+    typeof __hooks === "undefined" ? $http : require(__hooks + "/safeHttp.js")
+  ).send({
     url: config.base + path,
     method: "POST",
     headers: {
@@ -482,6 +580,14 @@ function createProject(c, helpers) {
   if (!dealerActionAllowed(c, helpers, context, "creation", 12)) return;
   const collection = $app.dao().findCollectionByNameOrId("walkaround_projects");
   const project = new Record(collection);
+  const snapshotConfig = infrastructureSnapshot();
+  if (snapshotConfig && (!snapshotConfig.enabled || !snapshotConfig.configured))
+    return c.json(503, {
+      error: "Walkaround connections are on configuration hold",
+      code: "WALKAROUND_CONFIG_HOLD",
+    });
+  project.set("config_revision", snapshotConfig ? snapshotConfig.revision : 0);
+  project.set("destination_identity", snapshotConfig ? snapshotConfig.identity : "");
   project.set("dealer", context.dealer.id);
   project.set("owner_person", context.person.id);
   project.set("owner_session_hash", ownerHash);
@@ -695,6 +801,14 @@ function createUpload(c, helpers) {
     $app.dao().saveRecord(project);
   } catch (_e) {
     try {
+      if (
+        !projectConfigurationMatches(
+          project,
+          infrastructureSnapshot(),
+          youtubeConnection($app.dao(), project.getString("dealer")),
+        )
+      )
+        throw new Error("WALKAROUND_CONFIG_CHANGED");
       asset.set("state", "deleted");
       asset.set("upload_session_reference", "");
       $app.dao().saveRecord(asset);
@@ -950,6 +1064,20 @@ function enqueueTask(dao, project, kind, key, payload) {
       { key: key },
     );
   } catch (_e) {}
+  const snapshotConfig = infrastructureSnapshot();
+  if (
+    !projectConfigurationMatches(
+      project,
+      snapshotConfig,
+      youtubeConnection(dao, project.getString("dealer")),
+    )
+  )
+    throw new Error("WALKAROUND_CONFIG_CHANGED");
+  payload = Object.assign({}, payload, {
+    configRevision: Number(project.get("config_revision") || 0),
+    configIdentity: project.getString("destination_identity"),
+    youtubeIdentity: project.getString("youtube_identity"),
+  });
   const task = new Record(dao.findCollectionByNameOrId("walkaround_worker_tasks"));
   task.set("project", project.id);
   task.set("dealer", project.getString("dealer"));
@@ -1387,6 +1515,7 @@ function publishProject(c, helpers) {
       error: "YouTube is not connected for this dealership",
       code: "YOUTUBE_NOT_CONNECTED",
     });
+  project.set("youtube_identity", channelIdentity(connection));
   if (visibility === "public") {
     project.set("availability_attested_at", now());
     project.set("availability_attested_by", authorized.context.person.id);
@@ -1802,8 +1931,8 @@ function internalAuth(c, rawBody) {
     nonce = "",
     idempotency = "";
   try {
-    token = ($os.getenv("WALKAROUND_WORKER_TOKEN") || "").toString();
-    secret = ($os.getenv("WALKAROUND_WORKER_SIGNING_SECRET") || "").toString();
+    token = (runtimeValue("WALKAROUND_WORKER_TOKEN") || "").toString();
+    secret = (runtimeValue("WALKAROUND_WORKER_SIGNING_SECRET") || "").toString();
     authorization = (c.request().header.get("Authorization") || "").toString();
     timestamp = (c.request().header.get("X-Walkaround-Timestamp") || "").toString();
     signature = (c.request().header.get("X-Walkaround-Signature") || "")
@@ -1924,6 +2053,7 @@ function internalProject(c, rawBody, mutation) {
     c.json(404, { error: "Walkaround not found" });
     return null;
   }
+  if (!requireProjectConfiguration(c, project)) return null;
   return { auth: auth, project: project };
 }
 
@@ -2000,7 +2130,7 @@ function claimTask(c) {
   )
     return c.json(400, { error: "Invalid dispatcher lease request" });
   const signingSecret = (
-    $os.getenv("WALKAROUND_WORKER_SIGNING_SECRET") || ""
+    runtimeValue("WALKAROUND_WORKER_SIGNING_SECRET") || ""
   ).toString();
   const leaseToken = $security.hs256(
     taskAuth.idempotencyKey + "." + dispatcherId,
@@ -2025,13 +2155,40 @@ function claimTask(c) {
         "walkaround_worker_tasks",
         "(status = 'queued' || status = 'retrying' || (status = 'claimed' && lease_expires_at <= {:now})) && (next_attempt_at = '' || next_attempt_at <= {:now})",
         "+created",
-        1,
+        50,
         0,
         { now: nowValue },
       );
     } catch (_e) {}
-    if (!candidates.length) return;
-    claimed = candidates[0];
+    const snapshotConfig = infrastructureSnapshot();
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      let project = null;
+      try {
+        project = txDao.findRecordById(
+          "walkaround_projects",
+          candidate.getString("project"),
+        );
+      } catch (_e) {}
+      if (
+        !project ||
+        !taskConfigurationMatches(
+          candidate,
+          project,
+          snapshotConfig,
+          youtubeConnection(txDao, project.getString("dealer")),
+        )
+      ) {
+        candidate.set("status", "failed");
+        candidate.set("last_error_code", "WALKAROUND_CONFIG_CHANGED");
+        candidate.set("next_attempt_at", "");
+        txDao.saveRecord(candidate);
+        continue;
+      }
+      claimed = candidate;
+      break;
+    }
+    if (!claimed) return;
     claimed.set("status", "claimed");
     claimed.set("lease_owner", dispatcherId);
     claimed.set("claim_request_key", taskAuth.idempotencyKey);
@@ -2042,7 +2199,22 @@ function claimTask(c) {
     txDao.saveRecord(claimed);
   });
   if (!claimed) return c.json(200, { task: null });
+  const claimedProject = $app
+    .dao()
+    .findRecordById("walkaround_projects", claimed.getString("project"));
+  if (!requireProjectConfiguration(c, claimedProject)) return;
   const payload = safeJson(claimed.getString("payload"), {});
+  if (
+    payload.configIdentity !== claimedProject.getString("destination_identity") ||
+    Number(payload.configRevision || 0) !==
+      Number(claimedProject.get("config_revision") || 0) ||
+    (payload.youtubeIdentity &&
+      payload.youtubeIdentity !== claimedProject.getString("youtube_identity"))
+  )
+    return c.json(409, {
+      error: "Worker task target changed",
+      code: "WALKAROUND_CONFIG_CHANGED",
+    });
   const kind = claimed.getString("kind");
   const workflowNames = {
     produce: "vehicle_walkaround_producer",
@@ -2060,6 +2232,8 @@ function claimTask(c) {
         projectId: payload.projectId,
         workflowId: payload.workflowId,
         expectedRevision: Number(payload.expectedRevision || 0),
+        configRevision: Number(payload.configRevision || 0),
+        configIdentity: payload.configIdentity,
       },
       deletion: taskDeletionTarget($app.dao(), claimed),
       review: taskReviewContext($app.dao(), claimed),
@@ -2078,6 +2252,24 @@ function taskLeaseMutation(c, action) {
   try {
     task = $app.dao().findRecordById("walkaround_worker_tasks", c.pathParam("taskId"));
   } catch (_e) {}
+  if (task) {
+    const project = $app
+      .dao()
+      .findRecordById("walkaround_projects", task.getString("project"));
+    if (!requireProjectConfiguration(c, project)) return;
+    if (
+      !taskConfigurationMatches(
+        task,
+        project,
+        infrastructureSnapshot(),
+        youtubeConnection($app.dao(), project.getString("dealer")),
+      )
+    )
+      return c.json(409, {
+        error: "Worker task target changed",
+        code: "WALKAROUND_CONFIG_CHANGED",
+      });
+  }
   const requestedRunId = cleanString(
     (body && (body.temporalRunId || (body.result && body.result.temporalRunId))) || "",
     160,
@@ -2223,7 +2415,7 @@ function internalContext(c, lane) {
       : null;
   let bucket = "";
   try {
-    bucket = ($os.getenv("WALKAROUND_GCS_BUCKET") || "").toString().trim();
+    bucket = (runtimeValue("WALKAROUND_GCS_BUCKET") || "").toString().trim();
   } catch (_e) {}
   if (!/^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(bucket))
     return c.json(503, { error: "Private media storage is on configuration hold" });
@@ -2259,6 +2451,8 @@ function internalContext(c, lane) {
   const base = {
     projectId: project.id,
     revision: revision,
+    configRevision: Number(project.get("config_revision") || 0),
+    configIdentity: project.getString("destination_identity"),
     dealerId: project.getString("dealer"),
     ownerId: project.getString("owner_person"),
     mode: project.getString("audience_mode"),
@@ -2654,6 +2848,7 @@ function productionEvent(c) {
     asset.set("project", found.project.id);
     asset.set("dealer", found.project.getString("dealer"));
     asset.set("kind", kind);
+    asset.set("metadata_revision", expectedRevision);
     asset.set("state", "ready");
     asset.set("storage_key", storageKey);
     asset.set(
@@ -3318,7 +3513,143 @@ function cleanupAbandonedUploads() {
   return cleaned;
 }
 
+// Strong readiness proof is derived from durable output bindings, never from
+// a setup request's booleans. A private YouTube capability additionally requires
+// a fresh authoritative broker receipt; this function never changes visibility.
+function verifyCompletedProject(dealerId, projectId, expectedRevision) {
+  const dao = $app.dao();
+  dao.findRecordById("dealers", dealerId);
+  const project = dao.findRecordById("walkaround_projects", projectId);
+  if (project.getString("dealer") !== dealerId)
+    throw new Error("WALKAROUND_DEALER_CONFLICT");
+  const snapshotConfig = infrastructureSnapshot();
+  const connection = youtubeConnection(dao, dealerId);
+  if (
+    !snapshotConfig ||
+    Number(snapshotConfig.revision) !== Number(expectedRevision) ||
+    !projectConfigurationMatches(project, snapshotConfig, connection)
+  )
+    throw new Error("WALKAROUND_CONFIG_CHANGED");
+  const revision = Number(project.get("metadata_revision") || 0);
+  const sha = project.getString("master_sha256");
+  const assets = dao.findRecordsByFilter(
+    "walkaround_assets",
+    "project = {:project} && state = 'ready'",
+    "+created",
+    100,
+    0,
+    { project: projectId },
+  );
+  const requiredKinds = [
+    "transcript",
+    "edit_plan",
+    "master",
+    "teaser",
+    "captions",
+    "thumbnail",
+  ];
+  const completeAssets = requiredKinds.every((kind) =>
+    assets.some(
+      (asset) =>
+        asset.getString("kind") === kind &&
+        asset.getString("dealer") === dealerId &&
+        asset.getString("project") === projectId &&
+        Number(asset.get("metadata_revision") || 0) === revision &&
+        /^[a-f0-9]{64}$/.test(asset.getString("sha256")) &&
+        Number(asset.get("size_bytes") || 0) > 0 &&
+        asset
+          .getString("storage_key")
+          .indexOf("walkarounds/" + dealerId + "/" + projectId + "/") === 0 &&
+        (kind !== "master" || asset.getString("sha256") === sha),
+    ),
+  );
+  const ready =
+    project.getString("production_state") === "review_ready" &&
+    revision > 0 &&
+    /^[a-f0-9]{64}$/.test(sha) &&
+    completeAssets &&
+    bool(project, "qc_passed") &&
+    Number(project.get("metadata_validated_revision") || 0) === revision &&
+    !!normalizeMetadata(safeJson(project.getString("metadata_json"), null)) &&
+    validRelease(dao, project);
+  const proof = {
+    ready: ready,
+    source: "walkaround_project",
+    proofId: project.id,
+    dealerId: dealerId,
+    configRevision: snapshotConfig.revision,
+    configIdentity: snapshotConfig.identity,
+    metadataRevision: revision,
+    capabilities: ready ? ["processing"] : [],
+    youtubeReady: false,
+  };
+  if (!ready || !connection || !project.getString("youtube_identity")) return proof;
+  let publication = null;
+  try {
+    publication = dao.findFirstRecordByFilter(
+      "walkaround_publications",
+      "project = {:project}",
+      { project: projectId },
+    );
+  } catch (_e) {
+    return proof;
+  }
+  const videoId = publication.getString("video_id");
+  if (
+    !/^[A-Za-z0-9_-]{6,128}$/.test(videoId) ||
+    publication.getString("dealer") !== dealerId ||
+    publication.getString("channel_id") !== connection.getString("channel_id") ||
+    publication.getString("master_sha256") !== sha ||
+    Number(publication.get("metadata_revision") || 0) !== revision ||
+    publication.getString("actual_visibility") !== "private" ||
+    project.getString("approved_master_sha256") !== sha ||
+    Number(project.get("approved_metadata_revision") || 0) !== revision
+  )
+    return proof;
+  const config = youtubeBrokerConfig();
+  if (!config) return proof;
+  let receipt = null;
+  try {
+    receipt = brokerRequest(
+      config,
+      "/v1/youtube/videos/status",
+      {
+        projectId: projectId,
+        videoId: videoId,
+        channelId: connection.getString("channel_id"),
+        credentialReference: connection.getString("credential_reference"),
+      },
+      "youtube-proof:" +
+        projectId +
+        ":" +
+        videoId +
+        ":" +
+        Math.floor(Date.now() / 10000),
+    );
+  } catch (_e) {
+    return proof;
+  }
+  // Do not infer private playback from a worker event or a browser assertion.
+  proof.youtubeReady =
+    !!receipt &&
+    receipt.privacyStatus === "private" &&
+    receipt.playbackVerified === true &&
+    receipt.processingStatus === "succeeded" &&
+    receipt.uploadStatus === "processed" &&
+    projectConfigurationMatches(
+      project,
+      infrastructureSnapshot(),
+      youtubeConnection(dao, dealerId),
+    );
+  if (proof.youtubeReady) proof.capabilities.push("youtube");
+  return proof;
+}
+
 module.exports = {
+  projectConfigurationMatches,
+  taskConfigurationMatches,
+  verifyCompletedProject,
+  featureEnabled,
   MAX_CLIPS,
   MAX_TOTAL_BYTES,
   MAX_TOTAL_DURATION_MS,

@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, Images, LoaderCircle, Rotate3D, Upload } from "lucide-react";
+import {
+  ChevronRight,
+  Images,
+  LoaderCircle,
+  Rotate3D,
+  Upload,
+  Video,
+} from "lucide-react";
 import type { BrandCategoryId, GeneratedPost, ImageSelection } from "../types";
 import { useAppStore } from "../stores/appStore";
 import { homeTilesForDealer, type HomeTile } from "../services/storeDefaults";
@@ -19,6 +26,8 @@ export interface HomeProps {
   ) => void;
   onShowHistory: () => void;
   onOpenSpin?: () => void;
+  walkaroundEnabled?: boolean;
+  onOpenWalkaround?: () => void;
   onOpenPost: (post: GeneratedPost) => void;
 }
 
@@ -27,6 +36,8 @@ export const Home: React.FC<HomeProps> = ({
   onShowHistory,
   onOpenPost,
   onOpenSpin,
+  walkaroundEnabled = false,
+  onOpenWalkaround,
 }) => {
   const dealer = useAppStore((state) => state.currentDealer);
   const person = useAppStore((state) => state.currentPerson);
@@ -171,6 +182,19 @@ export const Home: React.FC<HomeProps> = ({
             onClick={onOpenSpin}
           >
             360° vehicle studio
+          </Button>
+        )}
+        {walkaroundEnabled && onOpenWalkaround && (
+          <Button
+            variant="secondary"
+            size="md"
+            fullWidth
+            className="mt-2 min-h-[52px] justify-start gap-3 border-brand-ink bg-panel-raised px-4 text-base text-ink [&>span:nth-child(2)]:flex-1 [&>span:nth-child(2)]:text-left"
+            leftIcon={<Video />}
+            rightIcon={<ChevronRight />}
+            onClick={onOpenWalkaround}
+          >
+            Walkaround video studio
           </Button>
         )}
 

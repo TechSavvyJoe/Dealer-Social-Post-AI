@@ -75,6 +75,10 @@ jobs:
         run: node scripts/launch-capacity-canary.mjs
         env:
           POCKETBASE_TEST_BINARY: /tmp/launch-pocketbase/pocketbase
+      - name: Exercise guided connection encryption and transport
+        run: node scripts/guided-connections-canary.mjs
+        env:
+          POCKETBASE_TEST_BINARY: /tmp/launch-pocketbase/pocketbase
       - name: Exercise low storage and recoverable post saves
         run: node scripts/media-storage-canary.mjs
         env:

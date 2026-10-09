@@ -375,6 +375,18 @@ const checkRows: Array<{
   },
 ];
 
+// An optional provider switched off by choice is not a runtime fault.
+const neutralCheck = (
+  key: keyof HealthPayload["checks"],
+  checks: HealthPayload["checks"],
+) =>
+  key === "anthropic_key_set" || key === "claude_fallback_enabled"
+    ? !checks.claude_fallback_enabled
+    : key === "openai_key_set" || key === "openai_fallback_enabled"
+      ? !checks.openai_fallback_enabled
+      : key === "legacy_client_compatibility_enabled" &&
+        !checks.legacy_client_compatibility_enabled;
+
 /**
  * Super-admin system health surface. Pings /api/app/health and renders a
  * one-line status strip: healthy systems stay out of the way, failing checks
@@ -464,7 +476,11 @@ export const SystemHealthPanel: React.FC = () => {
     (r) => r.critical && data && data.checks[r.key] === false,
   );
   const advisories = checkRows.filter(
-    (r) => !r.critical && data && data.checks[r.key] === false,
+    (r) =>
+      !r.critical &&
+      data &&
+      data.checks[r.key] === false &&
+      !neutralCheck(r.key, data.checks),
   );
 
   const storageAdvisory = Boolean(
@@ -591,6 +607,7 @@ export const SystemHealthPanel: React.FC = () => {
           <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
             {checkRows.map((row) => {
               const ok = data ? (data.checks[row.key] ?? null) : null;
+              const neutral = data ? neutralCheck(row.key, data.checks) : false;
               return (
                 <div
                   key={row.key}
@@ -603,7 +620,7 @@ export const SystemHealthPanel: React.FC = () => {
                       aria-hidden="true"
                     />
                   )}
-                  {ok === false && (
+                  {ok === false && !neutral && (
                     <XCircle
                       className={cn(
                         "h-3.5 w-3.5 shrink-0",
@@ -611,6 +628,14 @@ export const SystemHealthPanel: React.FC = () => {
                       )}
                       aria-hidden="true"
                     />
+                  )}
+                  {neutral && (
+                    <span
+                      className="h-3.5 w-3.5 shrink-0 text-content-tertiary"
+                      aria-hidden="true"
+                    >
+                      —
+                    </span>
                   )}
                   {ok === null && (
                     <Loader2
@@ -620,6 +645,7 @@ export const SystemHealthPanel: React.FC = () => {
                   )}
                   <span className="truncate text-sm text-content-secondary">
                     {row.label}
+                    {neutral ? " · Off" : ""}
                   </span>
                   <span className="sr-only">
                     {ok === true ? "passing" : ok === false ? "failing" : "checking"}

@@ -177,6 +177,7 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
           TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
+          CONNECTIONS_ENCRYPTION_KEY: ${{ secrets.CONNECTIONS_ENCRYPTION_KEY }}
         run: |
           set -o pipefail
           case "$TURNSTILE_SITE_KEY" in
@@ -246,6 +247,12 @@ jobs:
             echo "Production release blocked: a newer main commit exists." >&2
             exit 1
           fi
+
+      - name: Stage central connection encryption without a separate deployment
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CONNECTIONS_ENCRYPTION_KEY: ${{ secrets.CONNECTIONS_ENCRYPTION_KEY }}
+        run: node scripts/stage-connections-key.mjs
 
       - name: Require server-only runtime credentials
         env:

@@ -10,12 +10,16 @@ const Harness = ({
   managementDirty,
   onManagement,
   onDraft,
+  walkaroundDirty,
+  onWalkaround,
 }: {
   onBlocked?: () => void;
   onBusy?: (message: string) => void;
   managementDirty?: boolean;
   onManagement?: (target: AppStep) => void;
   onDraft?: (target: AppStep) => void;
+  walkaroundDirty?: boolean;
+  onWalkaround?: (target: AppStep) => void;
 }) => {
   useUrlStepSync({
     onBlockedResultBack: onBlocked,
@@ -23,6 +27,8 @@ const Harness = ({
     managementDirty,
     onBlockedManagementBack: onManagement,
     onBlockedDraftBack: onDraft,
+    walkaroundDirty,
+    onBlockedWalkaroundBack: onWalkaround,
   });
   return null;
 };
@@ -66,6 +72,24 @@ describe("streamlined URL navigation", () => {
     expect(window.location.hash).toBe("#/home");
     act(() => useAppStore.getState().setStep(AppStep.WORK));
     expect(window.location.hash).toBe("#/work");
+  });
+  it("maps the Walkaround Studio to its direct route", () => {
+    render(<Harness />);
+    act(() => useAppStore.getState().setStep(AppStep.WALKAROUND));
+    expect(window.location.hash).toBe("#/walkaround-studio");
+    act(() => popTo("#/home"));
+    expect(useAppStore.getState().step).toBe(AppStep.HOME);
+    act(() => popTo("#/walkaround-studio"));
+    expect(useAppStore.getState().step).toBe(AppStep.WALKAROUND);
+  });
+  it("preserves unsaved Walkaround work on browser Back", () => {
+    const onWalkaround = vi.fn();
+    useAppStore.setState({ step: AppStep.WALKAROUND });
+    render(<Harness walkaroundDirty onWalkaround={onWalkaround} />);
+    act(() => popTo("#/home"));
+    expect(useAppStore.getState().step).toBe(AppStep.WALKAROUND);
+    expect(window.location.hash).toBe("#/walkaround-studio");
+    expect(onWalkaround).toHaveBeenCalledWith(AppStep.HOME);
   });
   it("refuses an unprepared Details page and unauthorized admin routes", () => {
     render(<Harness />);

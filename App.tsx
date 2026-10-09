@@ -152,7 +152,7 @@ const cancelSavedMessage = (
 };
 
 /** Which question the leave dialog is asking. */
-type LeaveKind = "post" | "settings" | "draft" | "spin";
+type LeaveKind = "post" | "settings" | "draft" | "spin" | "walkaround";
 
 const AppContent: React.FC = () => {
   const app = useAppController();
@@ -170,6 +170,7 @@ const AppContent: React.FC = () => {
   const [workReturnStep, setWorkReturnStep] = useState<AppStep | null>(null);
   const [managementDirty, setManagementDirty] = useState(false);
   const [spinDirty, setSpinDirty] = useState(false);
+  const [walkaroundDirty, setWalkaroundDirty] = useState(false);
   const toast = useToast();
   const mainRef = useRef<HTMLElement>(null);
 
@@ -252,6 +253,10 @@ const AppContent: React.FC = () => {
       confirmLeave("spin", action);
       return;
     }
+    if (step === AppStep.WALKAROUND && walkaroundDirty) {
+      confirmLeave("walkaround", action);
+      return;
+    }
     action();
   };
   /** A return step is only usable while the state it renders still exists. */
@@ -332,6 +337,9 @@ const AppContent: React.FC = () => {
   useUrlStepSync({
     managementDirty,
     spinDirty,
+    walkaroundDirty,
+    onBlockedWalkaroundBack: (target) =>
+      confirmLeave("walkaround", () => app.setStep(target)),
     onBlockedSpinBack: (target) => confirmLeave("spin", () => app.setStep(target)),
     onBlockedManagementBack: (target) => {
       confirmLeave("settings", () => app.setStep(target));
@@ -355,9 +363,13 @@ const AppContent: React.FC = () => {
         return;
       }
       if (
-        [AppStep.DETAILS, AppStep.POST, AppStep.WORK, AppStep.VEHICLE_SPIN].includes(
-          step,
-        )
+        [
+          AppStep.DETAILS,
+          AppStep.POST,
+          AppStep.WORK,
+          AppStep.VEHICLE_SPIN,
+          AppStep.WALKAROUND,
+        ].includes(step)
       )
         goBack();
     },
@@ -394,7 +406,9 @@ const AppContent: React.FC = () => {
           ? "My work"
           : step === AppStep.VEHICLE_SPIN
             ? "Vehicle studio"
-            : undefined;
+            : step === AppStep.WALKAROUND
+              ? "Walkaround video"
+              : undefined;
   if (isRestoringSession)
     return (
       <main
@@ -421,7 +435,8 @@ const AppContent: React.FC = () => {
             step === AppStep.DETAILS ||
             step === AppStep.POST ||
             step === AppStep.WORK ||
-            step === AppStep.VEHICLE_SPIN
+            step === AppStep.VEHICLE_SPIN ||
+            step === AppStep.WALKAROUND
               ? goBack
               : undefined
           }
@@ -462,7 +477,9 @@ const AppContent: React.FC = () => {
           onBackFromWork={goBack}
           onManagementDirtyChange={setManagementDirty}
           onSpinDirtyChange={setSpinDirty}
+          onWalkaroundDirtyChange={setWalkaroundDirty}
           onOpenSpin={() => requestLeave(() => app.setStep(AppStep.VEHICLE_SPIN))}
+          onOpenWalkaround={() => requestLeave(() => app.setStep(AppStep.WALKAROUND))}
           onRemix={() => requestLeave(app.startRemix)}
           onRetrySaveGeneratedPost={app.retrySaveGeneratedPost}
           savingGeneratedPost={app.savingGeneratedPost}
@@ -513,24 +530,28 @@ const AppContent: React.FC = () => {
         title={
           leaveKind === "spin"
             ? "Leave this vehicle spin?"
-            : leaveKind === "settings"
-              ? "Leave unsaved store settings?"
-              : leaveKind === "draft"
-                ? "Discard the post in progress?"
-                : "Leave this post?"
+            : leaveKind === "walkaround"
+              ? "Leave this walkaround?"
+              : leaveKind === "settings"
+                ? "Leave unsaved store settings?"
+                : leaveKind === "draft"
+                  ? "Discard the post in progress?"
+                  : "Leave this post?"
         }
         description={
           leaveKind === "spin"
             ? "Unsaved frames and processing will be discarded. Saved spins stay in your vehicle studio."
-            : leaveKind === "settings"
-              ? "Save your dealership settings before leaving, or discard these changes."
-              : leaveKind === "draft"
-                ? pendingRelease
-                  ? "Your photo, details and the customer's signature will be cleared."
-                  : "Your photo and details will be cleared."
-                : postWorkAtRisk
-                  ? "Changes are still saving or work is in progress."
-                  : "This post has not been saved yet."
+            : leaveKind === "walkaround"
+              ? "Unuploaded clips and unsaved walkaround text will be cleared. Saved project work stays with the dealership."
+              : leaveKind === "settings"
+                ? "Save your dealership settings before leaving, or discard these changes."
+                : leaveKind === "draft"
+                  ? pendingRelease
+                    ? "Your photo, details and the customer's signature will be cleared."
+                    : "Your photo and details will be cleared."
+                  : postWorkAtRisk
+                    ? "Changes are still saving or work is in progress."
+                    : "This post has not been saved yet."
         }
         size="sm"
         footer={
