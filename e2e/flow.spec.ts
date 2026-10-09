@@ -22,6 +22,10 @@ async function expectNoSeriousAxeViolations(page: import("@playwright/test").Pag
       id: violation.id,
       impact: violation.impact,
       targets: violation.nodes.map((node) => node.target.join(" ")).slice(0, 5),
+      details: violation.nodes.slice(0, 5).map((node) => ({
+        target: node.target,
+        summary: node.failureSummary,
+      })),
     }));
   expect(violations).toEqual([]);
 }
