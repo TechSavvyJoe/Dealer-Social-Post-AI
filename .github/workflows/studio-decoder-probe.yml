@@ -11,6 +11,17 @@ on:
       - "e2e/streamlined-flow.spec.ts"
       - ".github/workflows/studio-decoder-probe.yml"
   workflow_dispatch:
+    inputs:
+      probe:
+        description: Diagnostic to run
+        type: choice
+        options: [decoder, recovery]
+        default: decoder
+      project:
+        description: Viewport for the recovery probe
+        type: choice
+        options: [webkit-phone-fold-280, webkit-phone-320, webkit-phone-390]
+        default: webkit-phone-fold-280
 
 permissions:
   contents: read
@@ -19,7 +30,7 @@ jobs:
   webkit-decoder-probe:
     name: WebKit decoder probe
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.probe == 'recovery' && 12 || 15 }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -29,6 +40,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npx playwright install --with-deps webkit
       - name: Repeat the 6 fps and installed-phone preview fixtures on WebKit
+        if: github.event_name != 'workflow_dispatch' || inputs.probe != 'recovery'
         run: >-
           npx playwright test e2e/vehicle-spin-refinement.spec.ts e2e/streamlined-flow.spec.ts
           --grep "6fps vehicle import builds all 48 quantized samples with decoded pixels|installed iPhone fills its canvas with a stale viewport and reachable image/video actions"
@@ -37,6 +49,20 @@ jobs:
           --trace=retain-on-failure --reporter=line
         env:
           CI: true
+      - name: Probe the complete recovery viewport on WebKit
+        if: github.event_name == 'workflow_dispatch' && inputs.probe == 'recovery'
+        run: |
+          case "$PROBE_PROJECT" in
+            webkit-phone-fold-280|webkit-phone-320|webkit-phone-390) ;;
+            *) echo "Unsupported recovery viewport"; exit 1 ;;
+          esac
+          npx playwright test --project="$PROBE_PROJECT" \
+            --grep-invert 'vehicle background controls preserve originals' \
+            --workers=1
+        env:
+          CI: true
+          DEBUG: pw:test
+          PROBE_PROJECT: ${{ inputs.project }}
       - name: Retain decoder diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

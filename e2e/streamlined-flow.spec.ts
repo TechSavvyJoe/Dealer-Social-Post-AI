@@ -906,13 +906,21 @@ for (const committed of [false, true]) {
       timeout: 30_000,
     });
     await expect(page.getByText("Your post is ready, but not saved")).toBeVisible();
-    const previewBytes = () =>
+    // Compare the entire payload without sending hundreds of thousands of
+    // numbers through the test protocol or constructing a huge failure diff.
+    const previewFingerprint = () =>
       page.getByRole("img", { name: "Post image" }).evaluate(async (element) => {
         const source = (element as HTMLImageElement).src;
         const bytes = await (await fetch(source)).arrayBuffer();
-        return Array.from(new Uint8Array(bytes));
+        const digest = await crypto.subtle.digest("SHA-256", bytes);
+        return {
+          length: bytes.byteLength,
+          sha256: Array.from(new Uint8Array(digest), (byte) =>
+            byte.toString(16).padStart(2, "0"),
+          ).join(""),
+        };
       });
-    const image = await previewBytes();
+    const image = await previewFingerprint();
     expect(image.length).toBeGreaterThan(0);
     const providerCalls = state.calls.filter((call) =>
       call.includes(" /api/proxy/"),
@@ -935,7 +943,7 @@ for (const committed of [false, true]) {
       exact: true,
     });
     await expect(shareButton).toBeEnabled({ timeout: 15_000 });
-    expect(await previewBytes()).toEqual(image);
+    expect(await previewFingerprint()).toEqual(image);
     expect(state.calls.filter((call) => call.includes(" /api/proxy/"))).toHaveLength(
       providerCalls,
     );
