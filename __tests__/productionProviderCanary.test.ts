@@ -7,6 +7,7 @@ import {
   AuthenticatedClient,
   canonicalOrigin,
   finalInlineImage,
+  inlineVideoBytes,
   probeImageEvidence,
   probeVideoEvidence,
   validateVideoProbeMetadata,
@@ -265,6 +266,38 @@ describe("production provider canary", () => {
         expected,
       ),
     ).toThrow(/exact playable MP4 delivery contract/);
+  });
+
+  it("accepts the projected inline Omni MP4 response and rejects malformed media", () => {
+    const mp4 = Buffer.alloc(4096);
+    mp4.write("ftyp", 4, "ascii");
+    const encodedVideo = mp4.toString("base64");
+    const completed = {
+      generateVideoResponse: {
+        generatedSamples: [{ video: { encodedVideo, encoding: "video/mp4" } }],
+      },
+    };
+
+    expect(inlineVideoBytes(completed)).toEqual({
+      bytes: mp4,
+      mimeType: "video/mp4",
+    });
+    expect(() =>
+      inlineVideoBytes({
+        generateVideoResponse: {
+          generatedSamples: [
+            { video: { encodedVideo: "not-base64", encoding: "video/mp4" } },
+          ],
+        },
+      }),
+    ).toThrow(/valid inline MP4 media/);
+    expect(() =>
+      inlineVideoBytes({
+        generateVideoResponse: {
+          generatedSamples: [{ video: { encodedVideo, encoding: "video/webm" } }],
+        },
+      }),
+    ).toThrow(/valid inline MP4 media/);
   });
 
   it("records real image pixels and rejects the wrong provider aspect ratio", () => {

@@ -35,6 +35,7 @@ const DEFAULT_EVIDENCE_PATH = resolve(
 );
 const CONFIRMATION = "caption-image-video-synthetic-only";
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+const OMNI_VIDEO_MODEL = "gemini-omni-1.1-flash";
 const PRODUCTION_FLY_ORIGIN = "https://dealer-social-post-ai-production.fly.dev";
 const EXACT_STANDARD_IMAGE = Object.freeze({
   model: "gemini-3-pro-image",
@@ -317,6 +318,40 @@ function providerVideoUri(value, depth = 0) {
   return "";
 }
 
+export function inlineVideoBytes(completed) {
+  const response = completed?.generateVideoResponse;
+  if (response === undefined) return null;
+  const video = response?.generatedSamples?.[0]?.video;
+  const encoded = video?.encodedVideo;
+  const mimeType = video?.encoding;
+  if (
+    typeof encoded !== "string" ||
+    !encoded ||
+    encoded.length > Math.ceil(MAX_VIDEO_BYTES / 3) * 4 ||
+    encoded.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded) ||
+    typeof mimeType !== "string" ||
+    mimeType.trim().toLowerCase() !== "video/mp4"
+  ) {
+    throw new CanaryError(
+      "VIDEO_OUTPUT_INVALID",
+      "Completed Omni operation did not include valid inline MP4 media.",
+    );
+  }
+  const bytes = Buffer.from(encoded, "base64");
+  if (
+    bytes.length < 4096 ||
+    bytes.length > MAX_VIDEO_BYTES ||
+    bytes.toString("base64") !== encoded
+  ) {
+    throw new CanaryError(
+      "VIDEO_OUTPUT_INVALID",
+      "Completed Omni operation did not include valid inline MP4 media.",
+    );
+  }
+  return { bytes, mimeType: "video/mp4" };
+}
+
 function operationPollPath(name) {
   let clean = (name || "").trim().replace(/^\/+/, "");
   clean = clean.replace(/^v1beta\//i, "");
@@ -328,7 +363,7 @@ function operationPollPath(name) {
   }
   throw new CanaryError(
     "VIDEO_OPERATION_INVALID",
-    "Veo returned an invalid operation identifier.",
+    "Video provider returned an invalid operation identifier.",
   );
 }
 
@@ -387,6 +422,16 @@ async function contractCheck() {
         `Canonical model policy is missing ${task}.`,
       );
     }
+  }
+  if (
+    [policy.tasks.video_standard, policy.tasks.video_quality].some(
+      (task) => task.models.length !== 1 || task.models[0] !== OMNI_VIDEO_MODEL,
+    )
+  ) {
+    throw new CanaryError(
+      "POLICY_INVALID",
+      "Both video tiers must use the single canonical Gemini Omni model without a duplicate fallback.",
+    );
   }
   if (policy.tasks.caption.maxOutputTokens !== 2048) {
     throw new CanaryError(
@@ -908,7 +953,7 @@ async function runVideo(client, policy, imageBase64, taskName, expected) {
       if (operation.error) {
         throw new CanaryError(
           "VIDEO_PROVIDER_FAILED",
-          "Veo reported a terminal generation failure.",
+          "Video provider reported a terminal generation failure.",
         );
       }
       completed = operation.response;
@@ -919,30 +964,39 @@ async function runVideo(client, policy, imageBase64, taskName, expected) {
   if (!completed) {
     throw new CanaryError(
       "VIDEO_TIMEOUT",
-      "Veo did not complete before the release-canary deadline.",
+      "Video generation did not complete before the release-canary deadline.",
     );
   }
-  const uri = providerVideoUri(completed);
-  if (!uri) {
-    throw new CanaryError(
-      "VIDEO_OUTPUT_INVALID",
-      "Completed Veo operation did not include an authorized media reference.",
+  const inline = inlineVideoBytes(completed);
+  let media;
+  if (inline) {
+    media = new Response(inline.bytes, {
+      status: 200,
+      headers: { "content-type": inline.mimeType },
+    });
+  } else {
+    const uri = providerVideoUri(completed);
+    if (!uri) {
+      throw new CanaryError(
+        "VIDEO_OUTPUT_INVALID",
+        "Completed video operation did not include an authorized media reference.",
+      );
+    }
+    const providerUrl = new URL(uri);
+    const mediaPath = providerUrl.pathname.endsWith(":download")
+      ? providerUrl.pathname
+      : `${providerUrl.pathname}:download`;
+    media = await client.request(
+      // Never relay provider-returned query material. The same-origin proxy owns
+      // authentication and requires only the allowlisted path plus alt=media.
+      `/api/proxy${mediaPath}?alt=media`,
+      {
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(310_000),
+      },
     );
   }
-  const providerUrl = new URL(uri);
-  const mediaPath = providerUrl.pathname.endsWith(":download")
-    ? providerUrl.pathname
-    : `${providerUrl.pathname}:download`;
-  const media = await client.request(
-    // Never relay provider-returned query material. The same-origin proxy owns
-    // authentication and requires only the allowlisted path plus alt=media.
-    `/api/proxy${mediaPath}?alt=media`,
-    {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(310_000),
-    },
-  );
   const mediaEvidence = await readVideoEvidence(media, expected);
   return {
     model,

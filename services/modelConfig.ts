@@ -163,10 +163,8 @@ export interface TaskConfig {
  * Canonical model identifiers. Keep this list in sync with what Google has
  * actually released — picking nonexistent ids breaks generation silently.
  *
- * Current as of 2026-07-23. Update only after checking Google's live model
- * catalog and deprecation notices. Stable ids are preferred where Google
- * offers them; Veo remains on the Gemini API's documented preview ids because
- * its stable `-001` ids are Vertex-only.
+ * Video transport verified on 2026-10-10 against the stable Omni API. The
+ * backend preserves the installed-client contract while owning provider I/O.
  */
 export const MODELS = {
   // ---- Text + multimodal reasoning ----
@@ -184,16 +182,11 @@ export const MODELS = {
     fallback: MODEL_POLICY.models.imageFallback,
     emergency: MODEL_POLICY.models.imageLite,
   },
-  // ---- Video (Veo through the Gemini API) ----
-  // The Gemini API and Vertex expose different IDs. This app calls
-  // generativelanguage.googleapis.com, whose current Veo 3.1 IDs retain the
-  // `-preview` suffix. The GA `-001` IDs belong to Vertex / Gemini Enterprise
-  // Agent Platform and return 404 on this transport.
+  // ---- Video (Omni, translated by the server) ----
+  // Output resolution distinguishes the tiers; there is one model and no
+  // automatic second billable attempt on a duplicate fallback rung.
   video: {
-    // Prefer Fast on the sales floor — full quality Veo often takes several
-    // minutes; Fast is usually enough for IG/TikTok delivery clips.
     primary: MODEL_POLICY.models.videoStandard,
-    fallback: MODEL_POLICY.models.videoQuality,
     fast: MODEL_POLICY.models.videoStandard,
     quality: MODEL_POLICY.models.videoQuality,
   },

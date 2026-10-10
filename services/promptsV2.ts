@@ -1344,11 +1344,11 @@ Return the artwork only. Never draw an Instagram/TikTok/Facebook header, usernam
 };
 
 // ----------------------------------------------------------------------------
-// VIDEO — Veo image-to-video (photo-locked campaign motion)
+// VIDEO — Image-to-video (photo-locked campaign motion)
 // ----------------------------------------------------------------------------
 
 /**
- * Veo image-to-video works best when the prompt describes MOTION only.
+ * Image-to-video works best when the prompt describes MOTION only.
  * Describing a new scene, second car, morph, or "reveal of another vehicle"
  * causes the model to invent frames that leave the source photo.
  */
@@ -1408,16 +1408,9 @@ const videoMotionForStyle = (
 };
 
 /**
- * Veo `parameters.negativePrompt` — the request-level counterpart to the prose
- * `<hard_locks>` block below. Prose is advice the model may weigh against the
- * rest of the prompt; this is a constraint carried in the request itself, so the
- * identity locks that matter most to a dealership (no second car, no morphing,
- * no warped badges) stop depending on the model reading a paragraph.
- *
- * The soundtrack clause is the only deterministic silent path available on this
- * endpoint. `generateAudio` is a Vertex/GEAP-only parameter — both official
- * Google SDKs refuse to send it to generativelanguage.googleapis.com — so when
- * the salesperson picks "Silent" the request suppresses audio here instead.
+ * Exclusion guidance carried by the app's compatibility request. The server
+ * adds it to Omni's prompt; it is not a deterministic identity or mute control.
+ * Review generated faces, vehicle details, text and audio before sharing.
  */
 export const generateVideoNegativePrompt = (options: VideoRequestOptions): string => {
   const locks = [

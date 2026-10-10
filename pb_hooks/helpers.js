@@ -1812,6 +1812,18 @@ function proxyGenerationIdentity(path, requestInfo, policies, provider, modelOve
     if (!match) return null;
     model = match[1];
   }
+  // Starts addressed to legacy Veo aliases are executed by Omni. Audit the
+  // generating model, never the compatibility route label.
+  if (
+    normalizedPath.indexOf(":predictLongRunning") !== -1 &&
+    [
+      "veo-3.1-fast-generate-preview",
+      "veo-3.1-generate-preview",
+      "veo-3.1-lite-generate-preview",
+    ].indexOf(model) !== -1
+  ) {
+    model = policy.models.videoStandard;
+  }
   if (!/^[a-z0-9][a-z0-9._-]{0,119}$/i.test(model)) return null;
 
   let kind = "";
@@ -1850,6 +1862,18 @@ function proxyGenerationIdentity(path, requestInfo, policies, provider, modelOve
     }
   }
 
+  if (!taskName && kind === "video") {
+    const resolution =
+      requestInfo &&
+      requestInfo.data &&
+      requestInfo.data.parameters &&
+      requestInfo.data.parameters.resolution;
+    taskName =
+      /models\/veo-3\.1-generate-preview:/.test(normalizedPath) ||
+      resolution === "1080p"
+        ? "video_quality"
+        : "video_standard";
+  }
   if (!taskName) {
     const fallbacks =
       kind === "text"
@@ -4317,6 +4341,178 @@ function purgeExpiredSessionsAndOldEvents() {
   }
 }
 
+// Private Omni recovery queue. Independent of dealer relations and resource GC:
+// an orphaned provider interaction must still be cancelled/deleted after a
+// dealer is removed or an ownership claim fails. No prompts/media/keys stored.
+const OMNI_RECOVERY_TTL_MS = 24 * 60 * 60 * 1000;
+
+function omniKeyFingerprint(apiKey) {
+  if (typeof apiKey !== "string" || !apiKey)
+    throw new Error("Video recovery credential unavailable");
+  const fingerprint = $security.sha256(apiKey);
+  if (!/^[a-f0-9]{64}$/i.test(fingerprint))
+    throw new Error("Video recovery credential fingerprint invalid");
+  return fingerprint;
+}
+
+function saveOmniInteraction(operationName, providerId, apiKey) {
+  const adapter = require(__hooks + "/omniVideo.js");
+  if (
+    !adapter.isOmniOperationName(operationName) ||
+    adapter.providerInteractionId({ id: providerId }) !== providerId
+  ) {
+    throw new Error("Invalid video recovery identity");
+  }
+  const expires = providerResourceDate(new Date(Date.now() + OMNI_RECOVERY_TTL_MS));
+  const record = new Record($app.dao().findCollectionByNameOrId("omni_interactions"), {
+    operation_name: operationName,
+    provider_id: providerId,
+    key_fingerprint: omniKeyFingerprint(apiKey),
+    expires_at: expires,
+    cleanup_after: expires,
+    cleanup_attempts: 0,
+  });
+  $app.dao().saveRecord(record);
+  return record;
+}
+
+function findOmniInteraction(operationName) {
+  try {
+    const record = $app
+      .dao()
+      .findFirstRecordByFilter("omni_interactions", "operation_name = {:name}", {
+        name: operationName,
+      });
+    if (record.getString("expires_at") <= providerResourceDate(new Date())) return null;
+    return record;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function omniCleanupRequest(providerId, method, suffix, transport) {
+  const adapter = require(__hooks + "/omniVideo.js");
+  if (adapter.providerInteractionId({ id: providerId }) !== providerId)
+    throw new Error("Invalid video recovery identity");
+  const remainingSeconds = transport.deadlineMs
+    ? Math.floor((transport.deadlineMs - Date.now()) / 1000)
+    : 10;
+  if (remainingSeconds < 1) throw new Error("Video recovery time budget exhausted");
+  return $http.send({
+    url:
+      transport.baseUrl +
+      "v1beta/interactions/" +
+      encodeURIComponent(providerId) +
+      (suffix || ""),
+    method: method,
+    headers: { "x-goog-api-key": transport.apiKey },
+    timeout: Math.max(
+      1,
+      Math.min(10, Number(transport.timeoutSeconds) || 5, remainingSeconds),
+    ),
+  });
+}
+
+function cleanupOmniProviderInteraction(providerId, transport) {
+  // A different-project key can report404 for a retained old interaction.
+  // Only the creation key fingerprint makes404 proof of disappearance.
+  const sameKey = transport.keyFingerprint === omniKeyFingerprint(transport.apiKey);
+  // Retry only recovery reads, cancellation and deletion, never generation.
+  let response = omniCleanupRequest(providerId, "GET", "", transport);
+  if (response.statusCode === 404) return sameKey;
+  if (response.statusCode < 200 || response.statusCode >= 300) return false;
+  let state = response.json && response.json.status;
+  if (["queued", "in_progress"].indexOf(state) !== -1) {
+    response = omniCleanupRequest(providerId, "POST", "/cancel", transport);
+    if (response.statusCode === 404) return sameKey;
+    if (response.statusCode < 200 || response.statusCode >= 300) return false;
+    // Reconcile before delete: cancellation is asynchronous at the provider.
+    response = omniCleanupRequest(providerId, "GET", "", transport);
+    if (response.statusCode === 404) return sameKey;
+    if (response.statusCode < 200 || response.statusCode >= 300) return false;
+    state = response.json && response.json.status;
+  }
+  if (
+    [
+      "completed",
+      "failed",
+      "cancelled",
+      "canceled",
+      "incomplete",
+      "budget_exceeded",
+      "requires_action",
+    ].indexOf(state) === -1
+  )
+    return false;
+  response = omniCleanupRequest(providerId, "DELETE", "", transport);
+  return (
+    (response.statusCode === 404 && sameKey) ||
+    (response.statusCode >= 200 && response.statusCode < 300)
+  );
+}
+
+function pruneOmniInteractions(transport) {
+  const summary = { deleted: 0, retried: 0 };
+  const deadlineMs = Date.now() + 90 * 1000;
+  const boundedTransport = {
+    baseUrl: transport.baseUrl,
+    apiKey: transport.apiKey,
+    timeoutSeconds: 10,
+    deadlineMs: deadlineMs,
+  };
+  const now = providerResourceDate(new Date());
+  // Twenty rows, ten-second calls and a ninety-second total budget cap a
+  // run. Rows remain durable on failure; provider payloads are never logged.
+  const rows = $app
+    .dao()
+    .findRecordsByFilter(
+      "omni_interactions",
+      "cleanup_after <= {:now}",
+      "cleanup_after,id",
+      20,
+      0,
+      { now: now },
+    );
+  for (let i = 0; i < rows.length; i++) {
+    if (Date.now() >= deadlineMs) break;
+    const record = rows[i];
+    boundedTransport.keyFingerprint = record.getString("key_fingerprint");
+    try {
+      if (
+        cleanupOmniProviderInteraction(
+          record.getString("provider_id"),
+          boundedTransport,
+        )
+      ) {
+        $app.dao().deleteRecord(record);
+        summary.deleted += 1;
+        continue;
+      }
+    } catch (_e) {
+      /* preserve retry record */
+    }
+    record.set(
+      "cleanup_attempts",
+      Math.min(1000000, record.getInt("cleanup_attempts") + 1),
+    );
+    record.set(
+      "cleanup_after",
+      providerResourceDate(new Date(Date.now() + 15 * 60 * 1000)),
+    );
+    try {
+      $app.dao().saveRecord(record);
+    } catch (_e) {
+      /* still queued */
+    }
+    summary.retried += 1;
+  }
+  if (summary.retried > 0)
+    console.warn(
+      "[omni-cleanup] retried=" + summary.retried + " deleted=" + summary.deleted,
+    );
+  return summary;
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -4440,6 +4636,12 @@ module.exports = {
   parsePostPlatformCaptions,
   safeProviderTransportDiagnostic,
   providerResponseByteLength,
+  // Private provider recovery
+  omniKeyFingerprint,
+  saveOmniInteraction,
+  findOmniInteraction,
+  cleanupOmniProviderInteraction,
+  pruneOmniInteractions,
   // Provider resource ownership
   claimProviderResource,
   claimProviderResources,

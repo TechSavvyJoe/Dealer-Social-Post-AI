@@ -580,9 +580,9 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
     imageStudio: "gemini-3-pro-image",
     imageFallback: "gemini-3.1-flash-image",
     imageLite: "gemini-3.1-flash-lite-image",
-    videoStandard: "veo-3.1-fast-generate-preview",
-    videoQuality: "veo-3.1-generate-preview",
-    videoFallback: "veo-3.1-lite-generate-preview",
+    videoStandard: "gemini-omni-1.1-flash",
+    videoQuality: "gemini-omni-1.1-flash",
+    videoFallback: "gemini-omni-1.1-flash",
   },
   thinkingLevels: {
     "gemini-3.6-flash": ["minimal", "low", "medium", "high"],
@@ -655,26 +655,19 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
     video_standard: {
       kind: "video",
       tier: "standard",
-      models: ["veo-3.1-fast-generate-preview", "veo-3.1-lite-generate-preview"],
+      models: ["gemini-omni-1.1-flash"],
       resolution: "720p",
     },
     video_quality: {
       kind: "video",
       tier: "quality",
-      models: ["veo-3.1-generate-preview", "veo-3.1-lite-generate-preview"],
+      models: ["gemini-omni-1.1-flash"],
       resolution: "1080p",
     },
   },
-  // Veo runs against the Gemini Developer API (generativelanguage.googleapis.com
-  // predictLongRunning), not Vertex. `negativePrompt` is accepted there and maps
-  // to parameters.negativePrompt. `generateAudio` is deliberately absent: both
-  // official Google SDKs raise "generateAudio parameter is only supported in
-  // Gemini Enterprise Agent Platform mode, not in Gemini Developer API mode"
-  // (googleapis/python-genai _GenerateVideosConfig_to_mldev, googleapis/js-genai
-  // _models_converters), so sending it on this endpoint risks a 400 on every
-  // video. A silent clip is requested through negativePrompt instead.
+  // Legacy Veo-shaped bodies are translated server-side to Omni Interactions.
   veoParameterNote:
-    'Veo runs against the Gemini Developer API (generativelanguage.googleapis.com predictLongRunning), not Vertex. `negativePrompt` is accepted there and maps to parameters.negativePrompt. `generateAudio` is deliberately absent: both official Google SDKs raise "generateAudio parameter is only supported in Gemini Enterprise Agent Platform mode, not in Gemini Developer API mode" (googleapis/python-genai _GenerateVideosConfig_to_mldev, googleapis/js-genai _models_converters), so sending it on this endpoint risks a 400 on every video. A silent clip is requested through negativePrompt instead.',
+    "The browser retains its validated Veo-shaped compatibility contract. The server translates starts to gemini-omni-1.1-flash using background Interactions. negativePrompt becomes ordinary prompt guidance; personGeneration and generateAudio are not forwarded. Provider safety remains enabled. Audio preferences are requests, not a hard mute guarantee. Both resolutions use one stable model with no duplicate fallback. Legacy Veo IDs are server-only migration aliases.",
   allowedImageAspectRatios: ["1:1", "4:5", "9:16", "16:9", "4:3"],
   allowedResponseMimeTypes: ["application/json"],
   // Ids the browser may reference. The schema bodies live only in
@@ -981,7 +974,17 @@ const IMAGE_GENERATE_CONTENT_MODELS = uniqueModelsForTasks([
 const ALLOWED_GENERATE_CONTENT_MODELS = TEXT_GENERATE_CONTENT_MODELS.concat(
   IMAGE_GENERATE_CONTENT_MODELS,
 );
-const ALLOWED_VEO_MODELS = uniqueModelsForTasks(["video_standard", "video_quality"]);
+// Installed clients may still request these aliases. They are never outbound
+// generating models; main.pb.js translates every start into Omni Interactions.
+const LEGACY_VEO_MODEL_ALIASES = [
+  "veo-3.1-fast-generate-preview",
+  "veo-3.1-generate-preview",
+  "veo-3.1-lite-generate-preview",
+];
+const ALLOWED_VEO_MODELS = uniqueModelsForTasks([
+  "video_standard",
+  "video_quality",
+]).concat(LEGACY_VEO_MODEL_ALIASES);
 
 /**
  * The client-side router is a preference, not an authorization boundary.
@@ -1608,7 +1611,7 @@ function buildGenerateContentRequest(model, input, requestedTaskName) {
   };
 }
 
-function buildVeoRequest(model, input) {
+function buildVeoRequest(model, input, requestedTaskName) {
   const fields = GEMINI_REQUEST_FIELDS.veo;
   if (
     !hasOnlyKeys(input, fields.topLevel, fields.topLevel) ||
@@ -1666,21 +1669,31 @@ function buildVeoRequest(model, input) {
     parameters.personGeneration !== "allow_adult" ||
     [4, 6, 8].indexOf(parameters.durationSeconds) === -1 ||
     ["720p", "1080p"].indexOf(parameters.resolution) === -1 ||
-    (model === GEMINI_MODEL_POLICY_SNAPSHOT.models.videoStandard &&
-      parameters.resolution !==
-        GEMINI_MODEL_POLICY_SNAPSHOT.tasks.video_standard.resolution) ||
-    (model === GEMINI_MODEL_POLICY_SNAPSHOT.models.videoQuality &&
-      parameters.resolution !==
-        GEMINI_MODEL_POLICY_SNAPSHOT.tasks.video_quality.resolution) ||
     (parameters.resolution === "1080p" && parameters.durationSeconds !== 8)
   ) {
     return null;
   }
 
+  // Standard and quality share Omni, so validate by task rather than testing
+  // the same model twice against incompatible resolutions. Headerless legacy
+  // clients retain their historical alias resolution constraints.
+  let videoTask = requestedTaskName || "";
+  if (videoTask && videoTask !== "video_standard" && videoTask !== "video_quality")
+    return null;
+  if (!videoTask && model === "veo-3.1-fast-generate-preview")
+    videoTask = "video_standard";
+  if (!videoTask && model === "veo-3.1-generate-preview") videoTask = "video_quality";
+  if (
+    videoTask &&
+    parameters.resolution !== GEMINI_MODEL_POLICY_SNAPSHOT.tasks[videoTask].resolution
+  )
+    return null;
+
   // Optional, and bounded separately from the prompt. `negativePrompt` is the
   // one Veo knob this proxy admits beyond the fixed four: it turns the prompt's
-  // prose locks ("no second car, no morphing, no warped badges") and a silent
-  // soundtrack choice into real request constraints. A present-but-malformed
+  // prose locks ("no second car, no morphing, no warped badges") and soundtrack
+  // preferences into prompt instructions. Omni does not enforce these as
+  // deterministic generation parameters. A present-but-malformed
   // value is a rejection, never a silently dropped field.
   const sanitizedParameters = {
     aspectRatio: parameters.aspectRatio,
@@ -1724,7 +1737,7 @@ function buildGeminiProxyRequest(path, input, requestedTaskName) {
     /^v1beta\/models\/([a-z0-9._-]+):predictLongRunning$/i,
   );
   if (veoMatch && ALLOWED_VEO_MODELS.indexOf(veoMatch[1]) !== -1) {
-    return buildVeoRequest(veoMatch[1], input);
+    return buildVeoRequest(veoMatch[1], input, requestedTaskName);
   }
 
   return null;

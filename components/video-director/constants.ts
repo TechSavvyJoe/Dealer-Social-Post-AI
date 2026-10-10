@@ -45,8 +45,8 @@ export const soundtracks: Array<{
   },
   {
     value: "none",
-    label: "Silent",
-    description: "No music — score later in your editor if needed.",
+    label: "No music",
+    description: "Request no soundtrack. Preview audio before sharing.",
   },
 ];
 

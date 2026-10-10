@@ -2262,8 +2262,9 @@ describe("GeminiService model routing", () => {
     expect(MODELS.image.studio).toBe("gemini-3-pro-image");
     expect(MODELS.image.fallback).toBe("gemini-3.1-flash-image");
     expect(MODELS.image.emergency).toBe("gemini-3.1-flash-lite-image");
-    expect(MODELS.video.primary).toBe("veo-3.1-fast-generate-preview");
-    expect(MODELS.video.fallback).toBe("veo-3.1-generate-preview");
+    expect(MODELS.video.primary).toBe("gemini-omni-1.1-flash");
+    expect(TASKS.video_standard.fallback).toBeUndefined();
+    expect(TASKS.video_quality.fallback).toBeUndefined();
 
     expect(JSON.stringify(MODELS.text)).not.toContain("preview");
     expect(JSON.stringify(MODELS.image)).not.toContain("preview");
@@ -2360,7 +2361,7 @@ describe("GeminiService model routing", () => {
     );
   });
 
-  it("hits the Veo predictLongRunning endpoint for video generation", async () => {
+  it("uses the compatibility endpoint for Omni video generation", async () => {
     vi.stubGlobal(
       "fetch",
       vi
@@ -2463,6 +2464,88 @@ describe("GeminiService model routing", () => {
     );
     expect(result).toBe("blob:fake-video-url");
   }, 30000);
+
+  it.each([
+    [4, "720p", "video_standard"],
+    [6, "720p", "video_standard"],
+    [8, "720p", "video_standard"],
+    [8, "1080p", "video_quality"],
+  ] as const)(
+    "receives an inline Omni %ss %s video without a second start",
+    async (duration, resolution, task) => {
+      const operation = "operations/omni-" + "a".repeat(32);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ name: operation }) })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            name: operation,
+            done: true,
+            response: {
+              generateVideoResponse: {
+                generatedSamples: [
+                  {
+                    video: {
+                      encodedVideo: Buffer.from(makeMp4Bytes()).toString("base64"),
+                      encoding: "video/mp4",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        });
+      vi.stubGlobal("fetch", fetchMock);
+      stubLoadedVideoImage();
+      vi.spyOn(global.URL, "createObjectURL").mockReturnValue("blob:omni-video");
+      await expect(
+        generatePostVideo("data:image/jpeg;base64,fake", VideoStyle.GoldenRadiance, {
+          durationSeconds: duration,
+          resolution,
+          aspectPreference: "9:16",
+          soundtrack: "none",
+          pacing: "snappy",
+        }),
+      ).resolves.toBe("blob:omni-video");
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe(
+        "/api/proxy/v1beta/models/gemini-omni-1.1-flash:predictLongRunning",
+      );
+      expect(init.headers["X-Generation-Task"]).toBe(task);
+      expect(JSON.parse(init.body).parameters).toMatchObject({
+        durationSeconds: duration,
+        resolution,
+      });
+      expect(fetchMock.mock.calls[1][0]).toBe(`/api/proxy/v1beta/${operation}`);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([401, 403, 404, 410])(
+    "stops an unavailable video poll (%s) without another paid start",
+    async (status) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ name: "operations/omni-" + "a".repeat(32) }),
+        })
+        .mockResolvedValueOnce({ ok: false, status });
+      vi.stubGlobal("fetch", fetchMock);
+      stubLoadedVideoImage();
+      await expect(
+        generatePostVideo("data:image/jpeg;base64,fake", VideoStyle.GoldenRadiance, {
+          durationSeconds: 6,
+          resolution: "720p",
+          aspectPreference: "9:16",
+          soundtrack: "none",
+          pacing: "snappy",
+        }),
+      ).rejects.toThrow("This video session is no longer available");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("does not issue a second billable start after an ambiguous network failure", async () => {
     const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch"));
@@ -2599,7 +2682,7 @@ describe("GeminiService model routing", () => {
     expect(pollCalls).toHaveLength(2);
   });
 
-  it("sends the identity locks as a real negativePrompt and suppresses audio when the salesperson picks Silent", async () => {
+  it("sends exclusion and no-music guidance through the compatibility request", async () => {
     const startVideo = async (soundtrack: "none" | "cinematic") => {
       setProxyCapabilities({ veoNegativePrompt: true });
       const fetchMock = vi
@@ -2658,7 +2741,7 @@ describe("GeminiService model routing", () => {
     for (const lock of ["second car", "vehicle morphing", "warped badges"]) {
       expect(silent.negativePrompt).toContain(lock);
     }
-    // "Silent" is deterministic through the one parameter this endpoint accepts.
+    // The server converts these preferences to ordinary Omni prompt guidance.
     for (const audio of ["music", "soundtrack", "score", "voiceover", "dialogue"]) {
       expect(silent.negativePrompt).toContain(audio);
     }

@@ -39,6 +39,7 @@ function harness(
     secureRandomString: () => "0123456789abcdef",
     recordProxyGenerationEvent: audit,
     claimProviderResources: claim,
+    saveOmniInteraction: vi.fn(),
     logCoalescedAuthEvent: vi.fn(),
     clientIP: () => "",
     userAgent: () => "",
@@ -76,7 +77,14 @@ function harness(
         ? helpers
         : path.endsWith("requestPolicies.js")
           ? policies
-          : { runtimeValue: () => "synthetic-server-key" },
+          : path.endsWith("omniVideo.js")
+            ? {
+                MODEL: "gemini-omni-1.1-flash",
+                buildOmniVideoRequest: () => ({}),
+                providerInteractionId: () => "synthetic",
+                projectOmniVideoResponse: () => ({}),
+              }
+            : { runtimeValue: () => "synthetic-server-key" },
     { getenv: () => "" },
     {
       requestInfo: () => ({ method: options.method || "POST", data: {}, headers: {} }),
@@ -158,7 +166,7 @@ describe("validated Gemini response forwarding", () => {
     });
     expect(h.proxy()).toEqual({
       status: 502,
-      body: { error: "Could not secure provider resource" },
+      body: { error: "Could not secure video operation" },
     });
     expect(h.c.string).not.toHaveBeenCalled();
   });
