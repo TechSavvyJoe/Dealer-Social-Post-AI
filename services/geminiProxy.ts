@@ -99,6 +99,33 @@ const normalizedProxyError = (
   return err;
 };
 
+const isAbortException = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "name" in error &&
+  error.name === "AbortError";
+
+const indeterminatePostError = (
+  kind: "network" | "timeout",
+  phase: "fetch" | "response" | "parse",
+  status?: number,
+): NormalizedError =>
+  normalizedProxyError(
+    "The request outcome is unknown because the AI service response was incomplete.",
+    kind,
+    false,
+    { phase, ...(status === undefined ? {} : { status }) },
+  );
+
+/** A paid generation may have reached the provider despite losing its reply. */
+export const isIndeterminateGenerationError = (error: unknown): boolean => {
+  const normalized = normalizeError(error);
+  return (
+    normalized.retryable === false &&
+    (normalized.kind === "network" || normalized.kind === "timeout")
+  );
+};
+
 /**
  * A wrapper for the fetch API to communicate with our backend proxy for Gemini.
  * Now includes retry logic, performance monitoring, and enhanced error handling.
@@ -129,10 +156,13 @@ export async function fetchFromProxy(
 
   const controller = new AbortController();
   let didTimeout = false;
-  const timeoutId = setTimeout(() => {
-    didTimeout = true;
-    controller.abort();
-  }, 300000); // 300 second timeout (5 minutes)
+  const timeoutId = setTimeout(
+    () => {
+      didTimeout = true;
+      controller.abort();
+    },
+    method === "POST" ? 110000 : 300000,
+  ); // POST stays below Vercel's 120-second external proxy limit.
   const relayExternalAbort = () => controller.abort();
   if (externalSignal?.aborted) relayExternalAbort();
   else externalSignal?.addEventListener("abort", relayExternalAbort, { once: true });
@@ -146,36 +176,54 @@ export async function fetchFromProxy(
     if (path.includes("image")) serviceKey = "gemini-image-api";
     else if (path.includes("veo") || path.includes("video")) serviceKey = "veo-api";
 
-    // Only network errors and 5xx responses count against the circuit and get
-    // retried. A 4xx means the service answered successfully, so it is parsed
+    // Network errors and 5xx responses count against the circuit; only GETs
+    // may retry. A 4xx means the service answered, so it is parsed
     // below and surfaced immediately without poisoning service health.
     const response = await withCircuitBreaker(serviceKey, async () => {
       return await retryWithBackoff(
         async () => {
           assertAuthEpoch(requestAuthEpoch);
-          const res = await fetch(`/api/proxy/${path}`, {
-            method,
-            credentials: "include",
-            headers: {
-              "Content-Type": "application/json",
-              ...(task
-                ? {
-                    "X-Generation-Task": task,
-                    "X-Model-Policy-Version": MODEL_POLICY_VERSION,
-                    ...(attemptId ? { "X-Generation-Attempt-ID": attemptId } : {}),
-                    ...(purpose ? { "X-Generation-Purpose": purpose } : {}),
-                  }
-                : {}),
-            },
-            body: method === "POST" ? JSON.stringify(body) : undefined,
-            signal: controller.signal,
-          });
+          let res: Response;
+          try {
+            res = await fetch(`/api/proxy/${path}`, {
+              method,
+              credentials: "include",
+              headers: {
+                "Content-Type": "application/json",
+                ...(task
+                  ? {
+                      "X-Generation-Task": task,
+                      "X-Model-Policy-Version": MODEL_POLICY_VERSION,
+                      ...(attemptId ? { "X-Generation-Attempt-ID": attemptId } : {}),
+                      ...(purpose ? { "X-Generation-Purpose": purpose } : {}),
+                    }
+                  : {}),
+              },
+              body: method === "POST" ? JSON.stringify(body) : undefined,
+              signal: controller.signal,
+            });
+          } catch (error) {
+            if (controller.signal.aborted) {
+              throw new DOMException("Request cancelled", "AbortError");
+            }
+            if (method === "POST" && !isAbortException(error)) {
+              // Safari may report only "Load failed"; transport failure
+              // classification must not depend on browser-specific wording.
+              throw indeterminatePostError("network", "fetch");
+            }
+            throw error;
+          }
 
           if (res.status >= 500) {
+            // Release the unread error body before a safe GET retry or the
+            // terminal POST outcome; no provider error text is retained.
+            await res.body?.cancel().catch(() => undefined);
             throw normalizedProxyError(
-              "The AI service is temporarily unavailable.",
-              "model_unavailable",
-              true,
+              method === "POST"
+                ? "The request outcome is unknown because the AI service did not respond."
+                : "The AI service is temporarily unavailable.",
+              method === "POST" ? "network" : "model_unavailable",
+              method === "GET",
               { status: res.status },
             );
           }
@@ -183,7 +231,9 @@ export async function fetchFromProxy(
           return res;
         },
         {
-          maxAttempts: 3,
+          // Generation POSTs can incur cost before a response is lost. Only
+          // safe reads such as long-running operation polls may be replayed.
+          maxAttempts: method === "GET" ? 3 : 1,
           initialDelay: 1000,
           signal: controller.signal,
           shouldRetry: (error) => error.name !== "AbortError",
@@ -199,23 +249,37 @@ export async function fetchFromProxy(
 
     traceProxy(`[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`);
 
-    const responseText = await response.text();
+    let responseText: string;
+    try {
+      responseText = await response.text();
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new DOMException("Request cancelled", "AbortError");
+      }
+      if (method === "POST" && response.ok && !isAbortException(error)) {
+        throw indeterminatePostError("network", "response", response.status);
+      }
+      // A completed 4xx response already establishes that the request was
+      // rejected. Its body may refine the message (for example 409 policy
+      // mismatch), but a lost body must not turn that rejection into a paid
+      // unknown outcome.
+      if (
+        method === "POST" &&
+        !response.ok &&
+        response.status < 500 &&
+        !isAbortException(error)
+      ) {
+        responseText = "";
+      } else {
+        throw error;
+      }
+    }
     assertAuthEpoch(requestAuthEpoch);
 
     if (!response.ok) {
       if (response.status === 401) notifySessionRejected(requestAuthEpoch);
-      // Prefer Google's structured error message when the body is JSON; fall
-      // back to the raw text. The technical detail stays in the console — the
-      // thrown message is what a salesperson reads in the toast.
-      let detail: string;
-      try {
-        const errorJson = JSON.parse(responseText);
-        detail = errorJson?.error?.message || JSON.stringify(errorJson);
-      } catch {
-        detail = responseText || `status ${response.status}`;
-      }
       console.error(
-        `[GeminiProxy] [${requestId}] ${method} ${path} failed (${response.status}): ${detail}`,
+        `[GeminiProxy] [${requestId}] ${method} ${path} failed (${response.status}).`,
       );
       // A stale installed app: terminal, never retried, and already outside
       // the circuit breaker (only 5xx/network failures count against it).
@@ -226,7 +290,7 @@ export async function fetchFromProxy(
           "Session expired — please sign in again.",
           "unauthorized",
           false,
-          detail,
+          { status: response.status },
         );
       }
       if (response.status === 429) {
@@ -234,7 +298,7 @@ export async function fetchFromProxy(
           "Too many requests — try again in a minute.",
           "quota",
           false,
-          detail,
+          { status: response.status },
         );
       }
       // The numeric status doubles as normalizeError's classification token
@@ -250,34 +314,48 @@ export async function fetchFromProxy(
       console.warn(`[GeminiProxy] [${requestId}] Slow request: ${duration}ms`);
     }
 
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(responseText);
-      assertAuthEpoch(requestAuthEpoch);
-      return parsed;
+      parsed = JSON.parse(responseText);
     } catch {
-      // If the successful response is not JSON, return the raw text
+      if (method === "POST") {
+        // The provider may have completed and billed the job even though its
+        // response was empty or malformed. Do not send the paid POST again.
+        throw indeterminatePostError("network", "parse", response.status);
+      }
+      // Safe GET callers retain the raw-text behavior for non-JSON responses.
       assertAuthEpoch(requestAuthEpoch);
       return responseText;
     }
+    if (
+      method === "POST" &&
+      (typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed) ||
+        Object.keys(parsed).length === 0)
+    ) {
+      throw indeterminatePostError("network", "parse", response.status);
+    }
+    assertAuthEpoch(requestAuthEpoch);
+    return parsed;
   } catch (error) {
     performanceMonitor.measure(`${markName}-error`, `${markName}-start`);
 
-    if (
-      error !== null &&
-      typeof error === "object" &&
-      "name" in error &&
-      error.name === "AbortError" &&
-      controller.signal.aborted
-    ) {
+    if (isAbortException(error) && controller.signal.aborted) {
       if (!didTimeout && externalSignal?.aborted) {
         throw externalSignal.reason instanceof Error
           ? externalSignal.reason
           : new DOMException("Request cancelled", "AbortError");
       }
       console.error(
-        `[GeminiProxy] [${requestId}] ${method} ${path} timed out after 300 seconds.`,
+        `[GeminiProxy] [${requestId}] ${method} ${path} timed out after ${method === "POST" ? 110 : 300} seconds.`,
       );
-      throw new Error("The request timed out. Please try again.");
+      throw normalizedProxyError(
+        "The request outcome is unknown because the AI service did not respond in time.",
+        "timeout",
+        false,
+        error,
+      );
     }
     throw normalizeError(error);
   } finally {

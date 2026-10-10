@@ -832,6 +832,115 @@ test("Create post stores the signature first, Cancel keeps the draft, and the re
   }
 });
 
+test("ambiguous image failure saves the signed delivery with its original photo and caption", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const deliveryCaption =
+    "Congratulations, Alex, on your exciting new ride! The Northline Motors team is happy to celebrate this special delivery with you. We hope every mile ahead brings another great memory. #NewCarDelivery #NorthlineMotors";
+  const created = {
+    id: "qa-ambiguous-image-post",
+    dealer: dealer.id,
+    salesperson_id: person.id,
+    salesperson_name: person.name,
+    scenario_id: "customer_delivery",
+    platform_ids: ["facebook_feed", "instagram_feed"],
+    media_output_mode: "photo",
+    primary_format_id: "feed_portrait",
+    image_aspect_ratio: "4:5",
+    approval_status: "n_a",
+    release_required: true,
+    release_status: "pending",
+    has_release: false,
+    created: "2026-10-06 12:00:00.000Z",
+    updated: "2026-10-06 12:00:00.000Z",
+  };
+  const imageCalls: Request[] = [];
+  const degradationEvents: string[] = [];
+  let captionPrompt = "";
+  let savedCaption = "";
+  await recordSharing(page);
+  const state = await fixture(page, "salesperson", (request, path) => {
+    const method = request.method();
+    if (method === "POST" && path === "/api/telemetry") {
+      degradationEvents.push(request.postData() || "");
+      return { json: { success: true } };
+    }
+    if (method === "POST" && path === "/api/app/photo_releases")
+      return { json: { id: "qa-ambiguous-release", customer_name: "Alex Johnson" } };
+    if (
+      method === "POST" &&
+      path === "/api/app/photo_releases/qa-ambiguous-release/link-post"
+    )
+      return {
+        json: {
+          id: "qa-ambiguous-release",
+          post: created.id,
+          post_revision: "2026-10-06 12:00:01.000Z",
+        },
+      };
+    if (path.startsWith("/api/proxy/")) {
+      const task = request.headers()["x-generation-task"];
+      if (task === "caption") {
+        captionPrompt = request.postData() || "";
+        return { json: geminiText(deliveryCaption) };
+      }
+      if (task === "image_standard" || task === "image_studio") {
+        imageCalls.push(request);
+        // The provider may have started billing before this response was lost.
+        return { status: 503, json: { error: "Upstream response unavailable" } };
+      }
+      return undefined;
+    }
+    if (method === "POST" && path === "/api/app/posts") {
+      savedCaption = multipartFields(request).caption || "";
+      return { json: { ...created, caption: savedCaption } };
+    }
+    return undefined;
+  });
+
+  await page
+    .getByLabel("Take a photo for Delivery", { exact: true })
+    .setInputFiles({ name: "delivery.jpg", mimeType: "image/jpeg", buffer: photo });
+  await page.getByRole("button", { name: "Get customer's signature" }).click();
+  await signRelease(page, "Alex Johnson");
+  await page.getByRole("button", { name: /Anything to mention/ }).click();
+  await page
+    .getByRole("textbox", { name: /Anything to mention/ })
+    .fill("Picked up on her birthday.");
+  await page.getByRole("button", { name: "Create post", exact: true }).click();
+
+  await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByRole("img", { name: "Post image" })).toBeVisible();
+  expect(captionPrompt).toContain("Picked up on her birthday.");
+  expect(savedCaption).toContain("Congratulations, Alex, on your exciting new ride!");
+  expect(savedCaption).toContain("#NorthlineMotors");
+  expect(imageCalls).toHaveLength(1);
+  expect(
+    degradationEvents.some((event) => event.includes("image.fallback.original")),
+    "the app records that it used the original photo after the ambiguous image failure",
+  ).toBe(true);
+  expect(
+    state.calls.filter((call) => call.startsWith("POST /api/proxy/")),
+  ).toHaveLength(2);
+  expect(
+    state.calls.filter((call) => call === "POST /api/app/photo_releases"),
+  ).toHaveLength(1);
+  expect(
+    state.calls.filter(
+      (call) => call === "POST /api/app/photo_releases/qa-ambiguous-release/link-post",
+    ),
+  ).toHaveLength(1);
+  const saved = state.calls.indexOf("POST /api/app/posts");
+  expect(saved).toBeGreaterThanOrEqual(0);
+  expect(saved).toBeLessThan(
+    state.calls.indexOf("POST /api/app/photo_releases/qa-ambiguous-release/link-post"),
+  );
+  expect(state.unknown).toEqual([]);
+});
+
 for (const committed of [false, true]) {
   test(`generated post recovers a ${committed ? "lost save response" : "failed save"} without another AI call`, async ({
     page,

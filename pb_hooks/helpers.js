@@ -115,20 +115,81 @@ function isAuthoritativePostPerson(context, record) {
  * values. Return only a short allowlisted diagnostic for server logs.
  */
 function safeProviderTransportDiagnostic(err) {
-  const clean = function (value) {
-    return (value || "")
-      .toString()
-      .replace(/[^A-Za-z0-9_.:-]/g, "")
-      .slice(0, 80);
-  };
-  const name = clean(err && err.name);
-  const code = clean(err && err.code);
-  const status = clean(err && (err.statusCode || err.status));
-  const details = [];
-  if (name) details.push("name=" + name);
+  // Inspect wrapped Go errors only to classify known failures. Never return
+  // their message: it may contain provider URLs, keys, or response bodies.
+  const wrapped = err && err.value;
+  let message = "";
+  try {
+    message = String((err && err.message) || "") + " " + String(wrapped || "");
+  } catch (_e) {
+    /* classification is best-effort */
+  }
+  const flags = [];
+  if (/deadline exceeded|timed? out|timeout/i.test(message)) flags.push("timeout");
+  if (
+    /broken pipe|connection reset|closed network connection|client disconnected/i.test(
+      message,
+    )
+  )
+    flags.push("connection_closed");
+  if (
+    /context canceled|context cancelled|request canceled|request cancelled/i.test(
+      message,
+    )
+  )
+    flags.push("cancelled");
+  if (/unexpected EOF|\bEOF\b/.test(message)) flags.push("eof");
+  if (/no such host|name resolution|DNS/i.test(message)) flags.push("dns");
+  if (/TLS|certificate|x509/i.test(message)) flags.push("tls");
+  if (/database is locked|database is busy|SQLITE_BUSY/i.test(message))
+    flags.push("database_busy");
+  const allowedNames = ["Error", "GoError", "TypeError", "SyntaxError", "AbortError"];
+  const name = err && allowedNames.indexOf(err.name) !== -1 ? err.name : "unknown";
+  const allowedCodes = [
+    "ETIMEDOUT",
+    "ECONNRESET",
+    "EPIPE",
+    "ENOTFOUND",
+    "ECONNREFUSED",
+    "ERR_STREAM_PREMATURE_CLOSE",
+  ];
+  const code = err && allowedCodes.indexOf(err.code) !== -1 ? err.code : "";
+  const status = Number(err && (err.statusCode || err.status));
+  const details = ["name=" + name];
   if (code) details.push("code=" + code);
-  if (status) details.push("status=" + status);
-  return details.length ? details.join(" ") : "unclassified_transport_error";
+  if (Number.isInteger(status) && status >= 100 && status <= 599)
+    details.push("status=" + status);
+  if (flags.length) details.push("flags=" + flags.join(","));
+  return details.join(" ");
+}
+
+function providerResponseByteLength(body) {
+  const text = String(body || "");
+  let bytes = text.length;
+  // Base64 image envelopes are overwhelmingly ASCII. Let the regex skip that
+  // data natively instead of walking millions of characters in the JSVM.
+  const nonAscii = /[\u0080-\uFFFF]/g;
+  let match;
+  while ((match = nonAscii.exec(text)) !== null) {
+    const code = text.charCodeAt(match.index);
+    if (code <= 0x7ff) bytes += 1;
+    else if (
+      code >= 0xd800 &&
+      code <= 0xdbff &&
+      text.charCodeAt(match.index + 1) >= 0xdc00 &&
+      text.charCodeAt(match.index + 1) <= 0xdfff
+    )
+      bytes += 1;
+    else if (
+      code >= 0xdc00 &&
+      code <= 0xdfff &&
+      text.charCodeAt(match.index - 1) >= 0xd800 &&
+      text.charCodeAt(match.index - 1) <= 0xdbff
+    )
+      bytes += 1;
+    else bytes += 2;
+  }
+  return bytes;
 }
 
 /**
@@ -4378,6 +4439,7 @@ module.exports = {
   allowedPostPlatformIds,
   parsePostPlatformCaptions,
   safeProviderTransportDiagnostic,
+  providerResponseByteLength,
   // Provider resource ownership
   claimProviderResource,
   claimProviderResources,

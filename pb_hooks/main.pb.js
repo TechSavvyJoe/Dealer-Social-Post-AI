@@ -67,6 +67,18 @@ const proxyHandler = (c) => {
   let path = null;
   let generationAudit = null;
   let generationAuditRecorded = false;
+  const diagnosticStartedAt = Date.now();
+  let diagnosticId = "unassigned";
+  let diagnosticPhase = "authorization";
+  let diagnosticBytes = 0;
+  let diagnosticStatus = 0;
+  let diagnosticTask = "unknown";
+  const phaseDiagnostic = (phase) => {
+    diagnosticPhase = phase;
+    console.log(
+      `[Proxy phase] request=${diagnosticId} phase=${phase} task=${diagnosticTask} elapsed_ms=${Math.max(0, Date.now() - diagnosticStartedAt)} status=${diagnosticStatus} bytes=${diagnosticBytes}`,
+    );
+  };
   // Billable facts for the usage ledger. Image size and video seconds come
   // from the sanitized upstream body (never the raw client body); latency is
   // the timed provider call. Token counts and finishReason are read from the
@@ -365,6 +377,19 @@ const proxyHandler = (c) => {
       ? { ...authHeader }
       : { "Content-Type": "application/json", ...authHeader };
 
+    // Task names come from the server's validated model policy, never from
+    // arbitrary header text or a customer/dealership identifier.
+    const diagnosticIdentity = helpers.proxyGenerationIdentity
+      ? helpers.proxyGenerationIdentity(
+          authorizedProxyPath,
+          requestInfo,
+          policies,
+          "gemini",
+          "",
+        )
+      : null;
+    diagnosticTask = diagnosticIdentity ? diagnosticIdentity.task : "read";
+    diagnosticId = helpers.secureRandomString(16, "0123456789abcdef");
     const globalProviderSlot = helpers.acquireProxyConcurrency("provider:global", 12);
     if (!globalProviderSlot.ok) {
       c.response().header().set("Retry-After", "1");
@@ -380,6 +405,11 @@ const proxyHandler = (c) => {
       return c.json(429, { error: "Too many concurrent provider requests" });
     }
 
+    phaseDiagnostic("upstream");
+    // Buffered generateContent must settle before the browser's 110-second
+    // transport deadline and Vercel's 120-second external rewrite ceiling.
+    // Veo starts, polls and downloads keep their existing separate budget.
+    const upstreamTimeoutSeconds = /:generateContent$/.test(cleanPath) ? 100 : 300;
     const upstreamStartedAt = Date.now();
     const res = (function () {
       try {
@@ -388,7 +418,7 @@ const proxyHandler = (c) => {
           method: requestInfo.method,
           body: isGet ? "" : sanitizedProxyBody,
           headers: upstreamHeaders,
-          timeout: 300, // PocketBase 0.22 uses seconds; allow 5 minutes for Veo.
+          timeout: upstreamTimeoutSeconds, // PocketBase 0.22 uses seconds.
         });
       } finally {
         generationUsage.latencyMs = Math.max(0, Date.now() - upstreamStartedAt);
@@ -397,6 +427,8 @@ const proxyHandler = (c) => {
       }
     })();
 
+    diagnosticStatus = res.statusCode;
+    phaseDiagnostic("upstream_complete");
     const declaredResponseBytes = helpers.upstreamContentLength(res);
     const maximumResponseBytes = isFileDownloadPath
       ? 100 * 1024 * 1024
@@ -460,7 +492,12 @@ const proxyHandler = (c) => {
       return c.blob(res.statusCode, "video/mp4", binaryBody);
     }
 
-    const body = res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
+    const body = res.raw ?? res.body ?? (res.json ? JSON.stringify(res.json) : "");
+    diagnosticBytes = helpers.providerResponseByteLength(body);
+    if (diagnosticBytes > maximumResponseBytes) {
+      return c.json(413, { error: "Provider response is too large" });
+    }
+    phaseDiagnostic("parse");
 
     let jsonBody = null;
     try {
@@ -482,6 +519,8 @@ const proxyHandler = (c) => {
       }
       return c.string(res.statusCode, body);
     }
+
+    phaseDiagnostic("parsed");
 
     if (
       dealer &&
@@ -522,6 +561,7 @@ const proxyHandler = (c) => {
       }
 
       try {
+        phaseDiagnostic("ownership");
         if (discoveredResources.length) {
           helpers.claimProviderResources(dealer.id, discoveredResources);
         }
@@ -543,6 +583,7 @@ const proxyHandler = (c) => {
       }
     }
 
+    phaseDiagnostic("audit");
     if (!isGet) {
       helpers.recordProxyGenerationEvent(
         c,
@@ -558,7 +599,15 @@ const proxyHandler = (c) => {
       generationAuditRecorded = true;
     }
 
-    return c.json(res.statusCode, jsonBody);
+    // The parsed envelope has passed ownership/audit checks. Preserve the
+    // provider's original JSON bytes instead of exporting and encoding its
+    // potentially large Go-mapped image payload a second time.
+    c.response().header().set("Content-Type", "application/json");
+    c.response().header().set("Cache-Control", "private, no-store");
+    phaseDiagnostic("write");
+    const written = c.string(res.statusCode, body);
+    phaseDiagnostic("complete");
+    return written;
   } catch (err) {
     if (generationAudit && !generationAuditRecorded) {
       helpers.recordProxyGenerationEvent(
@@ -574,7 +623,7 @@ const proxyHandler = (c) => {
       );
     }
     console.error(
-      "[Proxy Gemini API] Error:",
+      `[Proxy Gemini API] Error: request=${diagnosticId} phase=${diagnosticPhase} task=${diagnosticTask} elapsed_ms=${Math.max(0, Date.now() - diagnosticStartedAt)} status=${diagnosticStatus} bytes=${diagnosticBytes}`,
       helpers.safeProviderTransportDiagnostic(err),
     );
     return c.json(500, {
