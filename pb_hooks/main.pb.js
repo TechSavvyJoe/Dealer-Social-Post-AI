@@ -3025,11 +3025,37 @@ routerAdd("POST", "/api/app/posts", (c) => {
       };
       const captionAttemptId = normalizeAttemptId(body.caption_attempt_id);
       const imageAttemptId = normalizeAttemptId(body.image_attempt_id);
+      const generationEventNow = Date.now();
+      const currentModelPolicyVersion = String(modelPolicy.version || "");
+      // A generated preview can remain open while saving is interrupted. Recover
+      // its server-owned, exact-attempt evidence for one day, without upgrading
+      // older-policy output or trusting multipart provenance assertions.
       const eventCutoff = helpers.databaseTimestamp(
-        new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+        new Date(generationEventNow - 24 * 60 * 60 * 1000).toISOString(),
+      );
+      const eventNow = helpers.databaseTimestamp(
+        new Date(generationEventNow).toISOString(),
       );
       const loadAttemptEvents = function (attemptId) {
         if (!ownerSessionHash || !attemptId) return [];
+        // Check consumption across the whole attempt before applying the row
+        // cap or age/policy filters. Later requests must not hide an earlier
+        // committed claim behind newer diagnostics.
+        const consumed = txDao.findRecordsByFilter(
+          "generation_events",
+          "owner_session_hash = {:owner} && dealer = {:dealer} && attempt_id = {:attempt} && consumed_post != ''",
+          "",
+          1,
+          0,
+          { owner: ownerSessionHash, dealer: dealer.id, attempt: attemptId },
+        );
+        if (consumed.length) {
+          throw operations.failure(
+            "GENERATION_ATTEMPT_ALREADY_USED",
+            409,
+            "This generation result was already saved to another post.",
+          );
+        }
         const events = txDao.findRecordsByFilter(
           "generation_events",
           "owner_session_hash = {:owner} && dealer = {:dealer} && attempt_id = {:attempt}",
@@ -3050,16 +3076,24 @@ routerAdd("POST", "/api/app/posts", (c) => {
           );
         }
         return events.filter(function (event) {
-          return event.getString("occurred_at") >= eventCutoff;
+          const occurredAt = event.getString("occurred_at");
+          return (
+            currentModelPolicyVersion &&
+            event.getString("model_policy_version") === currentModelPolicyVersion &&
+            occurredAt >= eventCutoff &&
+            occurredAt <= eventNow
+          );
         });
       };
       const captionGenerationEvents = loadAttemptEvents(captionAttemptId);
-      const imageGenerationEvents =
-        imageAttemptId && imageAttemptId !== captionAttemptId
-          ? loadAttemptEvents(imageAttemptId)
-          : [];
-      const recentGenerationEvents =
-        captionGenerationEvents.concat(imageGenerationEvents);
+      const sharedGenerationAttempt =
+        !!imageAttemptId && imageAttemptId === captionAttemptId;
+      const imageGenerationEvents = sharedGenerationAttempt
+        ? captionGenerationEvents
+        : loadAttemptEvents(imageAttemptId);
+      const recentGenerationEvents = sharedGenerationAttempt
+        ? captionGenerationEvents
+        : captionGenerationEvents.concat(imageGenerationEvents);
       if (recentGenerationEvents.length) {
         try {
           generationClaimToken = helpers.claimGenerationEvents(
@@ -3095,8 +3129,10 @@ routerAdd("POST", "/api/app/posts", (c) => {
       let latestImageSuccess = null;
       let latestAnySuccess = null;
       let serverFallbackCount = 0;
-      captionGenerationEvents.forEach(function (event) {
-        const task = event.getString("task");
+      const imagePolicyVerified = imageGenerationEvents.some(function (event) {
+        return !!imageTasks[event.getString("task")];
+      });
+      recentGenerationEvents.forEach(function (event) {
         const succeeded = event.getBool
           ? event.getBool("succeeded")
           : !!event.get("succeeded");
@@ -3104,7 +3140,19 @@ routerAdd("POST", "/api/app/posts", (c) => {
           serverFallbackCount += 1;
           return;
         }
-        if (!latestAnySuccess) latestAnySuccess = event;
+        if (
+          !latestAnySuccess ||
+          event.getString("occurred_at") > latestAnySuccess.getString("occurred_at")
+        ) {
+          latestAnySuccess = event;
+        }
+      });
+      captionGenerationEvents.forEach(function (event) {
+        const task = event.getString("task");
+        const succeeded = event.getBool
+          ? event.getBool("succeeded")
+          : !!event.get("succeeded");
+        if (!succeeded) return;
         if (!latestCaptionSuccess && captionTasks[task]) {
           latestCaptionSuccess = event;
         }
@@ -3114,17 +3162,8 @@ routerAdd("POST", "/api/app/posts", (c) => {
         const succeeded = event.getBool
           ? event.getBool("succeeded")
           : !!event.get("succeeded");
-        if (!succeeded) {
-          serverFallbackCount += 1;
-          return;
-        }
+        if (!succeeded) return;
         if (!latestImageSuccess && imageTasks[task]) latestImageSuccess = event;
-        if (
-          !latestAnySuccess ||
-          event.getString("occurred_at") > latestAnySuccess.getString("occurred_at")
-        ) {
-          latestAnySuccess = event;
-        }
       });
       const captionSource =
         captionSourceCandidate === "custom"
@@ -3144,8 +3183,10 @@ routerAdd("POST", "/api/app/posts", (c) => {
       const generationLastSuccessAt = latestAnySuccess
         ? latestAnySuccess.getString("occurred_at")
         : "";
-      const modelPolicyVersion = recentGenerationEvents.length
-        ? String(modelPolicy.version)
+      const modelPolicyVersion = (
+        creativeFile ? imagePolicyVerified : recentGenerationEvents.length
+      )
+        ? currentModelPolicyVersion
         : "";
       form.loadData({
         dealer: dealer.id,
