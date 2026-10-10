@@ -37,8 +37,8 @@ export const useGemini = () => {
       logEvent(`${name}.start`, metadata);
       try {
         // maxRetries:0 — the queue only serializes AI calls; it must NOT retry.
-        // Transient retries are owned by the proxy (retryWithBackoff ×3) and
-        // model failover by withFallbackChain (×N models). A queue-level retry
+        // Only safe proxy GETs retry; ambiguous paid POSTs never replay.
+        // Model failover requires a known outcome. A queue-level retry
         // here re-ran that entire stack, multiplying one user action into up to
         // ~27 upstream requests during an outage (self-inflicted DDoS + cost).
         const result = await enqueueTask(task, { maxRetries: 0, signal });

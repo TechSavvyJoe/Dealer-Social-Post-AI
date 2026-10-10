@@ -42,10 +42,12 @@ import {
 import { getGeminiClient } from "./geminiClient";
 import {
   isProxyValidationRejection,
+  isIndeterminateGenerationError,
   outdatedClientErrorFromResponse,
   type GenerationPurpose,
 } from "./geminiProxy";
 import { proxyCapabilities } from "./proxyCapabilities";
+import { createGenerationBudget } from "./generationBudget";
 import { GeminiVideoOperationSchema, resolveVeoVideoOutcome } from "../utils/schemas";
 import {
   type CaptionGenerationResult,
@@ -294,6 +296,11 @@ async function withFallbackChain<T>(
       // Cancellation is a caller decision, not a model failure. Never advance
       // to another provider/model after the queue has aborted the active task.
       if (isAbortError(err)) throw err;
+      // A lost paid response is not evidence that a different model should
+      // be charged for the same action. Preserve it as a terminal outcome.
+      if (isIndeterminateGenerationError(err)) {
+        throw new ModelChainFailure(task, attemptedModels, err);
+      }
       lastErr = err;
       // A content refusal is a verdict on the photo/wording, not on the model:
       // the next model would be shown the same input and answer the same way.
@@ -575,7 +582,11 @@ const generateImageWithFallback = async (
     throw new Error("Image model returned no image data.");
   } catch (err) {
     let terminalError = err;
-    if (shouldFallbackToOpenAI(err) && imagePromptForOpenAI) {
+    if (
+      !isIndeterminateGenerationError(err) &&
+      shouldFallbackToOpenAI(err) &&
+      imagePromptForOpenAI
+    ) {
       console.warn(
         `[${task}] All Gemini image models exhausted; falling back to OpenAI`,
         err,
@@ -1443,7 +1454,7 @@ const enforceGeneratedImageTextCompliance = async ({
         signal,
       );
     } catch (error) {
-      if (isAbortError(error)) throw error;
+      if (isAbortError(error) || isIndeterminateGenerationError(error)) throw error;
       logTelemetry("image.text_compliance.review_failed", {
         stage,
         reason: error instanceof Error ? error.message : String(error),
@@ -1472,6 +1483,21 @@ const enforceGeneratedImageTextCompliance = async ({
     run: ModelRun<string>;
     review: GeneratedImageTextReview | null;
   };
+  let safeReviewed: ReviewedRun | null = null;
+  const rememberReviewed = (
+    run: ModelRun<string>,
+    review: GeneratedImageTextReview | null,
+  ) => {
+    if (
+      review &&
+      !hasUnsafeOverlayContent(review) &&
+      (!safeReviewed ||
+        generatedImageReviewScore(review) >=
+          generatedImageReviewScore(safeReviewed.review!))
+    ) {
+      safeReviewed = { run, review };
+    }
+  };
   const withLogoCornerCheck = ({ run, review }: ReviewedRun): ModelRun<string> => {
     if (!logoImagePart) return run;
     const check = logoCornerCheck(logoPlacement, review?.logoCorner);
@@ -1495,7 +1521,11 @@ const enforceGeneratedImageTextCompliance = async ({
     logTelemetry("image.text_compliance.logo_restore", {});
     let restored: ModelRun<string>;
     try {
-      const sourcePart = await imagePartFromDataUrl(result.value, requestAuthEpoch);
+      const sourcePart = await imagePartFromDataUrl(
+        result.value,
+        requestAuthEpoch,
+        signal,
+      );
       restored = await generateImageWithFallback(
         imageTaskForTier(imageTier),
         [sourcePart, { text: logoRestorePrompt(logoPlacement) }, logoImagePart],
@@ -1505,7 +1535,7 @@ const enforceGeneratedImageTextCompliance = async ({
         signal,
       );
     } catch (error) {
-      if (isAbortError(error)) throw error;
+      if (isAbortError(error) || isIndeterminateGenerationError(error)) throw error;
       // Same policy as the review-failure branch below: the render in hand
       // already passed identity/brand review apart from the logo, so it
       // ships rather than the raw photo. Only an unsafe or unreviewed render
@@ -1523,6 +1553,7 @@ const enforceGeneratedImageTextCompliance = async ({
     }
 
     const restoredReview = await reviewOrNull(restored.value, "logo_restored");
+    rememberReviewed(restored, restoredReview);
     if (restoredReview?.compliant && !hasUnsafeOverlayContent(restoredReview)) {
       return { run: restored, review: restoredReview };
     }
@@ -1548,258 +1579,284 @@ const enforceGeneratedImageTextCompliance = async ({
       : { run: result, review };
   };
 
-  const firstReview = await reviewOrNull(candidate.value, "initial");
-  if (firstReview === null) {
-    throw new Error(
-      "Generated image could not be verified for customer identity and branding.",
+  const completeReview = async (): Promise<ModelRun<string>> => {
+    const firstReview = await reviewOrNull(candidate.value, "initial");
+    rememberReviewed(candidate, firstReview);
+    if (firstReview === null) {
+      throw new Error(
+        "Generated image could not be verified for customer identity and branding.",
+      );
+    }
+    const logoNeedsRepair =
+      Boolean(logoImagePart) &&
+      (firstReview.logoPresent === false ||
+        firstReview.logoMatchesSuppliedAsset === false);
+    const nonLogoViolations = firstReview.violations.filter(
+      (violation) => violation !== "supplied_logo_altered_or_replaced",
     );
-  }
-  const logoNeedsRepair =
-    Boolean(logoImagePart) &&
-    (firstReview.logoPresent === false ||
-      firstReview.logoMatchesSuppliedAsset === false);
-  const nonLogoViolations = firstReview.violations.filter(
-    (violation) => violation !== "supplied_logo_altered_or_replaced",
-  );
-  if (logoNeedsRepair && nonLogoViolations.length === 0) {
-    return await restoreLogoIfMissing(candidate, firstReview);
-  }
-  if (firstReview.compliant) return restoreLogoIfMissing(candidate, firstReview);
+    if (logoNeedsRepair && nonLogoViolations.length === 0) {
+      return await restoreLogoIfMissing(candidate, firstReview);
+    }
+    if (firstReview.compliant) return restoreLogoIfMissing(candidate, firstReview);
 
-  const confirmed = concreteViolations(firstReview);
-  if (confirmed.length === 0 && !hasUnsafeOverlayContent(firstReview)) {
-    logTelemetry("image.text_compliance.uncertain_pass", {
+    const confirmed = concreteViolations(firstReview);
+    if (confirmed.length === 0 && !hasUnsafeOverlayContent(firstReview)) {
+      logTelemetry("image.text_compliance.uncertain_pass", {
+        uncertain: firstReview.uncertain,
+        wordCount: firstReview.marketingWordCount,
+        characterCount: firstReview.marketingCharacterCount,
+      });
+      return restoreLogoIfMissing(candidate, firstReview);
+    }
+
+    logTelemetry("image.text_compliance.retry", {
       uncertain: firstReview.uncertain,
       wordCount: firstReview.marketingWordCount,
       characterCount: firstReview.marketingCharacterCount,
+      violations: firstReview.violations,
     });
-    return restoreLogoIfMissing(candidate, firstReview);
-  }
 
-  logTelemetry("image.text_compliance.retry", {
-    uncertain: firstReview.uncertain,
-    wordCount: firstReview.marketingWordCount,
-    characterCount: firstReview.marketingCharacterCount,
-    violations: firstReview.violations,
-  });
-
-  // Rung 1: styled re-render from the original photo with tighter copy.
-  let bestCandidate = candidate;
-  let bestReview = firstReview;
-  if (regenerationParts && regenerationPrompt) {
-    try {
-      const retryParts = regenerationParts.map((part) =>
-        part && typeof part === "object" && "text" in (part as object)
-          ? {
-              text: `${(part as { text: string }).text}${strictTextRetryAddendum(
-                requestedStyle,
-              )}`,
-            }
-          : part,
-      );
-      const regenerated = await generateImageWithFallback(
-        imageTaskForTier(imageTier),
-        retryParts,
-        undefined,
-        imageAspectRatio,
-        requestAuthEpoch,
-        signal,
-      );
-      const regeneratedReview = await reviewOrNull(regenerated.value, "regenerated");
-      if (regeneratedReview?.compliant) {
-        return restoreLogoIfMissing(regenerated, regeneratedReview);
-      }
-      if (regeneratedReview === null) {
-        throw new Error(
-          "Regenerated image could not be verified for customer identity and branding.",
+    // Rung 1: styled re-render from the original photo with tighter copy.
+    let bestCandidate = candidate;
+    let bestReview = firstReview;
+    if (regenerationParts && regenerationPrompt) {
+      try {
+        const retryParts = regenerationParts.map((part) =>
+          part && typeof part === "object" && "text" in (part as object)
+            ? {
+                text: `${(part as { text: string }).text}${strictTextRetryAddendum(
+                  requestedStyle,
+                )}`,
+              }
+            : part,
         );
+        const regenerated = await generateImageWithFallback(
+          imageTaskForTier(imageTier),
+          retryParts,
+          undefined,
+          imageAspectRatio,
+          requestAuthEpoch,
+          signal,
+        );
+        const regeneratedReview = await reviewOrNull(regenerated.value, "regenerated");
+        rememberReviewed(regenerated, regeneratedReview);
+        if (regeneratedReview?.compliant) {
+          return restoreLogoIfMissing(regenerated, regeneratedReview);
+        }
+        if (regeneratedReview === null) {
+          throw new Error(
+            "Regenerated image could not be verified for customer identity and branding.",
+          );
+        }
+        if (
+          concreteViolations(regeneratedReview).length === 0 &&
+          !hasUnsafeOverlayContent(regeneratedReview)
+        ) {
+          return restoreLogoIfMissing(regenerated, regeneratedReview);
+        }
+        if (
+          generatedImageReviewScore(regeneratedReview) >=
+          generatedImageReviewScore(bestReview)
+        ) {
+          bestCandidate = regenerated;
+          bestReview = regeneratedReview;
+        }
+      } catch (error) {
+        if (isAbortError(error) || isIndeterminateGenerationError(error)) throw error;
+        logTelemetry("image.text_compliance.regeneration_failed", {
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
-      if (
-        concreteViolations(regeneratedReview).length === 0 &&
-        !hasUnsafeOverlayContent(regeneratedReview)
-      ) {
-        return restoreLogoIfMissing(regenerated, regeneratedReview);
-      }
-      if (
-        generatedImageReviewScore(regeneratedReview) >=
-        generatedImageReviewScore(bestReview)
-      ) {
-        bestCandidate = regenerated;
-        bestReview = regeneratedReview;
-      }
-    } catch (error) {
-      if (isAbortError(error)) throw error;
-      logTelemetry("image.text_compliance.regeneration_failed", {
-        reason: error instanceof Error ? error.message : String(error),
-      });
     }
-  }
 
-  // Rung 1b: one final full creative pass for defects a text-only edit cannot
-  // repair (bland design, malformed type, broken 3D, changed subjects/scene,
-  // or disrespectful/overdone treatment).
-  if (
-    regenerationParts &&
-    regenerationPrompt &&
-    needsFullCreativeRerender(bestReview)
-  ) {
-    try {
-      const finalRetryParts = regenerationParts.map((part) =>
-        part && typeof part === "object" && "text" in (part as object)
-          ? {
-              text: `${(part as { text: string }).text}${strictTextRetryAddendum(
-                requestedStyle,
-              )}
+    // Rung 1b: one final full creative pass for defects a text-only edit cannot
+    // repair (bland design, malformed type, broken 3D, changed subjects/scene,
+    // or disrespectful/overdone treatment).
+    if (
+      regenerationParts &&
+      regenerationPrompt &&
+      needsFullCreativeRerender(bestReview)
+    ) {
+      try {
+        const finalRetryParts = regenerationParts.map((part) =>
+          part && typeof part === "object" && "text" in (part as object)
+            ? {
+                text: `${(part as { text: string }).text}${strictTextRetryAddendum(
+                  requestedStyle,
+                )}
 
 <final_creative_recovery>
 The previous attempt still failed campaign review. Build a visibly different, senior-designer composition while preserving the exact source people, vehicle, and scene relationship. Use crisp correctly spelled type, a clear style signature, flattering customer treatment, and platform-ready restraint. If dimensional graphics are requested, integrate them through real perspective, lighting, contact shadow, depth-of-field, and occlusion rather than a flat sticker effect.
 </final_creative_recovery>`,
-            }
-          : part,
-      );
-      const finalRetry = await generateImageWithFallback(
-        imageTaskForTier(imageTier),
-        finalRetryParts,
-        undefined,
-        imageAspectRatio,
-        requestAuthEpoch,
-        signal,
-      );
-      const finalRetryReview = await reviewOrNull(
-        finalRetry.value,
-        "creative_recovery",
-      );
-      if (finalRetryReview?.compliant) {
-        return restoreLogoIfMissing(finalRetry, finalRetryReview);
+              }
+            : part,
+        );
+        const finalRetry = await generateImageWithFallback(
+          imageTaskForTier(imageTier),
+          finalRetryParts,
+          undefined,
+          imageAspectRatio,
+          requestAuthEpoch,
+          signal,
+        );
+        const finalRetryReview = await reviewOrNull(
+          finalRetry.value,
+          "creative_recovery",
+        );
+        rememberReviewed(finalRetry, finalRetryReview);
+        if (finalRetryReview?.compliant) {
+          return restoreLogoIfMissing(finalRetry, finalRetryReview);
+        }
+        if (
+          finalRetryReview &&
+          generatedImageReviewScore(finalRetryReview) >=
+            generatedImageReviewScore(bestReview)
+        ) {
+          bestCandidate = finalRetry;
+          bestReview = finalRetryReview;
+        }
+      } catch (error) {
+        if (isAbortError(error) || isIndeterminateGenerationError(error)) throw error;
+        logTelemetry("image.text_compliance.creative_recovery_failed", {
+          reason: error instanceof Error ? error.message : String(error),
+        });
       }
-      if (
-        finalRetryReview &&
-        generatedImageReviewScore(finalRetryReview) >=
-          generatedImageReviewScore(bestReview)
-      ) {
-        bestCandidate = finalRetry;
-        bestReview = finalRetryReview;
+    }
+
+    if (needsFullCreativeRerender(bestReview)) {
+      if (hasUnsafeOverlayContent(bestReview)) {
+        throw new Error(
+          "Generated image did not meet the campaign-quality and source-fidelity review.",
+        );
       }
-    } catch (error) {
-      if (isAbortError(error)) throw error;
-      logTelemetry("image.text_compliance.creative_recovery_failed", {
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  if (needsFullCreativeRerender(bestReview)) {
-    if (hasUnsafeOverlayContent(bestReview)) {
-      throw new Error(
-        "Generated image did not meet the campaign-quality and source-fidelity review.",
-      );
-    }
-    // Every remaining finding is a craft opinion (score, style signature,
-    // typography, 3D integration, missing store lockup). Two full renders
-    // disagreed with the reviewer's taste; a third would too. The
-    // salesperson can regenerate or edit a styled image — they cannot do
-    // anything with an untouched photo except conclude the app did nothing.
-    logTelemetry("image.text_compliance.accepted_below_craft_bar", {
-      violations: bestReview.violations,
-      requestedStyle,
-      visualQualityScore: bestReview.visualQualityScore,
-    });
-    reportDegradedShip(
-      bestReview.violations[0] ?? `score_${bestReview.visualQualityScore}`,
-    );
-    return restoreLogoIfMissing(bestCandidate, bestReview);
-  }
-
-  // A second text-reduction edit can remove unsafe pixel copy, but it cannot
-  // repair art direction or scene-depth integration. After one full re-render,
-  // keep the better styled candidate instead of flattening it with an
-  // unrelated correction pass.
-  if (
-    !hasUnsafeOverlayContent(bestReview) &&
-    !hasCorrectableOverlayLengthViolation(bestReview)
-  ) {
-    logTelemetry("image.text_compliance.accepted_after_style_retry", {
-      violations: bestReview.violations,
-      requestedStyle,
-    });
-    return restoreLogoIfMissing(bestCandidate, bestReview);
-  }
-
-  // Rung 2: reduce overlay text on the best candidate, keeping brand identity.
-  const sourcePart = await imagePartFromDataUrl(bestCandidate.value, requestAuthEpoch);
-  const correctionParts: unknown[] = [
-    sourcePart,
-    { text: textReductionCorrectionPrompt(dealershipName) },
-  ];
-  if (logoImagePart) correctionParts.push(logoImagePart);
-  const corrected = await generateImageWithFallback(
-    imageTaskForTier(imageTier),
-    correctionParts,
-    // An OpenAI text-to-image fallback cannot see the correction source and
-    // could fabricate replacement people/vehicles. Fail closed instead.
-    undefined,
-    imageAspectRatio,
-    requestAuthEpoch,
-    signal,
-  );
-
-  const correctedReview = await reviewOrNull(corrected.value, "corrected");
-  if (correctedReview?.compliant) {
-    return restoreLogoIfMissing(corrected, correctedReview);
-  }
-  if (correctedReview === null) {
-    // The correction pass could not be reviewed. The best reviewed render is
-    // the only candidate whose safety is known; ship it unless it carries an
-    // identity/brand/fidelity/dignity finding.
-    if (!hasUnsafeOverlayContent(bestReview)) {
-      logTelemetry("image.text_compliance.accepted_with_length_findings", {
+      // Every remaining finding is a craft opinion (score, style signature,
+      // typography, 3D integration, missing store lockup). Two full renders
+      // disagreed with the reviewer's taste; a third would too. The
+      // salesperson can regenerate or edit a styled image — they cannot do
+      // anything with an untouched photo except conclude the app did nothing.
+      logTelemetry("image.text_compliance.accepted_below_craft_bar", {
         violations: bestReview.violations,
-        wordCount: bestReview.marketingWordCount,
-        characterCount: bestReview.marketingCharacterCount,
+        requestedStyle,
+        visualQualityScore: bestReview.visualQualityScore,
       });
-      reportDegradedShip("correction_unreviewed");
+      reportDegradedShip(
+        bestReview.violations[0] ?? `score_${bestReview.visualQualityScore}`,
+      );
       return restoreLogoIfMissing(bestCandidate, bestReview);
     }
-    throw new Error(
-      "Corrected image could not be verified for customer identity and branding.",
+
+    // A second text-reduction edit can remove unsafe pixel copy, but it cannot
+    // repair art direction or scene-depth integration. After one full re-render,
+    // keep the better styled candidate instead of flattening it with an
+    // unrelated correction pass.
+    if (
+      !hasUnsafeOverlayContent(bestReview) &&
+      !hasCorrectableOverlayLengthViolation(bestReview)
+    ) {
+      logTelemetry("image.text_compliance.accepted_after_style_retry", {
+        violations: bestReview.violations,
+        requestedStyle,
+      });
+      return restoreLogoIfMissing(bestCandidate, bestReview);
+    }
+
+    // Rung 2: reduce overlay text on the best candidate, keeping brand identity.
+    const sourcePart = await imagePartFromDataUrl(
+      bestCandidate.value,
+      requestAuthEpoch,
+      signal,
     );
-  }
-  if (
-    concreteViolations(correctedReview).length === 0 &&
-    !hasUnsafeOverlayContent(correctedReview)
-  ) {
-    return restoreLogoIfMissing(corrected, correctedReview);
-  }
+    const correctionParts: unknown[] = [
+      sourcePart,
+      { text: textReductionCorrectionPrompt(dealershipName) },
+    ];
+    if (logoImagePart) correctionParts.push(logoImagePart);
+    const corrected = await generateImageWithFallback(
+      imageTaskForTier(imageTier),
+      correctionParts,
+      // An OpenAI text-to-image fallback cannot see the correction source and
+      // could fabricate replacement people/vehicles. Fail closed instead.
+      undefined,
+      imageAspectRatio,
+      requestAuthEpoch,
+      signal,
+    );
 
-  // Last rung. Only an identity/brand/fidelity/dignity finding is worth
-  // discarding a real render over; a leftover length or craft finding on the
-  // best available candidate ships with telemetry instead of nothing.
-  const finalCandidate =
-    generatedImageReviewScore(correctedReview) >= generatedImageReviewScore(bestReview)
-      ? { run: corrected, review: correctedReview }
-      : { run: bestCandidate, review: bestReview };
-  if (!hasUnsafeOverlayContent(finalCandidate.review)) {
-    logTelemetry("image.text_compliance.accepted_with_length_findings", {
-      violations: finalCandidate.review.violations,
-      wordCount: finalCandidate.review.marketingWordCount,
-      characterCount: finalCandidate.review.marketingCharacterCount,
+    const correctedReview = await reviewOrNull(corrected.value, "corrected");
+    rememberReviewed(corrected, correctedReview);
+    if (correctedReview?.compliant) {
+      return restoreLogoIfMissing(corrected, correctedReview);
+    }
+    if (correctedReview === null) {
+      // The correction pass could not be reviewed. The best reviewed render is
+      // the only candidate whose safety is known; ship it unless it carries an
+      // identity/brand/fidelity/dignity finding.
+      if (!hasUnsafeOverlayContent(bestReview)) {
+        logTelemetry("image.text_compliance.accepted_with_length_findings", {
+          violations: bestReview.violations,
+          wordCount: bestReview.marketingWordCount,
+          characterCount: bestReview.marketingCharacterCount,
+        });
+        reportDegradedShip("correction_unreviewed");
+        return restoreLogoIfMissing(bestCandidate, bestReview);
+      }
+      throw new Error(
+        "Corrected image could not be verified for customer identity and branding.",
+      );
+    }
+    if (
+      concreteViolations(correctedReview).length === 0 &&
+      !hasUnsafeOverlayContent(correctedReview)
+    ) {
+      return restoreLogoIfMissing(corrected, correctedReview);
+    }
+
+    // Last rung. Only an identity/brand/fidelity/dignity finding is worth
+    // discarding a real render over; a leftover length or craft finding on the
+    // best available candidate ships with telemetry instead of nothing.
+    const finalCandidate =
+      generatedImageReviewScore(correctedReview) >=
+      generatedImageReviewScore(bestReview)
+        ? { run: corrected, review: correctedReview }
+        : { run: bestCandidate, review: bestReview };
+    if (!hasUnsafeOverlayContent(finalCandidate.review)) {
+      logTelemetry("image.text_compliance.accepted_with_length_findings", {
+        violations: finalCandidate.review.violations,
+        wordCount: finalCandidate.review.marketingWordCount,
+        characterCount: finalCandidate.review.marketingCharacterCount,
+      });
+      reportDegradedShip(finalCandidate.review.violations[0] ?? "length");
+      return restoreLogoIfMissing(finalCandidate.run, finalCandidate.review);
+    }
+
+    logTelemetry("image.text_compliance.rejected", {
+      uncertain: correctedReview.uncertain,
+      wordCount: correctedReview.marketingWordCount,
+      characterCount: correctedReview.marketingCharacterCount,
+      violations: correctedReview.violations,
     });
-    reportDegradedShip(finalCandidate.review.violations[0] ?? "length");
-    return restoreLogoIfMissing(finalCandidate.run, finalCandidate.review);
+
+    throw new Error(
+      "Generated image did not pass the final text, identity, brand, and campaign-quality review.",
+    );
+  };
+  try {
+    return await completeReview();
+  } catch (error) {
+    if (!isIndeterminateGenerationError(error) || !safeReviewed) throw error;
+    // Only a render whose identity, source fidelity and branding review is
+    // complete may survive a stalled optional improvement. An unreviewed or
+    // unsafe render still fails closed to the caller's original-photo path.
+    assertAuthEpoch(requestAuthEpoch);
+    if (signal?.aborted && signal.reason?.name !== "GenerationBudgetExceeded") {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new DOMException("Request cancelled", "AbortError");
+    }
+    reportDegradedShip("recovery_interrupted");
+    return withLogoCornerCheck(safeReviewed);
   }
-
-  logTelemetry("image.text_compliance.rejected", {
-    uncertain: correctedReview.uncertain,
-    wordCount: correctedReview.marketingWordCount,
-    characterCount: correctedReview.marketingCharacterCount,
-    violations: correctedReview.violations,
-  });
-
-  throw new Error(
-    "Generated image did not pass the final text, identity, brand, and campaign-quality review.",
-  );
 };
-
 /**
  * Gemini 3 image models default to 1K. Prefer production-quality 2K for the
  * premium/standard tiers; Lite only supports 1K.
@@ -2091,7 +2148,11 @@ export const generateSocialPostTextDetailed = async (
       err instanceof Error && err.message.toLowerCase().includes("quality gate")
         ? "quality_gate"
         : "provider_error";
-    if (shouldFallbackToClaude(err) && taskConfig.claudeFallback) {
+    if (
+      !isIndeterminateGenerationError(err) &&
+      shouldFallbackToClaude(err) &&
+      taskConfig.claudeFallback
+    ) {
       console.warn(
         "[generateSocialPostText] Gemini exhausted; falling back to Claude",
         err,
@@ -2332,7 +2393,11 @@ export const editSocialPostTextDetailed = async (
     aiMeta = generated.aiMeta;
   } catch (err) {
     if (isAbortError(err)) throw err;
-    if (shouldFallbackToClaude(err) && taskConfig.claudeFallback) {
+    if (
+      !isIndeterminateGenerationError(err) &&
+      shouldFallbackToClaude(err) &&
+      taskConfig.claudeFallback
+    ) {
       console.warn(
         "[editSocialPostText] Gemini exhausted; falling back to Claude",
         err,
@@ -2490,6 +2555,7 @@ export const generateSocialPost = async (
   // block skips OpenAI (it would fabricate a photo without the customer) and
   // ships the original photo directly.
   const imagePromise = (async () => {
+    const imageBudget = createGenerationBudget(signal);
     try {
       const generated = await generateImageWithFallback(
         imageTaskForTier(imageTier),
@@ -2497,7 +2563,7 @@ export const generateSocialPost = async (
         imagePrompt,
         imageAspectRatio,
         requestAuthEpoch,
-        signal,
+        imageBudget.signal,
       );
       return await enforceGeneratedImageTextCompliance({
         candidate: generated,
@@ -2512,9 +2578,14 @@ export const generateSocialPost = async (
         allowArtisticTransformation: false,
         sourceImageBase64Url: normalisedImage,
         logoPlacement,
-        signal,
+        signal: imageBudget.signal,
       });
     } catch (err) {
+      if (signal?.aborted) {
+        throw signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("Request cancelled", "AbortError");
+      }
       if (isAbortError(err)) throw err;
       console.warn(
         "[generateSocialPost] AI image failed; shipping original photo with caption",
@@ -2544,6 +2615,8 @@ export const generateSocialPost = async (
           attemptIdFromError(err),
         ),
       };
+    } finally {
+      imageBudget.dispose();
     }
   })();
 

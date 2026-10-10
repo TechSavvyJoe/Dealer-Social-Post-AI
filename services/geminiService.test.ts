@@ -16,6 +16,8 @@ import {
   type GeneratedImageTextReview,
 } from "./geminiService";
 import { setProxyCapabilities } from "./proxyCapabilities";
+import { requestCache } from "../utils/requestCache";
+import { fetchFromProxy } from "./geminiProxy";
 import { StyleOption, ToneOption, VideoStyle } from "../types";
 import {
   FLAGS,
@@ -215,6 +217,266 @@ describe("GeminiService model routing", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  describe("bounded post preparation", () => {
+    beforeEach(() => requestCache.clear());
+    afterEach(() => requestCache.clear());
+    const delayedPost = async (unsafe = false, cancel = false) => {
+      vi.useFakeTimers();
+      const parent = new AbortController();
+      let imageCalls = 0;
+      let signalReady!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        signalReady = resolve;
+      });
+      mockGenerateContent.mockImplementation((request) => {
+        if (isImageTextReviewRequest(request)) {
+          return imageTextReviewResponse({
+            ...compliantImageTextReview,
+            compliant: false,
+            visualQualityScore: 3,
+            hasDistinctStyleSignature: false,
+            ...(unsafe ? { preservesSourceSubjects: false } : {}),
+            violations: unsafe ? ["subject_identity_changed"] : ["bland_or_unstyled"],
+          });
+        }
+        if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+          imageCalls += 1;
+          if (imageCalls === 1) return generatedImageResponse("reviewed-render");
+          signalReady();
+          return new Promise((_resolve, reject) => {
+            request.signal.addEventListener(
+              "abort",
+              () => reject(request.signal.reason),
+              { once: true },
+            );
+          });
+        }
+        return {
+          text: () =>
+            "Thank you for being part of the Test Dealer community. We appreciate your trust and look forward to the adventures ahead. #TestDealer",
+        };
+      });
+      const pending = generateSocialPost(
+        "data:image/jpeg;base64,original-photo",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "standard",
+        undefined,
+        true,
+        parent.signal,
+      );
+      // Attach rejection before cancellation to avoid an unhandled-rejection race.
+      const settled = pending.then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      );
+      await ready;
+      if (cancel) parent.abort();
+      else await vi.advanceTimersByTimeAsync(180_000);
+      return { outcome: await settled, imageCalls };
+    };
+
+    it("keeps the caption and a safety-reviewed render when optional recovery exceeds its budget", async () => {
+      const { outcome, imageCalls } = await delayedPost();
+      expect(outcome).toHaveProperty(
+        "value.image",
+        "data:image/png;base64,reviewed-render",
+      );
+      expect(outcome).toHaveProperty("value.aiMeta.image.provider", "gemini");
+      expect(outcome).toHaveProperty(
+        "value.text",
+        "Thank you for being part of the Test Dealer community. We appreciate your trust and look forward to the adventures ahead. #TestDealer",
+      );
+      expect(imageCalls).toBe(2);
+    });
+
+    it("uses the original photo when recovery times out and the reviewed render changed customer identity", async () => {
+      const { outcome, imageCalls } = await delayedPost(true);
+      expect(outcome).toHaveProperty(
+        "value.image",
+        "data:image/jpeg;base64,original-photo",
+      );
+      expect(outcome).toHaveProperty("value.aiMeta.image.provider", "original");
+      expect(imageCalls).toBe(2);
+    });
+
+    it("honors user cancellation even with a previously safety-reviewed render", async () => {
+      const { outcome, imageCalls } = await delayedPost(false, true);
+      expect(outcome).toHaveProperty("error.name", "AbortError");
+      expect(imageCalls).toBe(2);
+    });
+
+    it("finishes with the original photo and completed caption if the first render stalls", async () => {
+      vi.useFakeTimers();
+      let started!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      mockGenerateContent.mockImplementation((request) => {
+        if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+          started();
+          return new Promise((_resolve, reject) => {
+            request.signal.addEventListener(
+              "abort",
+              () => reject(request.signal.reason),
+              { once: true },
+            );
+          });
+        }
+        return {
+          text: () =>
+            "Thank you for being part of the Test Dealer community. We appreciate your trust and look forward to the adventures ahead. #TestDealer",
+        };
+      });
+      const pending = generateSocialPost(
+        "data:image/jpeg;base64,original-photo",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+      );
+      await ready;
+      await vi.advanceTimersByTimeAsync(180_000);
+      const result = await pending;
+      expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+      expect(result.text).toContain("We appreciate your trust");
+      expect(result.captionSource).toBe("ai");
+      expect(
+        mockGenerateContent.mock.calls.filter(([r]) => r.task === "image_standard"),
+      ).toHaveLength(1);
+    });
+
+    it("never keeps an already-generated image whose first safety review stalls", async () => {
+      vi.useFakeTimers();
+      let started!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      mockGenerateContent.mockImplementation((request) => {
+        if (isImageTextReviewRequest(request)) {
+          started();
+          return new Promise((_resolve, reject) => {
+            request.signal.addEventListener(
+              "abort",
+              () => reject(request.signal.reason),
+              { once: true },
+            );
+          });
+        }
+        if (request.generationConfig?.responseModalities?.includes("IMAGE"))
+          return generatedImageResponse("unreviewed-render");
+        return {
+          text: () =>
+            "Thank you for being part of the Test Dealer community. We appreciate your trust and look forward to the adventures ahead. #TestDealer",
+        };
+      });
+      const pending = generateSocialPost(
+        "data:image/jpeg;base64,original-photo",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+      );
+      await ready;
+      await vi.advanceTimersByTimeAsync(180_000);
+      const result = await pending;
+      expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+      expect(result.captionSource).toBe("ai");
+      expect(
+        mockGenerateContent.mock.calls.filter(([r]) => r.task === "vision_review"),
+      ).toHaveLength(1);
+    });
+
+    it("does not charge another model or vendor after an ambiguous image response", async () => {
+      const unknownOutcome = Object.assign(
+        new Error("Connection lost after dispatch"),
+        { kind: "network", retryable: false },
+      );
+      mockGenerateContent.mockImplementation((request) => {
+        if (request.generationConfig?.responseModalities?.includes("IMAGE"))
+          throw unknownOutcome;
+        return {
+          text: () =>
+            "Thank you for being part of the Test Dealer community. We appreciate your trust and look forward to the adventures ahead. #TestDealer",
+        };
+      });
+      const result = await generateSocialPost(
+        "data:image/jpeg;base64,original-photo",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+      );
+      expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+      expect(
+        mockGenerateContent.mock.calls.filter(([r]) => r.task === "image_standard"),
+      ).toHaveLength(1);
+      expect(generateImageViaOpenAI).not.toHaveBeenCalled();
+    });
+
+    it.each(["Safari load failure", "truncated successful response"])(
+      "does not charge another image model after %s through the actual transport",
+      async (scenario) => {
+        const fetchMock =
+          scenario === "Safari load failure"
+            ? vi.fn().mockRejectedValue(new TypeError("Load failed"))
+            : vi
+                .fn()
+                .mockResolvedValue(new Response('{"candidates":', { status: 200 }));
+        vi.stubGlobal("fetch", fetchMock);
+        mockGenerateContent.mockImplementation((request) => {
+          if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+            return fetchFromProxy(
+              "POST",
+              "v1beta/models/test:generateContent",
+              {},
+              "image_standard",
+              undefined,
+              undefined,
+              request.signal,
+            );
+          }
+          return {
+            text: () =>
+              "Thank you for being part of the Test Dealer community. We appreciate your trust and look forward to the adventures ahead. #TestDealer",
+          };
+        });
+        const result = await generateSocialPost(
+          "data:image/jpeg;base64,original-photo",
+          StyleOption.Modern,
+          ToneOption.Professional,
+          "Test Dealer",
+        );
+        expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+        expect(result.captionSource).toBe("ai");
+        expect(
+          mockGenerateContent.mock.calls.filter(([r]) => r.task === "image_standard"),
+        ).toHaveLength(1);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(generateImageViaOpenAI).not.toHaveBeenCalled();
+      },
+    );
+
+    it("does not charge Claude after an ambiguous caption response", async () => {
+      mockGenerateContent.mockRejectedValue(
+        Object.assign(new Error("Connection lost after dispatch"), {
+          kind: "network",
+          retryable: false,
+        }),
+      );
+      const result = await generateSocialPostTextDetailed(
+        "data:image/jpeg;base64,original-photo",
+        ToneOption.Professional,
+        "Test Dealer",
+      );
+      expect(result.captionSource).toBe("basic_fallback");
+      expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+      expect(generateTextViaClaude).not.toHaveBeenCalled();
+    });
   });
 
   it("routes text generation through the caption task's primary model", async () => {
