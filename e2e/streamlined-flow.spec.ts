@@ -1259,11 +1259,12 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
     page.getByRole("heading", { name: "Your next great post." }),
   ).toBeVisible();
   await page.getByRole("button", { name: "See all" }).click();
-  await page.getByRole("button", { name: /^Open Team/ }).click();
-  // Reopening fetches the saved image before the lazy post screen can render.
-  await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible({
-    timeout: 15000,
-  });
+  // Home's preview has the same Open label. Wait for the destination before
+  // clicking so its image request cannot belong to the exiting Home screen.
+  const work = page.getByRole("region", { name: "My work", exact: true });
+  await expect(work.getByRole("heading", { name: "My work", level: 1 })).toBeVisible();
+  await work.getByRole("button", { name: /^Open Team/ }).click();
+  await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible();
   const channels = page.getByRole("group", { name: "Share to" });
   await channels.getByRole("button", { name: "LinkedIn" }).click();
   await expect(channels.getByRole("button", { name: "LinkedIn" })).toHaveAttribute(
