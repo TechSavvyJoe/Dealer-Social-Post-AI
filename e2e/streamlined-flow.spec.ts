@@ -1270,7 +1270,11 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
   // Home's preview has the same Open label. Wait for the destination before
   // clicking so its image request cannot belong to the exiting Home screen.
   const work = page.getByRole("region", { name: "My work", exact: true });
-  await expect(work.getByRole("heading", { name: "My work", level: 1 })).toBeVisible();
+  // The first visit compiles this lazy screen on Vite's CI development server.
+  // Use the workspace-load budget before exercising its saved-post controls.
+  await expect(work.getByRole("heading", { name: "My work", level: 1 })).toBeVisible({
+    timeout: 15000,
+  });
   await work.getByRole("button", { name: /^Open Team/ }).click();
   await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible();
   const channels = page.getByRole("group", { name: "Share to" });

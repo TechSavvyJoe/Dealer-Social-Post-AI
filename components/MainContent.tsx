@@ -315,9 +315,7 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
     case AppStep.POST:
       content = generatedPost ? (
         <LazyPost
-          key={
-            generatedPost.postId || generatedPost.aiMeta?.image?.attemptId || "unsaved"
-          }
+          key={`${authEpoch}:${currentDealer?.id || "no-dealer"}:${generatedPost.saveOperationId || generatedPost.postId || generatedPost.aiMeta?.image?.attemptId || "unsaved"}`}
           post={generatedPost}
           onStartOver={props.onReset}
           onRemix={props.onRemix}

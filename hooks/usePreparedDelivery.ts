@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAppStore } from "../stores/appStore";
 import type { GeneratedPost } from "../types";
 import {
   derivePlatformDeliveryPlan,
@@ -19,7 +20,12 @@ import type { UseVideoJobsResult } from "./useVideoJobs";
 export interface UsePreparedDeliveryOptions {
   post: Pick<
     GeneratedPost,
-    "image" | "platformIds" | "primaryFormatId" | "mediaOutputMode" | "postId"
+    | "image"
+    | "platformIds"
+    | "primaryFormatId"
+    | "mediaOutputMode"
+    | "postId"
+    | "saveOperationId"
   >;
   /** PostResult's `resultIdentity`; keys the primary (no-delivery) preparation. */
   resultIdentity: string;
@@ -74,7 +80,11 @@ export const usePreparedDelivery = ({
     null,
   );
   const [mediaPreparationNonce, setMediaPreparationNonce] = useState(0);
-  const [formattedPreviewUrl, setFormattedPreviewUrl] = useState<string | null>(null);
+  const authEpoch = useAppStore((state) => state.authEpoch);
+  const dealerId = useAppStore((state) => state.currentDealer?.id);
+  const [preview, setPreview] = useState<{ fence: object; url: string } | null>(null);
+  const ownedPreview = useRef<{ fence: object; url: string } | null>(null);
+  const [preparedSaveFence, setPreparedSaveFence] = useState<object | null>(null);
   const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null);
   const [isPreparingSave, setIsPreparingSave] = useState(false);
 
@@ -149,8 +159,6 @@ export const usePreparedDelivery = ({
     : selectedDelivery
       ? preparationKeyForDelivery(selectedDelivery)
       : `primary:${resultIdentity}`;
-  const activePreparedSave =
-    preparedSaveForKey === selectedPreparationKey ? preparedSave : null;
   const activeImageFormat = useMemo(() => {
     if (selectedDelivery?.mediaKind === "photo") {
       return EXPORT_FORMATS.find(
@@ -159,6 +167,28 @@ export const usePreparedDelivery = ({
     }
     return primarySaveFormat;
   }, [primarySaveFormat, selectedDelivery]);
+
+  // A saved ID changes filenames, not the creative being displayed. Keep the
+  // preview within the same operation, image, destination and signed-in store.
+  const creativeIdentity = post.saveOperationId || post.postId || resultIdentity;
+  const previewFence = useMemo(
+    () => ({}),
+    [
+      authEpoch,
+      dealerId,
+      creativeIdentity,
+      post.image,
+      activeImageFormat?.id,
+      selectedDeliveryId,
+      manualVideoSelected,
+      videoUrl,
+    ],
+  );
+  const activePreparedSave =
+    preparedSaveForKey === selectedPreparationKey && preparedSaveFence === previewFence
+      ? preparedSave
+      : null;
+  const formattedPreviewUrl = preview?.fence === previewFence ? preview.url : null;
 
   useEffect(() => {
     if (
@@ -289,6 +319,7 @@ export const usePreparedDelivery = ({
         if (active) {
           setPreparedSave(prepared);
           setPreparedSaveForKey(preparationKey);
+          setPreparedSaveFence(previewFence);
         }
       })
       .catch((err) => {
@@ -307,6 +338,7 @@ export const usePreparedDelivery = ({
     };
   }, [
     activeImageFormat,
+    previewFence,
     manualVideoSelected,
     post.image,
     mediaPreparationNonce,
@@ -324,19 +356,37 @@ export const usePreparedDelivery = ({
   ]);
 
   useEffect(() => {
+    const previous = ownedPreview.current;
+    if (previous && (previous.fence !== previewFence || videoUrl)) {
+      URL.revokeObjectURL(previous.url);
+      ownedPreview.current = null;
+      setPreview(null);
+    }
+    // File preparation remains unavailable while the filename is rebuilt. The
+    // already formatted image can stay visible if its creative fence is intact.
     if (
       !activePreparedSave ||
       activePreparedSave.kind !== "image" ||
       videoUrl ||
       typeof URL.createObjectURL !== "function"
-    ) {
-      setFormattedPreviewUrl(null);
+    )
       return;
-    }
-    const url = URL.createObjectURL(activePreparedSave.file);
-    setFormattedPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [activePreparedSave, videoUrl]);
+    const next = {
+      fence: previewFence,
+      url: URL.createObjectURL(activePreparedSave.file),
+    };
+    if (ownedPreview.current) URL.revokeObjectURL(ownedPreview.current.url);
+    ownedPreview.current = next;
+    setPreview(next);
+  }, [activePreparedSave, previewFence, videoUrl]);
+
+  useEffect(
+    () => () => {
+      if (ownedPreview.current) URL.revokeObjectURL(ownedPreview.current.url);
+      ownedPreview.current = null;
+    },
+    [],
+  );
 
   /** PostResult's former handleSelectDelivery. */
   const selectDeliveryById = (deliveryId: string) => {

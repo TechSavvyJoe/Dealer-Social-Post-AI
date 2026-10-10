@@ -13,8 +13,9 @@ import { describe, expect, it } from "vitest";
 /**
  * config/gemini-model-policy.json carries a `verifiedAt` date and
  * scripts/check-model-policy.mjs hard-fails once it is 45 days old. That check
- * runs inside typecheck-and-test, which playwright, container-smoke and the
- * deploy workflow all depend on, so the day it trips every release stops.
+ * runs inside typecheck-and-test, which the Playwright aggregate requires.
+ * Deployment requires the entire CI workflow to succeed, so an expired policy
+ * still stops every release while independent checks can run in parallel.
  *
  * Before this window existed, CI was green on day 44 and every deploy was
  * blocked on day 45 with no notice. These tests pin the two-week runway.

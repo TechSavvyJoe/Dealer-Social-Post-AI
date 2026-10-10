@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useAppStore } from "../stores/appStore";
 import { VideoStyle } from "../types";
 import { derivePlatformDeliveryPlan } from "../services/platformOutputs";
 import type { PreparedMediaSave } from "../utils/mediaSave";
@@ -509,6 +510,89 @@ describe("usePreparedDelivery", () => {
     expect(result.current.selectedDeliveryId).toBe("gbp:photo");
     unmount();
   });
+
+  it("keeps the same formatted preview while adopting a saved ID and preparing its new filename", async () => {
+    const options = baseOptions({
+      post: {
+        image: IMAGE,
+        platformIds: ["instagram_feed"],
+        mediaOutputMode: "photo",
+        saveOperationId: "operation-1",
+      },
+      resultIdentity: "attempt-1",
+    });
+    const { result, rerender, unmount } = renderHook(
+      (props) => usePreparedDelivery(props),
+      { initialProps: options },
+    );
+    await waitFor(() => expect(result.current.formattedPreviewUrl).toBeTruthy());
+    const preview = result.current.formattedPreviewUrl;
+    let finish!: (value: string) => void;
+    mocks.renderFormatIfNeeded.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    rerender({
+      ...options,
+      post: { ...options.post, postId: "saved-1" },
+      resultIdentity: "saved-1",
+    });
+    expect(result.current.isPreparingSave).toBe(true);
+    expect(result.current.activePreparedSave).toBeNull();
+    expect(result.current.formattedPreviewUrl).toBe(preview);
+    expect(revokeObjectURL).not.toHaveBeenCalledWith(preview);
+    await act(async () => finish("formatted-same-image"));
+    await waitFor(() => expect(result.current.isPreparingSave).toBe(false));
+    expect(result.current.activePreparedSave?.filename).toContain("saved-1");
+    expect(revokeObjectURL).toHaveBeenCalledWith(preview);
+    unmount();
+  });
+
+  it.each(["image", "operation", "auth", "dealer"])(
+    "drops and revokes a retained preview across a changed %s",
+    async (boundary) => {
+      useAppStore.setState({
+        authEpoch: 1,
+        currentDealer: { id: "dealer-1", name: "Test" },
+      });
+      const options = baseOptions();
+      options.post.saveOperationId = "operation-1";
+      const { result, rerender, unmount } = renderHook(
+        (props) => usePreparedDelivery(props),
+        { initialProps: options },
+      );
+      await waitFor(() => expect(result.current.formattedPreviewUrl).toBeTruthy());
+      const preview = result.current.formattedPreviewUrl;
+      let finish!: (value: string) => void;
+      mocks.renderFormatIfNeeded.mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      act(() => {
+        if (boundary === "auth") useAppStore.setState({ authEpoch: 2 });
+        if (boundary === "dealer")
+          useAppStore.setState({ currentDealer: { id: "dealer-2", name: "Other" } });
+        rerender({
+          ...options,
+          post: {
+            ...options.post,
+            ...(boundary === "image" ? { image: "other-image" } : {}),
+            ...(boundary === "operation" ? { saveOperationId: "operation-2" } : {}),
+          },
+        });
+      });
+      expect(result.current.formattedPreviewUrl).toBeNull();
+      expect(result.current.activePreparedSave).toBeNull();
+      expect(revokeObjectURL).toHaveBeenCalledWith(preview);
+      await act(async () => finish("new-formatted-image"));
+      await waitFor(() => expect(result.current.formattedPreviewUrl).toBeTruthy());
+      unmount();
+    },
+  );
 
   it("owns one preview object URL at a time and revokes it when it is replaced or unmounted", async () => {
     const options = baseOptions();
