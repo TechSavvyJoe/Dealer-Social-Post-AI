@@ -39,9 +39,13 @@ function canonical(value) {
   }
   return value;
 }
-function requestText(body) {
+function requestText(body, preserveLineEndings) {
   return FIELDS.map(function (name) {
     let value = body[name] == null ? "" : String(body[name]);
+    // Multipart encoders convert LF and lone CR to CRLF on the wire. Hash the
+    // same logical lines as the browser, while retaining legacy wire digests
+    // for already-open clients and previously reserved save operations.
+    if (!preserveLineEndings) value = value.replace(/\r\n?/g, "\n");
     if (
       ["platform_ids", "platform_captions", "website_draft"].indexOf(name) !== -1 &&
       value
@@ -62,7 +66,7 @@ function failure(code, status, message) {
   error.postSaveStatus = status;
   return error;
 }
-function fingerprint(body, creativeFile, creativeMime) {
+function fingerprintMedia(creativeFile, creativeMime) {
   let media = "";
   if (creativeFile) {
     let reader = null;
@@ -76,15 +80,30 @@ function fingerprint(body, creativeFile, creativeMime) {
       if (reader) reader.close();
     }
   }
+  return [
+    $security.sha256(media),
+    creativeFile
+      ? [String(creativeFile.originalName), String(creativeMime || "")]
+      : null,
+  ];
+}
+function fingerprintFromMedia(body, media, preserveLineEndings) {
   return $security.sha256(
-    JSON.stringify([
-      requestText(body),
-      $security.sha256(media),
-      creativeFile
-        ? [String(creativeFile.originalName), String(creativeMime || "")]
-        : null,
-    ]),
+    JSON.stringify([requestText(body, preserveLineEndings), media[0], media[1]]),
   );
+}
+function fingerprint(body, creativeFile, creativeMime) {
+  return fingerprintFromMedia(body, fingerprintMedia(creativeFile, creativeMime));
+}
+function matchFingerprint(body, creativeFile, creativeMime, submittedDigest) {
+  if (!/^[a-f0-9]{64}$/.test(submittedDigest)) return "";
+  const media = fingerprintMedia(creativeFile, creativeMime);
+  if (fingerprintFromMedia(body, media) === submittedDigest) return submittedDigest;
+  // Return the verified submitted digest, not a rewritten digest: an existing
+  // operation remains bound to the exact digest it originally reserved.
+  return fingerprintFromMedia(body, media, true) === submittedDigest
+    ? submittedDigest
+    : "";
 }
 function withFence(dao, dealerId, callback) {
   let result;
@@ -247,6 +266,7 @@ module.exports = {
   FIELDS,
   requestText,
   fingerprint,
+  matchFingerprint,
   validOperation,
   failure,
   withFence,

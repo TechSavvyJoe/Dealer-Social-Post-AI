@@ -21,6 +21,7 @@ import { createServer as createHttpServer, request as httpRequest } from "node:h
 import { createServer } from "node:net";
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
+import { runInNewContext } from "node:vm";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const binary = process.env.POCKETBASE_TEST_BINARY || join(root, "pocketbase");
@@ -208,6 +209,10 @@ function makeOperationForm({
   png,
   filename = "post-creative.png",
   mime = "image/png",
+  captionAttemptId = "",
+  imageAttemptId = "",
+  clientPolicyVersion = "",
+  scenarioId = "",
 }) {
   const values = {
     salesperson_name: person.name,
@@ -220,6 +225,10 @@ function makeOperationForm({
     media_output_mode: "photo",
     primary_format_id: "feed_portrait",
     image_aspect_ratio: "4:5",
+    caption_attempt_id: captionAttemptId,
+    image_attempt_id: imageAttemptId,
+    model_policy_version: clientPolicyVersion,
+    scenario_id: scenarioId,
     caption,
   };
   const canonical = (value) => {
@@ -234,6 +243,8 @@ function makeOperationForm({
     return value;
   };
   const fields = POST_FIELDS.map((name) => {
+    // Deliberately mirror an already-open legacy client: LF is hashed before
+    // native FormData converts it to CRLF, and legacy CRLF hashes stay intact.
     let value = String(values[name] || "");
     if (
       ["platform_ids", "platform_captions", "website_draft"].includes(name) &&
@@ -349,6 +360,73 @@ async function countRecords() {
       counts[table] = Number(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n);
     }
     return counts;
+  } finally {
+    db.close();
+  }
+}
+
+function syntheticSessionHash(cookie) {
+  const token = cookie.match(/^dealer_session=([^;]+)$/)?.[1];
+  assert(token, "Synthetic generation fixture requires an exact session cookie.");
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function seedGenerationEvents(context, attemptId, modelPolicy, events) {
+  const db = new DatabaseSync(join(dataDir, "data.db"));
+  try {
+    const insert = db.prepare(
+      "INSERT INTO generation_events " +
+        "(id, created, updated, dealer, owner_session_hash, attempt_id, task, tier, provider, model, succeeded, status_code, model_policy_version, occurred_at, consumed_post) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    const now = Date.now();
+    const timestamp = (time) => new Date(time).toISOString().replace("T", " ");
+    for (const event of events) {
+      const task = event.task || "image_standard";
+      const taskPolicy = modelPolicy.tasks[task];
+      assert(taskPolicy, `Unknown synthetic generation task ${task}.`);
+      insert.run(
+        randomBytes(8).toString("hex").slice(0, 15),
+        timestamp(now),
+        timestamp(now),
+        event.dealer || context.dealer.id,
+        event.owner || syntheticSessionHash(context.sellerCookie),
+        attemptId,
+        task,
+        taskPolicy.tier,
+        "gemini",
+        taskPolicy.models[0],
+        event.succeeded === false ? 0 : 1,
+        event.succeeded === false ? 503 : 200,
+        event.policy === undefined ? String(modelPolicy.version) : event.policy,
+        timestamp(now - (event.ageMs || 0)),
+        event.consumedPost || "",
+      );
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function recoveryRecords(postId, attemptIds) {
+  const db = new DatabaseSync(join(dataDir, "data.db"), { readOnly: true });
+  try {
+    return {
+      post: postId
+        ? db
+            .prepare(
+              "SELECT model_policy_version, caption_source, generation_tier, generation_model, generation_fallback_count FROM posts WHERE id = ?",
+            )
+            .get(postId)
+        : null,
+      events: attemptIds.flatMap((attemptId) =>
+        db
+          .prepare(
+            "SELECT task, consumed_post, model_policy_version FROM generation_events WHERE attempt_id = ? ORDER BY occurred_at DESC",
+          )
+          .all(attemptId),
+      ),
+    };
   } finally {
     db.close();
   }
@@ -595,10 +673,11 @@ exec ${shellQuote(duPath)} "$@"
   );
 
   const operationId = "mediaStorageSameOperation20261009";
+  const operationCaption = "Concurrent local result recovery fixture.\n\n#Synthetic";
   const operationRequest = makeOperationForm({
     person: b.seller,
     operation: operationId,
-    caption: "Concurrent local result recovery fixture.",
+    caption: operationCaption,
     png,
   });
   const beforeLedgerCounts = await countRecords();
@@ -610,7 +689,7 @@ exec ${shellQuote(duPath)} "$@"
       makeOperationForm({
         person: b.seller,
         operation: operationId,
-        caption: "Concurrent local result recovery fixture.",
+        caption: operationCaption,
         png,
       }),
       b.sellerCookie,
@@ -666,7 +745,7 @@ exec ${shellQuote(duPath)} "$@"
     const altered = makeOperationForm({
       person: b.seller,
       operation: operationId,
-      caption: variant.caption || "Concurrent local result recovery fixture.",
+      caption: variant.caption || operationCaption,
       png: variant.png || png,
       filename: variant.filename || "post-creative.png",
       mime: variant.mime || "image/png",
@@ -699,6 +778,319 @@ exec ${shellQuote(duPath)} "$@"
     "An exact operation replay recovered the existing post while the fake capacity was full without new assets.",
   );
   await setCapacity(2 * 1024 * 1024);
+
+  const legacyOperationId = "mediaStorageLegacyCrlfOperation20261010";
+  const legacyRequest = makeOperationForm({
+    person: b.seller,
+    operation: legacyOperationId,
+    caption: "Legacy multiline recovery fixture.\r\n\r\n#Synthetic",
+    png,
+  });
+  const beforeLegacy = await countRecords();
+  const legacySaved = await submitOperation(legacyRequest, b.sellerCookie);
+  assert.equal(legacySaved.status, 200);
+  const legacyRetry = await submitOperation(legacyRequest, b.sellerCookie);
+  assert.equal(legacyRetry.status, 200);
+  assert.equal(legacyRetry.value.id, legacySaved.value.id);
+  const legacyLookup = await api(
+    `/api/app/post-operations/${legacyOperationId}?payload_digest=${legacyRequest.digest}`,
+    { cookie: b.sellerCookie },
+  );
+  assert.equal(legacyLookup.value.id, legacySaved.value.id);
+  assert.equal((await countRecords()).posts - beforeLegacy.posts, 1);
+  const legacyDb = new DatabaseSync(join(dataDir, "data.db"));
+  try {
+    assert.equal(
+      legacyDb
+        .prepare(
+          "SELECT payload_digest FROM _post_save_operations WHERE operation_id = ?",
+        )
+        .get(legacyOperationId).payload_digest,
+      legacyRequest.digest,
+      "Legacy recovery must retain the verified original operation digest.",
+    );
+  } finally {
+    legacyDb.close();
+  }
+  const invalidDigestRequest = makeOperationForm({
+    person: b.seller,
+    operation: legacyOperationId,
+    caption: "Legacy multiline recovery fixture.\r\n\r\n#Synthetic",
+    png,
+  });
+  invalidDigestRequest.form.set("save_payload_digest", "0".repeat(64));
+  const invalidDigestSave = await submitOperation(invalidDigestRequest, b.sellerCookie);
+  assert.equal(invalidDigestSave.status, 400);
+  assert.equal(invalidDigestSave.value.code, "POST_SAVE_PAYLOAD_INVALID");
+  assert.equal((await countRecords()).posts - beforeLegacy.posts, 1);
+  checks.push(
+    "Native multipart LF and legacy CRLF saves/retries preserved one post, its exact operation digest, and rejected a forged digest.",
+  );
+
+  // These are prompt-free server-shaped events in this disposable database.
+  // No provider request, production key, customer photo, or live data is used.
+  const policyModule = { exports: {} };
+  runInNewContext(await readFile(join(root, "pb_hooks/requestPolicies.js"), "utf8"), {
+    module: policyModule,
+  });
+  const recoveryPolicy = policyModule.exports.geminiModelPolicySnapshot();
+  const currentPolicyVersion = String(recoveryPolicy.version);
+  assert.equal(
+    (await api("/api/app/health")).value.modelPolicyVersion,
+    currentPolicyVersion,
+  );
+  const recoveryDealer = await provisionDealer(admin, "Synthetic Recovery C", false);
+  const minute = 60 * 1000;
+  const day = 24 * 60 * minute;
+  const freshRecoveryId = () => `syntheticRecovery${randomBytes(16).toString("hex")}`;
+  const saveRecovery = async ({
+    name,
+    imageEvents = [],
+    captionEvents = [],
+    unlocked = false,
+    clientPolicyVersion = currentPolicyVersion,
+    sharedAttempt = false,
+    expectedClaims,
+    expectedStatus = 200,
+  }) => {
+    const operation = freshRecoveryId();
+    const imageAttemptId = freshRecoveryId();
+    const captionAttemptId = sharedAttempt
+      ? imageAttemptId
+      : captionEvents.length
+        ? freshRecoveryId()
+        : "";
+    seedGenerationEvents(recoveryDealer, imageAttemptId, recoveryPolicy, imageEvents);
+    if (captionEvents.length)
+      seedGenerationEvents(
+        recoveryDealer,
+        captionAttemptId,
+        recoveryPolicy,
+        captionEvents,
+      );
+    const before = await countRecords();
+    const beforeFiles = await mediaFiles();
+    const request = makeOperationForm({
+      person: recoveryDealer.seller,
+      operation,
+      caption: "Synthetic delayed generation recovery.\n\n#Synthetic",
+      png,
+      captionAttemptId,
+      imageAttemptId,
+      clientPolicyVersion,
+      scenarioId: "new_arrival",
+    });
+    const saved = await submitOperation(request, recoveryDealer.sellerCookie);
+    assert.equal(
+      saved.status,
+      expectedStatus,
+      `${name}: unexpected save response ${saved.value.code || saved.value.error || ""}.`,
+    );
+    const attempts = [...new Set([imageAttemptId, captionAttemptId].filter(Boolean))];
+    if (expectedStatus !== 200) {
+      assert.equal(saved.value.code, "GENERATION_ATTEMPT_ALREADY_USED", name);
+      assert.equal(
+        (await countRecords()).posts,
+        before.posts,
+        `${name}: rejected attempt created a post.`,
+      );
+      assert.equal(
+        (await mediaFiles()).length,
+        beforeFiles.length,
+        `${name}: rejected attempt wrote a creative.`,
+      );
+      assert.equal(
+        recoveryRecords(null, attempts).events.filter(
+          (event) => event.consumed_post === "",
+        ).length,
+        imageEvents.concat(captionEvents).filter((event) => !event.consumedPost).length,
+        `${name}: rejection consumed another event.`,
+      );
+      return;
+    }
+    assert(saved.value.id && saved.value.updated, `${name}: missing saved revision.`);
+    assert.equal(
+      !!saved.value.image_review_required,
+      !unlocked,
+      `${name}: incorrect saved image lock.`,
+    );
+    const result = recoveryRecords(saved.value.id, attempts);
+    assert.equal(
+      result.post.model_policy_version,
+      unlocked ? currentPolicyVersion : "",
+      `${name}: client policy overrode server image evidence.`,
+    );
+    const eligibleCount =
+      expectedClaims ??
+      imageEvents
+        .concat(captionEvents)
+        .filter(
+          (event) =>
+            (event.policy === undefined || event.policy === currentPolicyVersion) &&
+            (event.ageMs || 0) >= 0 &&
+            (event.ageMs || 0) < day,
+        ).length;
+    assert.equal(
+      result.events.filter((event) => event.consumed_post === saved.value.id).length,
+      eligibleCount,
+      `${name}: eligible evidence was not claimed exactly once.`,
+    );
+    const shared = await api(`/api/app/posts/${saved.value.id}/shared`, {
+      method: "POST",
+      cookie: recoveryDealer.sellerCookie,
+      data: {
+        channel: "facebook_feed",
+        via: "download",
+        caption_mode: "primary",
+        disclosures: "",
+        expected_post_revision: saved.value.updated,
+      },
+      expected: unlocked ? 200 : 409,
+    });
+    if (!unlocked)
+      assert.equal(
+        shared.value.code,
+        "IMAGE_REVIEW_REQUIRED",
+        `${name}: share failed for the wrong lock.`,
+      );
+    const lookup = await api(
+      `/api/app/post-operations/${operation}?payload_digest=${request.digest}`,
+      {
+        cookie: recoveryDealer.sellerCookie,
+      },
+    );
+    assert.equal(
+      lookup.value.id,
+      saved.value.id,
+      `${name}: recovery lookup lost the saved post.`,
+    );
+    assert.equal(
+      !!lookup.value.image_review_required,
+      !unlocked,
+      `${name}: recovery lookup changed the image lock.`,
+    );
+    return result;
+  };
+
+  await saveRecovery({
+    name: "21-minute current image",
+    imageEvents: [{ ageMs: 21 * minute }],
+    unlocked: true,
+  });
+  await saveRecovery({
+    name: "Current studio image just inside one day",
+    imageEvents: [{ task: "image_studio", ageMs: day - minute }],
+    unlocked: true,
+  });
+  checks.push(
+    "Current-policy image attempts at 21 minutes and just inside 24 hours saved, reconciled, and shared without an image-review lock.",
+  );
+
+  for (const [name, event] of [
+    ["Expired image evidence", { ageMs: day + minute }],
+    ["Missing image policy", { policy: "" }],
+    ["Old image policy", { policy: "synthetic-old-policy" }],
+    ["Future image evidence", { ageMs: -5 * minute }],
+  ]) {
+    await saveRecovery({ name, imageEvents: [event] });
+  }
+  checks.push(
+    "Expired, missing-policy, old-policy, and future image events stayed unclaimed and left saving/recovery/share locked.",
+  );
+
+  for (const [name, imageEvents] of [
+    ["Caption with old image", [{ policy: "synthetic-old-policy" }]],
+    ["Caption without image evidence", []],
+    ["Caption with expired image", [{ ageMs: day + minute }]],
+    ["Caption with missing image policy", [{ policy: "" }]],
+  ]) {
+    const result = await saveRecovery({
+      name,
+      imageEvents,
+      captionEvents: [{ task: "caption" }],
+    });
+    assert.equal(
+      result.post.caption_source,
+      "ai",
+      `${name}: current caption evidence was lost.`,
+    );
+  }
+  checks.push(
+    "Current caption evidence retained AI caption provenance but could not unlock absent, old-policy, missing-policy, or expired image evidence.",
+  );
+
+  const originalFallback = await saveRecovery({
+    name: "Current failed image original-photo fallback",
+    imageEvents: [{ succeeded: false, ageMs: 21 * minute }],
+    unlocked: true,
+  });
+  assert.equal(originalFallback.post.generation_tier, "");
+  assert.equal(originalFallback.post.generation_model, "");
+  assert.equal(originalFallback.post.generation_fallback_count, 1);
+  checks.push(
+    "A current failed image attempt preserved the original-photo fallback, unlocked delivery, and recorded failure without inventing AI success.",
+  );
+
+  await saveRecovery({
+    name: "Forged client policy without evidence",
+    clientPolicyVersion: currentPolicyVersion,
+  });
+  await saveRecovery({
+    name: "Wrong-session image evidence",
+    imageEvents: [{ owner: syntheticSessionHash(b.sellerCookie) }],
+    expectedClaims: 0,
+  });
+  await saveRecovery({
+    name: "Wrong-dealer image evidence",
+    imageEvents: [{ dealer: b.dealer.id }],
+    expectedClaims: 0,
+  });
+  checks.push(
+    "Client policy assertions and image evidence from another session or dealer could not unlock a creative.",
+  );
+
+  for (const [name, consumed] of [
+    ["Consumed image older than one day", { ageMs: day + minute }],
+    ["Consumed image from old policy", { policy: "synthetic-old-policy" }],
+  ]) {
+    await saveRecovery({
+      name,
+      imageEvents: [{ ...consumed, consumedPost: legacySaved.value.id }, {}],
+      expectedStatus: 409,
+    });
+  }
+  await saveRecovery({
+    name: "Older consumed claim hidden by 40 recent rows",
+    imageEvents: [
+      {
+        ageMs: day + minute,
+        policy: "synthetic-old-policy",
+        consumedPost: legacySaved.value.id,
+      },
+      ...Array.from({ length: 40 }, (_, index) => ({ ageMs: (index + 1) * 1000 })),
+    ],
+    expectedStatus: 409,
+  });
+  checks.push(
+    "Consumed exact-attempt evidence rejected reuse across age/policy filters and behind 40 newer rows, with no post, asset, or additional event claim.",
+  );
+
+  const sharedAttempt = await saveRecovery({
+    name: "One shared caption/image logical attempt",
+    imageEvents: [{}],
+    captionEvents: [{ task: "caption" }],
+    sharedAttempt: true,
+    unlocked: true,
+    expectedClaims: 2,
+  });
+  assert.equal(sharedAttempt.post.caption_source, "ai");
+  assert.equal(
+    sharedAttempt.post.generation_tier,
+    recoveryPolicy.tasks.image_standard.tier,
+  );
+  checks.push(
+    "A shared caption/image logical attempt claimed its two unique events once and retained both caption and image provenance.",
+  );
 
   let relay;
   const unknownOperationId = "mediaStorageLostResponse20261009";
