@@ -1,293 +1,378 @@
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectionsPanel } from "../components/admin/ConnectionsPanel";
 import { useAppStore } from "../stores/appStore";
-import type { Dealer } from "../types";
+import type { ConnectionsResponse, ManagedConnection } from "../services/connections";
+
 vi.mock("../components/SystemHealthPanel", () => ({
   SystemHealthPanel: () => <div>Runtime health</div>,
 }));
-vi.mock("../components/ui/Toast", () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn() }),
-}));
-const status = { configured: true, enabled: true, verification: "not_tested" };
-const fixture = {
-  scope: "configuration_only",
-  providers: {
-    gemini: status,
-    anthropic: { ...status, configured: false, enabled: false },
-    openai: { ...status, enabled: false },
-  },
-  automation: {
-    customer_hub: status,
-    walkaround: { ...status, configured: false, enabled: false },
-  },
-  apiContractVersion: "2026-test",
+
+const connection = (
+  service: ManagedConnection["service"],
+  state: ManagedConnection["state"],
+  overrides: Partial<ManagedConnection> = {},
+): ManagedConnection => ({
+  service,
+  scope: service === "website" ? "dealer" : "global",
+  ...(service === "website" ? { dealerId: "dealer-1" } : {}),
+  configured: state !== "needs_setup",
+  enabled: state !== "off",
+  revision: 2,
+  state,
+  capabilities: [],
+  nextAction:
+    state === "ready" ? "No action needed." : "Save settings, then run a test.",
+  settings: {},
+  credentialConfigured: {},
+  ...overrides,
+});
+
+const makeFixture = (): ConnectionsResponse => ({
+  scope: "guided_setup",
+  secureStorageAvailable: true,
+  dealers: [
+    { id: "dealer-1", name: "Northside Motors" },
+    { id: "dealer-2", name: "Southside Motors" },
+  ],
+  services: [
+    connection("gemini", "needs_test", {
+      credentialConfigured: { apiKey: true },
+      capabilities: [
+        { id: "text", label: "Caption access", state: "not_tested" },
+        { id: "images", label: "Image generation", state: "not_tested" },
+        { id: "video", label: "AI video generation", state: "not_tested" },
+      ],
+    }),
+    connection("anthropic", "off", { configured: false, enabled: false }),
+    connection("openai", "needs_test"),
+    connection("website", "needs_setup", { configured: false, enabled: false }),
+    connection("website", "needs_test", {
+      dealerId: "dealer-2",
+      settings: { origin: "https://south.example", destinationId: "south" },
+      capabilities: [
+        { id: "website", label: "Private website draft", state: "not_tested" },
+      ],
+    }),
+    connection("walkaround", "needs_test"),
+  ],
+  apiContractVersion: "guided-setup-v1",
   modelPolicyVersion: "5",
-  capabilities: { veoNegativePrompt: true },
-};
-const mount = (dealers?: Dealer[], onCheckAgain?: () => void) =>
+  capabilities: { veo: true },
+});
+
+const mount = () =>
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <ConnectionsPanel dealers={dealers} onCheckAgain={onCheckAgain} />
+      <ConnectionsPanel />
     </QueryClientProvider>,
   );
-const card = (title: string) =>
-  screen.getByRole("region", { name: title }) as HTMLElement;
-const respondWith = (body: unknown) =>
-  vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => body } as Response);
 
-describe("system-only connection diagnostics", () => {
+const jsonResponse = (body: unknown, status = 200) =>
+  ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
+const getCall = () =>
+  vi
+    .mocked(fetch)
+    .mock.calls.find(
+      ([url, init]) =>
+        String(url) === "/api/app/connections" && (!init || init.method === "GET"),
+    );
+
+describe("guided system connections", () => {
+  afterEach(() => cleanup());
+
   beforeEach(() => {
     useAppStore.setState({ role: "super_admin", authEpoch: 1 });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, json: async () => fixture }),
-    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(makeFixture())));
   });
-  it("does not request or render provider configuration for dealership managers", async () => {
+
+  it("renders only for system admins and uses the guided setup endpoint", async () => {
+    const fixture = makeFixture();
+    fixture.services[0] = connection("gemini", "ready", {
+      credentialConfigured: { apiKey: true },
+    });
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(fixture));
     useAppStore.setState({ role: "dealer_admin" });
     mount();
-    expect(screen.queryByText("Google Gemini")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Connections" }),
+    ).not.toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
-  });
-  it("reports configuration without claiming live verification", async () => {
-    mount();
-    expect(
-      await screen.findByText(
-        "2 of 3 required services configured and enabled. 0 of 2 optional fallbacks on.",
-      ),
-    ).toBeVisible();
-    const aside = screen.getByRole("complementary", { name: "Configuration status" });
-    expect(
-      within(aside).getByText(
-        "It reads your configuration only. It does not call a provider or run a test.",
-      ),
-    ).toBeVisible();
-    expect(
-      within(aside).getByText(
-        "Keys and passwords are never shown here, only the names of the settings.",
-      ),
-    ).toBeVisible();
-    expect(
-      within(aside).getByText("Walkaround video pipeline needs setup"),
-    ).toBeVisible();
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Providers and automation" }),
-    ).toBeVisible();
-    expect(
-      screen.getByText(
-        "Only system admins see this page. Stores never see provider settings.",
-      ),
-    ).toBeVisible();
-    expect(within(card("Google Gemini")).getByText("Configured")).toBeVisible();
-    expect(
-      within(card("Walkaround video pipeline")).getByText("Needs setup"),
-    ).toBeVisible();
-    // No eyebrows: the provider name is the card title.
-    expect(screen.queryByText(/^AI provider$/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Dealer service$/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Platform control$/i)).not.toBeInTheDocument();
-  });
-  it("never reads an optional fallback that is off as a problem", async () => {
-    mount();
-    expect(
-      await within(card("Anthropic fallback")).findByText("Optional, not set up"),
-    ).toBeVisible();
-    expect(
-      within(card("OpenAI fallback")).getByText("Optional, turned off"),
-    ).toBeVisible();
-    expect(within(card("Anthropic fallback")).queryByText("Needs setup")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Needs setup" }));
-    expect(screen.getByRole("button", { name: "Needs setup" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByText("Walkaround video pipeline")).toBeVisible();
-    expect(screen.queryByText("Google Gemini")).not.toBeInTheDocument();
-    expect(screen.queryByText("Anthropic fallback")).not.toBeInTheDocument();
-    expect(screen.queryByText("OpenAI fallback")).not.toBeInTheDocument();
+    act(() => useAppStore.setState({ role: "super_admin" }));
+    expect(await screen.findByRole("heading", { name: "Connections" })).toBeVisible();
+    expect(getCall()).toBeTruthy();
+    expect(await screen.findByText("1 / 3 checks verified")).toBeVisible();
   });
-  it("keeps the warning wording for a required service that is configured but off", async () => {
-    respondWith({
-      ...fixture,
-      automation: {
-        ...fixture.automation,
-        walkaround: { ...status, enabled: false },
-      },
-    });
+
+  it("keeps optional-off neutral and selects the matching dealership website config", async () => {
     mount();
-    expect(
-      await within(card("Walkaround video pipeline")).findByText(
-        "Configured, turned off",
+    await screen.findByRole("heading", { name: "Connections" });
+    fireEvent.click(await screen.findByText("Optional AI backups"));
+    const fallback = await screen.findByRole("article", { name: /Anthropic fallback/ });
+    expect(within(fallback).getByText("Off")).toBeVisible();
+    expect(within(fallback).getByText("Optional")).toBeVisible();
+
+    const website = screen.getByRole("article", { name: /Customer website drafts/ });
+    fireEvent.click(within(website).getByRole("button", { name: "Set up" }));
+    expect(within(website).getByLabelText("Dealership")).toHaveValue("dealer-1");
+    await userEvent
+      .setup()
+      .selectOptions(within(website).getByLabelText("Dealership"), "dealer-2");
+    await waitFor(() =>
+      expect(within(website).getByLabelText("Approved website address")).toHaveValue(
+        "https://south.example",
       ),
-    ).toHaveClass("text-warning-ink");
-    expect(within(card("Google Gemini")).getByText("Configured")).toHaveClass(
-      "text-ink",
     );
   });
 
-  it("reports a healthy platform as done even with both fallbacks off", async () => {
-    respondWith({
-      ...fixture,
-      automation: { customer_hub: status, walkaround: status },
+  it("saves credentials through PATCH but remains test-required until the server verifies it", async () => {
+    const user = userEvent.setup();
+    const initial = makeFixture();
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/app/connections" && init?.method === "PATCH") {
+        return jsonResponse(connection("gemini", "needs_test", { revision: 3 }));
+      }
+      return jsonResponse(initial);
     });
     mount();
-    expect(
-      await screen.findByText(
-        "3 of 3 required services configured and enabled. 0 of 2 optional fallbacks on.",
-      ),
-    ).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Needs setup" }));
-    expect(
-      screen.getByText("Every required service has its configuration in place."),
-    ).toBeVisible();
-  });
-  it("groups services into Required and Optional rows on the canvas", async () => {
-    mount();
-    await screen.findByText(/required services configured/);
-    const required = screen.getByRole("region", { name: "Required" });
-    const optional = screen.getByRole("region", { name: "Optional" });
-    for (const title of [
-      "Google Gemini",
-      "Customer website",
-      "Walkaround video pipeline",
-    ]) {
-      expect(within(required).getByRole("region", { name: title })).toBeVisible();
-    }
-    for (const title of ["Anthropic fallback", "OpenAI fallback"]) {
-      expect(within(optional).getByRole("region", { name: title })).toBeVisible();
-    }
-    expect(
-      within(optional).getByText(
-        "The app works without these. Turn one on only when you want it.",
-      ),
-    ).toBeVisible();
-    expect(screen.getByText("Runtime health")).toBeVisible();
-  });
+    const gemini = await screen.findByRole("article", { name: /Google Gemini/ });
+    await user.click(within(gemini).getByRole("button", { name: "Set up" }));
+    const key = within(gemini).getByLabelText("Gemini API key");
+    await user.type(key, "transient-api-key");
+    await user.click(within(gemini).getByRole("button", { name: "Save connection" }));
 
-  it("opens the steps and the setting names from Setup instructions", async () => {
-    mount();
-    await screen.findByText("Google Gemini");
-    const toggle = within(card("Google Gemini")).getByRole("button", {
-      name: "Setup instructions",
-    });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    const setup = document.getElementById("connection-setup-gemini") as HTMLElement;
-    const steps = setup.querySelector("ol") as HTMLElement;
-    // A plain list in the row, not a second card nested inside it.
-    expect(steps.parentElement).toBe(setup);
-    expect(
-      within(steps).getByText("Set the Gemini key on the backend host."),
-    ).toBeVisible();
-    expect(within(setup).getByText("Setting name")).toBeVisible();
-    expect(within(setup).getByText("GEMINI_API_KEY")).toBeVisible();
-    expect(within(setup).getByText("Version 5")).toBeVisible();
-    expect(
-      within(setup).getByRole("button", { name: "Copy variable names" }),
-    ).toBeVisible();
-  });
-
-  it("says when everything the app needs is set up, and checks again on request", async () => {
-    respondWith({
-      ...fixture,
-      automation: { customer_hub: status, walkaround: status },
-    });
-    const onCheckAgain = vi.fn();
-    mount(undefined, onCheckAgain);
-    const aside = screen.getByRole("complementary", { name: "Configuration status" });
-    expect(
-      await within(aside).findByText("Everything the app needs is set up"),
-    ).toBeVisible();
-    expect(
-      within(aside).getByRole("heading", { name: "What this page checks" }),
-    ).toBeVisible();
-    fireEvent.click(within(aside).getByRole("button", { name: "Check again" }));
-    expect(onCheckAgain).toHaveBeenCalledTimes(1);
-  });
-
-  it("refetches the status itself when no hub refresh is given", async () => {
-    mount();
-    await screen.findByText(/required services configured/);
-    expect(fetch).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-  });
-  it("names the dealership the customer website is mapped to when the backend reports it", async () => {
-    respondWith({
-      ...fixture,
-      automation: {
-        ...fixture.automation,
-        customer_hub: { ...status, dealerId: "dealer-1" },
-      },
-    });
-    mount([{ id: "dealer-1", name: "Northside Motors" }]);
-    expect(
-      await within(card("Customer website")).findByText(
-        "Sends drafts for Northside Motors.",
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/app/connections/gemini",
+        expect.objectContaining({ method: "PATCH", credentials: "include" }),
       ),
-    ).toBeVisible();
-  });
-  it("says mapped, not sends, while the customer website is not set up", async () => {
-    respondWith({
-      ...fixture,
-      automation: {
-        ...fixture.automation,
-        customer_hub: {
-          configured: false,
-          enabled: false,
-          verification: "not_tested",
-          dealerId: "dealer-1",
-        },
-      },
-    });
-    mount([{ id: "dealer-1", name: "Northside Motors" }]);
-    const website = card("Customer website");
-    expect(
-      await within(website).findByText("Mapped to Northside Motors."),
-    ).toBeVisible();
-    expect(within(website).getByText("Needs setup")).toBeVisible();
-    expect(within(website).queryByText(/Sends drafts/)).toBeNull();
-  });
-  it("calls a mapped store missing only once the dealer list has loaded", async () => {
-    respondWith({
-      ...fixture,
-      automation: {
-        ...fixture.automation,
-        customer_hub: { ...status, dealerId: "dealer-9" },
-      },
-    });
-    const missing = "Mapped to dealership dealer-9, which is not in the dealer list.";
-    const view = mount();
-    await screen.findByText(/required services configured/);
-    expect(screen.queryByText(missing)).toBeNull();
-    view.rerender(
-      <QueryClientProvider
-        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-      >
-        <ConnectionsPanel dealers={[{ id: "dealer-1", name: "Northside Motors" }]} />
-      </QueryClientProvider>,
     );
-    expect(await within(card("Customer website")).findByText(missing)).toBeVisible();
+    const patchCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([, init]) => init?.method === "PATCH");
+    const body = JSON.parse(String(patchCall?.[1]?.body));
+    expect(body).toMatchObject({
+      confirmApply: true,
+      expectedRevision: 2,
+      enabled: true,
+      credentials: { apiKey: "transient-api-key" },
+    });
+    expect(await within(gemini).findByText("Test required")).toBeVisible();
+    expect(within(gemini).getByLabelText("Gemini API key")).toHaveValue("");
+    expect(within(gemini).queryByText("Ready")).toBeNull();
   });
-  it("shows a recoverable error and allows a fresh status request", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 404 } as Response);
+
+  it("shows Ready only after a successful test is reflected by a fresh server read", async () => {
+    const fixture = makeFixture();
+    let getCount = 0;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/app/connections" && init?.method === "POST")
+        return jsonResponse({});
+      if (String(input) === "/api/app/connections/gemini/test")
+        return jsonResponse(connection("gemini", "testing"));
+      if (String(input).startsWith("/api/app/connections/proofs?"))
+        return jsonResponse({
+          items: [
+            { id: "proof-1", label: "Released caption proof", state: "verified" },
+          ],
+        });
+      if (String(input) === "/api/app/connections") {
+        getCount += 1;
+        const current = structuredClone(fixture);
+        if (getCount > 1)
+          current.services[0] = connection("gemini", "ready", {
+            capabilities: [
+              { id: "text", label: "Caption access", state: "verified" },
+              { id: "images", label: "Image generation", state: "not_tested" },
+              { id: "video", label: "AI video generation", state: "not_tested" },
+            ],
+            lastVerifiedAt: "2026-10-09T12:00:00Z",
+          });
+        return jsonResponse(current);
+      }
+      return jsonResponse({});
+    });
     mount();
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Deploy the backend first",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
-    expect(
-      screen.getByText(
-        "2 of 3 required services configured and enabled. 0 of 2 optional fallbacks on.",
+    const gemini = await screen.findByRole("article", { name: /Google Gemini/ });
+    fireEvent.click(within(gemini).getByRole("button", { name: "Test" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/app/connections/gemini/test",
+        expect.objectContaining({ method: "POST" }),
       ),
+    );
+    expect(await within(gemini).findByText("Caption access verified")).toBeVisible();
+    expect(within(gemini).getByText("Caption access: Verified")).toBeVisible();
+  });
+
+  it("loads named website proofs and only enables tests after a proof is selected", async () => {
+    const user = userEvent.setup();
+    const fixture = makeFixture();
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).startsWith("/api/app/connections/proofs?"))
+        return jsonResponse({
+          items: [
+            {
+              id: "release-1",
+              label: "Approved release from today",
+              state: "verified",
+            },
+          ],
+        });
+      if (String(input) === "/api/app/connections") return jsonResponse(fixture);
+      return jsonResponse(connection("website", "testing"));
+    });
+    mount();
+    const website = await screen.findByRole("article", {
+      name: /Customer website drafts/,
+    });
+    await user.click(within(website).getByRole("button", { name: "Set up" }));
+    expect(
+      await within(website).findByRole("option", {
+        name: "Approved release from today",
+      }),
     ).toBeVisible();
+    await user.selectOptions(
+      within(website).getByLabelText("Released post ID for private test"),
+      "release-1",
+    );
+    await user.click(within(website).getByRole("button", { name: "Test connection" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/app/connections/website/test",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const testCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url) === "/api/app/connections/website/test");
+    expect(JSON.parse(String(testCall?.[1]?.body))).toMatchObject({
+      dealerId: "dealer-1",
+      proofId: "release-1",
+    });
+  });
+
+  it("explains the encrypted-vault prerequisite and disables credential saving", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ ...makeFixture(), secureStorageAvailable: false }),
+    );
+    mount();
+    const gemini = await screen.findByRole("article", { name: /Google Gemini/ });
+    fireEvent.click(within(gemini).getByRole("button", { name: "Set up" }));
+    expect(within(gemini).getByRole("alert")).toHaveTextContent(
+      "encrypted connection vault",
+    );
+    expect(within(gemini).getByLabelText("Gemini API key")).toBeDisabled();
+    expect(
+      within(gemini).getByRole("button", { name: "Save connection" }),
+    ).toBeDisabled();
+  });
+
+  it("saves canonical website origin fields and clears secrets when switching dealerships", async () => {
+    const user = userEvent.setup();
+    const requestBodies: Record<string, unknown>[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (
+        String(input) === "/api/app/connections/website" &&
+        init?.method === "PATCH"
+      ) {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        requestBodies.push(body);
+        if ("siteUrl" in (body.settings as Record<string, unknown>))
+          return jsonResponse({ error: "Unsupported setting" }, 400);
+        return jsonResponse(
+          connection("website", "needs_test", {
+            dealerId: "dealer-2",
+            revision: 3,
+            settings: body.settings as ManagedConnection["settings"],
+            credentialConfigured: { sharedSecret: false },
+          }),
+        );
+      }
+      return jsonResponse(makeFixture());
+    });
+    mount();
+    const website = await screen.findByRole("article", {
+      name: /Customer website drafts/,
+    });
+    await user.click(within(website).getByRole("button", { name: "Set up" }));
+    await user.type(
+      within(website).getByLabelText("Website connection key"),
+      "north-secret",
+    );
+    await user.selectOptions(within(website).getByLabelText("Dealership"), "dealer-2");
+    expect(within(website).getByLabelText("Website connection key")).toHaveValue("");
+    await user.clear(within(website).getByLabelText("Approved website address"));
+    await user.type(
+      within(website).getByLabelText("Approved website address"),
+      "https://new-south.example",
+    );
+    await user.click(within(website).getByRole("button", { name: "Save connection" }));
+    await waitFor(() => expect(requestBodies).toHaveLength(1));
+    expect(requestBodies[0]).toMatchObject({
+      dealerId: "dealer-2",
+      settings: { origin: "https://new-south.example", destinationId: "south" },
+      credentials: {},
+    });
+    expect(requestBodies[0]).not.toHaveProperty("settings.siteUrl");
+  });
+
+  it("preserves an enabled optional provider and omits blank credentials on save", async () => {
+    const user = userEvent.setup();
+    const fixture = makeFixture();
+    fixture.services.find((item) => item.service === "openai")!.credentialConfigured = {
+      apiKey: true,
+    };
+    let savedBody: Record<string, unknown> | undefined;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input) === "/api/app/connections/openai" && init?.method === "PATCH") {
+        savedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return jsonResponse(connection("openai", "needs_test"));
+      }
+      return jsonResponse(fixture);
+    });
+    mount();
+    await screen.findByRole("heading", { name: "Connections" });
+    fireEvent.click(await screen.findByText("Optional AI backups"));
+    const openai = await screen.findByRole("article", { name: /OpenAI fallback/ });
+    await user.click(within(openai).getByRole("button", { name: "Set up" }));
+    await user.click(within(openai).getByRole("button", { name: "Save connection" }));
+    await waitFor(() => expect(savedBody).toBeDefined());
+    expect(savedBody).toMatchObject({ enabled: true, credentials: {} });
+  });
+
+  it("clears a typed secret when setup is closed", async () => {
+    const user = userEvent.setup();
+    mount();
+    const gemini = await screen.findByRole("article", { name: /Google Gemini/ });
+    await user.click(within(gemini).getByRole("button", { name: "Set up" }));
+    await user.type(within(gemini).getByLabelText("Gemini API key"), "do-not-retain");
+    await user.click(within(gemini).getByRole("button", { name: "Close" }));
+    await user.click(within(gemini).getByRole("button", { name: "Set up" }));
+    expect(within(gemini).getByLabelText("Gemini API key")).toHaveValue("");
+  });
+
+  it("provides a recoverable initial load error", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse({ error: "unavailable" }, 503))
+      .mockResolvedValueOnce(jsonResponse(makeFixture()));
+    mount();
+    expect(await screen.findByRole("alert")).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { name: "Connections" })).toBeVisible();
   });
 });

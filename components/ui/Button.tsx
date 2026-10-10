@@ -57,19 +57,20 @@ interface ButtonProps extends Omit<
 const baseStyles = cn(
   "inline-flex items-center justify-center gap-2",
   "rounded-sm",
-  "transition-[color,background-color,border-color,opacity,transform] duration-120 ease-out",
+  "transition-[color,background-color,border-color,opacity,transform] duration-120 ease-out motion-reduce:transition-none",
   "active:scale-[0.98] motion-reduce:transform-none",
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none",
   "select-none touch-manipulation",
 );
 
-// A disabled primary keeps full opacity on a neutral fill: brand at 50 % read
-// as "still loading" on graphite and fell to 2.6:1 in Sunlight.
+// Keep a disabled primary opaque with strong ink on a neutral fill. In the
+// dark studio, this ink also clears AA against the default brand fill if the
+// label and background are sampled across the preparation state change.
 const primaryStyles = cn(
   "bg-brand-fill text-brand-foreground",
   "hover:opacity-90",
-  "disabled:bg-fill-hover disabled:text-ink-2 disabled:opacity-100",
-  "aria-disabled:bg-fill-hover aria-disabled:text-ink-2",
+  "disabled:bg-fill-hover disabled:text-ink disabled:opacity-100",
+  "aria-disabled:bg-fill-hover aria-disabled:text-ink",
 );
 
 const secondaryStyles = cn(

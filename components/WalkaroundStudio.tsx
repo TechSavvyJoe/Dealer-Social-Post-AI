@@ -49,6 +49,7 @@ interface WalkaroundStudioProps {
   dealerName: string;
   requiresApproval: boolean;
   canManageYouTube?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
   onBack: () => void;
 }
 
@@ -91,6 +92,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
   dealerName,
   requiresApproval,
   canManageYouTube = false,
+  onDirtyChange,
   onBack,
 }) => {
   const [audience, setAudience] = React.useState<WalkaroundAudience>("inventory");
@@ -109,6 +111,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
   const [releaseOpen, setReleaseOpen] = React.useState(false);
   const [releaseSaved, setReleaseSaved] = React.useState(false);
   const [project, setProject] = React.useState<WalkaroundProject | null>(null);
+  const [hydratedProjectId, setHydratedProjectId] = React.useState<string | null>(null);
   const [metadata, setMetadata] = React.useState<WalkaroundMetadata>({
     title: "",
     description: "",
@@ -127,9 +130,9 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
   const [youtubeStateReference, setYoutubeStateReference] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [confirm, setConfirm] = React.useState<"publish" | "delete" | "reedit" | null>(
-    null,
-  );
+  const [confirm, setConfirm] = React.useState<
+    "publish" | "delete" | "reedit" | "refresh" | null
+  >(null);
   const [reeditInstructions, setReeditInstructions] = React.useState("");
   const currentProjectKey = `dealer-social:walkaround-current:v1:${dealerId}`;
   const confirmedVehicle =
@@ -142,6 +145,75 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
     [captureMode, clips],
   );
 
+  const reviewEditsDirty = React.useMemo(() => {
+    if (!project || hydratedProjectId !== project.id) return false;
+    const persistedMetadata = project.metadata || {
+      title: "",
+      description: "",
+      tags: [],
+      madeForKids: false,
+    };
+    const expectedChapters = (persistedMetadata.chapters || [])
+      .map(
+        (chapter) =>
+          `${Math.floor(chapter.seconds / 60)}:${String(chapter.seconds % 60).padStart(2, "0")} ${chapter.label}`,
+      )
+      .join("\n");
+    return (
+      JSON.stringify(metadata) !== JSON.stringify(persistedMetadata) ||
+      chaptersDraft !== expectedChapters ||
+      visibility !== (project.youtube?.visibility || "unlisted")
+    );
+  }, [chaptersDraft, hydratedProjectId, metadata, project, visibility]);
+
+  const dirty = React.useMemo(() => {
+    const clipNeedsUpload = clips.some((clip) => {
+      if (!project) return true;
+      const matching = matchExistingSourceAsset(
+        (project.assets || []).filter((asset) => asset.kind === "source"),
+        clip.file,
+        clips.length >=
+          (project.assets || []).filter((asset) => asset.kind === "source").length
+          ? clips.indexOf(clip)
+          : -1,
+      );
+      return clip.progress < 1 || matching?.state !== "verified";
+    });
+
+    if (busy || clipNeedsUpload || reeditInstructions.trim()) return true;
+    if (project && hydratedProjectId !== project.id) return false;
+    if (!project) {
+      return Boolean(
+        audience !== "inventory" ||
+        captureMode !== "one_take" ||
+        vin.trim() ||
+        customerLabel.trim() ||
+        identifiableNonEmployee ||
+        (capturedRelease && !releaseSaved),
+      );
+    }
+    return reviewEditsDirty || (capturedRelease !== null && !releaseSaved);
+  }, [
+    audience,
+    busy,
+    captureMode,
+    capturedRelease,
+    clips,
+    customerLabel,
+    identifiableNonEmployee,
+    hydratedProjectId,
+    project,
+    releaseSaved,
+    reeditInstructions,
+    reviewEditsDirty,
+    vin,
+  ]);
+
+  React.useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
+
   React.useEffect(() => {
     if (audience === "customer") {
       setVisibility("unlisted");
@@ -151,7 +223,10 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
   }, [audience]);
 
   React.useEffect(() => {
-    if (!project) return;
+    if (!project) {
+      setHydratedProjectId(null);
+      return;
+    }
     if (project.releaseValid) setReleaseSaved(true);
     setMetadata(
       project.metadata || { title: "", description: "", tags: [], madeForKids: false },
@@ -165,6 +240,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
         .join("\n"),
     );
     if (project.youtube?.visibility) setVisibility(project.youtube.visibility);
+    setHydratedProjectId(project.id);
   }, [project]);
 
   React.useEffect(() => {
@@ -363,8 +439,26 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
       await uploadAndProcess(project);
     });
 
-  const refresh = () =>
-    project && run(async () => setProject(await getWalkaroundProject(project.id)));
+  const refreshProject = () =>
+    project &&
+    run(async () => {
+      const refreshed = await getWalkaroundProject(project.id);
+      setProject(refreshed);
+    });
+
+  const refresh = () => {
+    if (!project) return;
+    if (reviewEditsDirty) {
+      setConfirm("refresh");
+      return;
+    }
+    void refreshProject();
+  };
+
+  const confirmRefresh = () => {
+    setConfirm(null);
+    void refreshProject();
+  };
 
   const retryProcessing = () =>
     project && run(async () => setProject(await startWalkaroundProcessing(project.id)));
@@ -1332,6 +1426,28 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
             Remove it from YouTube separately if needed.
           </p>
         </div>
+      </Modal>
+      <Modal
+        isOpen={confirm === "refresh"}
+        onClose={() => setConfirm(null)}
+        title="Replace these unsaved edits?"
+        description="Refreshing replaces unsaved review text, chapters, and visibility with the saved project values."
+        disableClose={busy}
+        footer={
+          <>
+            <Button variant="outline" disabled={busy} onClick={() => setConfirm(null)}>
+              Keep editing
+            </Button>
+            <Button variant="secondary" loading={busy} onClick={confirmRefresh}>
+              Refresh saved project
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm leading-relaxed text-surface-300">
+          The refresh only replaces those review fields. Work already saved to this
+          dealership’s project remains available.
+        </p>
       </Modal>
       <Modal
         isOpen={confirm === "reedit"}

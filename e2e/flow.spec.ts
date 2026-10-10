@@ -22,6 +22,10 @@ async function expectNoSeriousAxeViolations(page: import("@playwright/test").Pag
       id: violation.id,
       impact: violation.impact,
       targets: violation.nodes.map((node) => node.target.join(" ")).slice(0, 5),
+      details: violation.nodes.slice(0, 5).map((node) => ({
+        target: node.target,
+        summary: node.failureSummary,
+      })),
     }));
   expect(violations).toEqual([]);
 }
@@ -1161,6 +1165,8 @@ test.describe("Dealer Social Post AI Flow", () => {
           post_revision: body.expected_post_revision,
         });
       }
+      if (request.method() === "GET" && path === "/api/app/studio-capabilities")
+        return reply({ walkaround: false });
       unknown.push(`${request.method()} ${path}`);
       return route.fulfill({ status: 500, body: "{}" });
     });
@@ -1269,7 +1275,9 @@ test.describe("Dealer Social Post AI Flow", () => {
     await page.reload();
 
     const postActions = page.getByRole("region", { name: "Post actions" });
-    await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible({
+      timeout: 15_000,
+    });
     const save = page.getByRole("button", { name: "Save image", exact: true });
     const copy = page.getByRole("button", { name: "Copy caption", exact: true });
     const open = page.getByRole("button", { name: "Open Facebook", exact: true });

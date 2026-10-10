@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Dealer } from "../types";
+import { AppStep, Dealer } from "../types";
 import * as db from "../services/database";
 import { toUiMessage } from "../utils/errorMessages";
 import { logError } from "../utils/telemetry";
@@ -29,6 +29,8 @@ import {
   fetchPeoplePage,
   PEOPLE_PAGE_SIZE,
   peopleQueryKey,
+  firstActiveManager,
+  storeManagersParams,
   type PeopleQueryParams,
 } from "./admin/peopleQuery";
 import { ConfirmationModal } from "./ConfirmationModal";
@@ -367,6 +369,37 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const openDealerManager = async (
+    dealerId: string,
+    destination: "channels" | "walkaround",
+  ) => {
+    if (!storeDealers.some((dealer) => dealer.id === dealerId)) {
+      toast.error("That dealership is no longer available.");
+      return;
+    }
+    try {
+      const managers = await fetchPeoplePage(storeManagersParams(dealerId));
+      const manager = firstActiveManager(managers);
+      if (!manager) {
+        toast.error("Add an active dealership manager before opening its services.");
+        return;
+      }
+      if (destination === "channels") {
+        await openAsPerson(manager, "channels");
+        return;
+      }
+      await openAsPerson(manager);
+      const session = useAppStore.getState();
+      if (session.currentDealer?.id !== dealerId || session.role !== "dealer_admin") {
+        toast.error("The manager session did not match the selected dealership.");
+        return;
+      }
+      session.setStep(AppStep.WALKAROUND);
+    } catch (err) {
+      toast.error(toUiMessage(err, "Could not open the dealership manager session."));
+    }
+  };
+
   const handlePersonCommitted = React.useCallback(
     (updated: Person) => {
       // Credential mutations have already committed on the server. Reflect
@@ -612,6 +645,12 @@ export const AdminDashboard: React.FC = () => {
             <ConnectionsPanel
               dealers={data ? storeDealers : undefined}
               onCheckAgain={handleRefresh}
+              onManageDealer={(dealerId) =>
+                void openDealerManager(dealerId, "channels")
+              }
+              onOpenWalkaround={(dealerId) =>
+                void openDealerManager(dealerId, "walkaround")
+              }
             />
           </div>
         )}

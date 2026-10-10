@@ -310,10 +310,18 @@ function normalizeSiteUrl(value) {
 }
 
 function destinationConfiguration(dealerId) {
-  const siteUrl = normalizeSiteUrl(readEnvironment("CUSTOMER_HUB_URL"));
-  const secret = readEnvironment("CUSTOMER_HUB_SECRET");
-  const destinationId = readEnvironment("CUSTOMER_HUB_DESTINATION_ID");
-  const allowedDealerId = readEnvironment("CUSTOMER_HUB_DEALER_ID");
+  // All production reads share the encrypted resolver, including fail-closed
+  // managed records. The no-hooks branch supports deterministic Node contracts.
+  const snapshot =
+    typeof __hooks !== "undefined"
+      ? require(__hooks + "/connectionConfig.js").runtimeSnapshot("website", dealerId)
+      : null;
+  const value = (name) =>
+    snapshot ? snapshot.values[name] || "" : readEnvironment(name);
+  const siteUrl = normalizeSiteUrl(value("CUSTOMER_HUB_URL"));
+  const secret = value("CUSTOMER_HUB_SECRET");
+  const destinationId = value("CUSTOMER_HUB_DESTINATION_ID");
+  const allowedDealerId = value("CUSTOMER_HUB_DEALER_ID");
   const destinationIdValid =
     destinationId === destinationId.trim() &&
     /^[a-z0-9][a-z0-9_-]{0,79}$/.test(destinationId);
@@ -324,6 +332,7 @@ function destinationConfiguration(dealerId) {
     allowedDealerId === allowedDealerId.trim() &&
     /^[A-Za-z0-9_-]{1,64}$/.test(allowedDealerId);
   const enabled =
+    (!snapshot || snapshot.enabled) &&
     !!siteUrl &&
     secretValid &&
     destinationIdValid &&
@@ -340,6 +349,9 @@ function destinationConfiguration(dealerId) {
     allowedDealerId: guardValid ? allowedDealerId : "",
     enabled: enabled,
     mode: WEBSITE_DESTINATION_MODE,
+    revision: snapshot ? snapshot.revision : 0,
+    identity: snapshot ? snapshot.identity : "",
+    managed: !!snapshot && snapshot.source === "managed",
   };
 }
 
@@ -351,6 +363,7 @@ function publicDestinationConfiguration(dealerId) {
     siteUrl: config.siteUrl,
     enabled: config.enabled,
     mode: config.mode,
+    readiness: config.enabled ? "configured" : "configuration_hold",
   };
 }
 
@@ -691,6 +704,8 @@ function createPublicationForPostWithDao(dao, post, config, eventId) {
     post: post.id,
     dealer: recordString(post, "dealer"),
     destination_id: destination.id,
+    config_revision: destination.revision || 0,
+    destination_identity: destination.identity || "",
     event_id: publicationEventId,
     source_revision: 1,
     // Frozen logical-payload time: retries rebuild byte-identical JSON.
@@ -760,9 +775,11 @@ function claimPublicationForPost(
     const config = destinationConfiguration(dealerId);
     if (!config.enabled) throw new Error("destination_unavailable");
 
-    const existing = findPublicationForPostWithDaoStrict(txDao, post.id, config.id);
+    const existing = findPublicationForPostWithDaoStrict(txDao, post.id, "");
     const storedDraft = parseWebsiteDraft(recordString(post, "website_draft"));
     if (existing) {
+      if (!publicationDestinationMatches(existing, config, dealerId))
+        throw new Error("destination_configuration_changed");
       if (!storedDraft.ok || storedDraft.serialized !== parsedDraft.serialized) {
         throw new Error("website_draft_already_sent");
       }
@@ -830,6 +847,7 @@ function claimPublicationForPost(
       media,
       $security,
       txDao,
+      { identity: config.identity, revision: config.revision },
     );
     const eventId = publicationEventIdForPostRevision(
       frozenPost.id,
@@ -7289,13 +7307,29 @@ function buildOutboundContent(post, draft, media, dao) {
   return content;
 }
 
-function publicationSourceSnapshotHash(post, draft, media, securityApi, dao) {
+function publicationSourceSnapshotHash(
+  post,
+  draft,
+  media,
+  securityApi,
+  dao,
+  destinationBinding,
+) {
   const crypto = securityApi || $security;
-  const sourceSnapshot = JSON.stringify({
+  const snapshot = {
     sourcePostId: post.id,
     sourceDealerId: recordString(post, "dealer"),
     content: buildOutboundContent(post, draft, media, dao),
-  });
+  };
+  // The event id carried by the signed envelope commits to the effective
+  // destination and credential/config revision without exposing credentials
+  // or changing Customer Hub's schema-v1 wire contract.
+  if (destinationBinding && destinationBinding.identity)
+    snapshot.destinationBinding = {
+      identity: destinationBinding.identity,
+      revision: Number(destinationBinding.revision || 0),
+    };
+  const sourceSnapshot = JSON.stringify(snapshot);
   const digest = (crypto.sha256(sourceSnapshot) || "").toString().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(digest)) {
     throw new Error("website_source_snapshot_invalid");
@@ -7314,7 +7348,10 @@ function verifyPublicationSourceSnapshot(
   const eventId = recordString(publication, "event_id").toLowerCase();
   const match = eventId.match(/^wp_s_[a-f0-9]{32}_([a-f0-9]{40})$/);
   if (!match) return;
-  const actual = publicationSourceSnapshotHash(post, draft, media, securityApi, dao);
+  const actual = publicationSourceSnapshotHash(post, draft, media, securityApi, dao, {
+    identity: recordString(publication, "destination_identity"),
+    revision: recordInt(publication, "config_revision"),
+  });
   if (match[1] !== actual.slice(0, 40)) {
     throw new Error("payload_revision_conflict");
   }
@@ -7665,6 +7702,20 @@ function safeDeliveryErrorCode(err) {
   return allowlisted.indexOf(code) !== -1 ? code : "destination_transport_failed";
 }
 
+function publicationDestinationMatches(publication, config, dealerId) {
+  return (
+    !!config &&
+    config.enabled &&
+    recordString(publication, "dealer") === dealerId &&
+    config.allowedDealerId === dealerId &&
+    config.id === recordString(publication, "destination_id") &&
+    // Unbound historical rows cannot establish their original target.
+    ((!config.identity && typeof __hooks === "undefined") ||
+      (recordString(publication, "destination_identity") === config.identity &&
+        recordInt(publication, "config_revision") === Number(config.revision)))
+  );
+}
+
 function deliverClaimedPublication(publication) {
   const isStatusReplay = !!recordString(publication, "remote_draft_id");
   let post = null;
@@ -7700,11 +7751,13 @@ function deliverClaimedPublication(publication) {
 
   const config = destinationConfiguration(recordString(post, "dealer"));
   if (
-    !config.enabled ||
-    config.id !== recordString(publication, "destination_id") ||
-    config.allowedDealerId !== recordString(post, "dealer")
+    !publicationDestinationMatches(publication, config, recordString(post, "dealer"))
   ) {
-    return scheduleRetry(publication, "destination_unavailable");
+    return savePublicationState(publication, {
+      status: isStatusReplay ? "draft_ready" : "failed",
+      next_attempt_at: "",
+      last_error: "destination_configuration_changed",
+    });
   }
 
   let rawBody = "";
@@ -7731,7 +7784,9 @@ function deliverClaimedPublication(publication) {
     signed = hmacHeaders(rawBody, timestamp, nonce, config.secret, $security);
     freezeOrVerifyPayloadHash(publication, signed.bodyHash);
 
-    const response = $http.send({
+    const response = (
+      typeof __hooks === "undefined" ? $http : require(__hooks + "/safeHttp.js")
+    ).send({
       url: config.endpointUrl,
       method: "POST",
       body: rawBody,
@@ -8010,6 +8065,56 @@ function retryPublication(post) {
   return savePublicationState(publication, values);
 }
 
+// Called only after the admin route validates its selected dealership. Test
+// delivery uses the same outbox, current image policy, release and privacy gates.
+function testWebsiteDraft(dealerId, postId, expectedRevision, actor) {
+  if (!actor || (actor.role !== "super_admin" && actor.role !== "dealer_admin"))
+    throw new Error("website_admin_required");
+  if (actor.role !== "super_admin" && (!actor.dealer || actor.dealer.id !== dealerId))
+    throw new Error("website_dealer_conflict");
+  const dao = $app.dao();
+  dao.findRecordById("dealers", dealerId);
+  const post = dao.findRecordById("posts", postId);
+  if (recordString(post, "dealer") !== dealerId)
+    throw new Error("website_dealer_conflict");
+  const config = destinationConfiguration(dealerId);
+  if (!config.enabled || Number(expectedRevision) !== Number(config.revision))
+    throw new Error("destination_configuration_changed");
+  const readiness = postReadinessWithDao(dao, post);
+  if (!readiness.ready) throw new Error(readiness.code);
+  const claim = claimPublicationForPost(
+    postId,
+    recordString(post, "website_draft"),
+    recordString(post, "updated"),
+    dealerId,
+  );
+  let publication = claim.publication;
+  if (recordString(publication, "status") !== "draft_ready") {
+    // Preserve retries' payload, source and event identity; never enqueue another pipeline.
+    const claimed = claimDuePublication(publication);
+    if (claimed) publication = deliverClaimedPublication(claimed);
+  }
+  const current = destinationConfiguration(dealerId);
+  const ready =
+    publicationDestinationMatches(publication, current, dealerId) &&
+    Number(current.revision) === Number(expectedRevision) &&
+    recordString(publication, "status") === "draft_ready" &&
+    !!recordString(publication, "delivered_at") &&
+    !!recordString(publication, "remote_draft_id") &&
+    !!safeReviewUrl(recordString(publication, "review_url"), current.siteUrl) &&
+    /^[a-f0-9]{64}$/.test(recordString(publication, "payload_hash"));
+  return {
+    ready: ready,
+    source: "website_draft_receipt",
+    proofId: publication.id,
+    configRevision: current.revision,
+    configIdentity: current.identity,
+    dealerId: dealerId,
+    capabilities: ready ? ["website"] : [],
+    status: ready ? "draft_ready" : "pending",
+  };
+}
+
 module.exports = {
   base64EncodeReader,
   groundedIdentityPhrase,
@@ -8019,6 +8124,8 @@ module.exports = {
   resolveWebsiteMapping,
   websiteDraftMatchesScenario,
   destinationConfiguration,
+  publicationDestinationMatches,
+  testWebsiteDraft,
   publicDestinationConfiguration,
   publicationSummary,
   publicationSummaryForPost,

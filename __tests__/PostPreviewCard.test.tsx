@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -46,6 +46,52 @@ const previewText = () =>
     .join("\n\n");
 
 describe("PostPreviewCard", () => {
+  it("keeps a pending swipe through a height-only resize and realigns after a width change", () => {
+    vi.useFakeTimers();
+    let notifyResize = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          notifyResize = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const pause = vi
+      .spyOn(HTMLMediaElement.prototype, "pause")
+      .mockImplementation(() => {});
+    const onSelectMedia = vi.fn();
+    const view = renderCard({ availableVideoUrl: "blob:preview-video", onSelectMedia });
+    const rail = screen.getByRole("group", { name: "Image and video previews" });
+    let width = 300;
+    Object.defineProperty(rail, "clientWidth", {
+      configurable: true,
+      get: () => width,
+    });
+    try {
+      act(() => notifyResize());
+      expect(rail.scrollLeft).toBe(300);
+      rail.scrollLeft = 0;
+      fireEvent.scroll(rail);
+      // ResizeObserver reports height changes as well as width changes.
+      act(() => notifyResize());
+      expect(rail.scrollLeft).toBe(0);
+      act(() => vi.advanceTimersByTime(120));
+      expect(onSelectMedia).toHaveBeenCalledWith("video");
+      // The controlled parent still selects Image; rotation aligns that slide.
+      width = 640;
+      act(() => notifyResize());
+      expect(rail.scrollLeft).toBe(640);
+    } finally {
+      view.unmount();
+      pause.mockRestore();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
   it("puts the team-member disclosure first, then the caption, then the disclosures", () => {
     renderCard();
     const nodes = outboundNodes();

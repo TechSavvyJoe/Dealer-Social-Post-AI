@@ -1,8 +1,9 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WalkaroundStudio } from "../components/WalkaroundStudio";
 import { decodeVin, type DecodedVehicle } from "../services/vinDecoder";
+import * as walkarounds from "../services/walkarounds";
 
 vi.mock("../services/vinDecoder", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../services/vinDecoder")>();
@@ -22,6 +23,11 @@ const confirmedVehicle: DecodedVehicle = {
 };
 
 describe("WalkaroundStudio", () => {
+  afterEach(() => {
+    localStorage.removeItem("dealer-social:walkaround-current:v1:dealer-1");
+    vi.restoreAllMocks();
+  });
+
   it("shows confirmed VIN facts and clears them when the entered vehicle changes", async () => {
     vi.mocked(decodeVin).mockResolvedValue(confirmedVehicle);
     render(
@@ -104,6 +110,78 @@ describe("WalkaroundStudio", () => {
     expect(
       screen.getByRole("button", { name: "Upload and prepare walkaround" }),
     ).toBeDisabled();
+  });
+
+  it("reports unsaved capture choices so app navigation can ask before leaving", async () => {
+    const onDirtyChange = vi.fn();
+    render(
+      <WalkaroundStudio
+        dealerId="dealer-1"
+        dealerName="Example Ford"
+        requiresApproval={false}
+        onDirtyChange={onDirtyChange}
+        onBack={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+    fireEvent.click(screen.getByRole("button", { name: "Multiple clips" }));
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+  });
+
+  it("hydrates a saved project without a false dirty state and confirms refresh over edits", async () => {
+    const savedProject: walkarounds.WalkaroundProject = {
+      id: "project-1",
+      audience: "inventory",
+      captureMode: "one_take",
+      productionState: "review_ready",
+      publicationState: "not_requested",
+      reviewRevision: 1,
+      approvalRequired: false,
+      metadata: {
+        title: "Saved title",
+        description: "Saved description",
+        tags: [],
+        madeForKids: false,
+      },
+    };
+    localStorage.setItem(
+      "dealer-social:walkaround-current:v1:dealer-1",
+      savedProject.id,
+    );
+    const getProject = vi
+      .spyOn(walkarounds, "getWalkaroundProject")
+      .mockImplementation(async () => ({
+        ...savedProject,
+        metadata: { ...savedProject.metadata! },
+      }));
+    const onDirtyChange = vi.fn();
+    render(
+      <WalkaroundStudio
+        dealerId="dealer-1"
+        dealerName="Example Ford"
+        requiresApproval={false}
+        onDirtyChange={onDirtyChange}
+        onBack={() => undefined}
+      />,
+    );
+
+    const title = await screen.findByLabelText("YouTube title");
+    expect(title).toHaveValue("Saved title");
+    expect(onDirtyChange).not.toHaveBeenCalledWith(true);
+
+    fireEvent.change(title, { target: { value: "Unpublished title edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(
+      screen.getByRole("dialog", { name: "Replace these unsaved edits?" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(title).toHaveValue("Unpublished title edit");
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh saved project" }));
+    await waitFor(() => expect(title).toHaveValue("Saved title"));
+    expect(getProject).toHaveBeenCalledTimes(2);
   });
 
   it("states that configuration failures cannot publish or start processing", () => {

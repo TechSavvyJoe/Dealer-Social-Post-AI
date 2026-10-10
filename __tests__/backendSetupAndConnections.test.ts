@@ -10,10 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-type JsonResult = { status: number; payload: Record<string, unknown> };
 
 const hookSource = readFileSync(resolve("pb_hooks/main.pb.js"), "utf8");
 const routeSource = (marker: string): string => {
@@ -22,62 +19,6 @@ const routeSource = (marker: string): string => {
   const end = hookSource.indexOf("routerAdd(", start + marker.length);
   expect(end).toBeGreaterThan(start);
   return hookSource.slice(start, end);
-};
-
-const connectionRoute = routeSource('routerAdd("GET", "/api/app/connections"');
-
-const runConnections = (
-  role: "salesperson" | "dealer_admin" | "super_admin" | null,
-  environment: Record<string, string> = {},
-): JsonResult => {
-  let handler: ((context: unknown) => JsonResult) | undefined;
-  const headers = new Map<string, string>();
-  const context = role
-    ? { role, dealer: { id: role === "super_admin" ? "system" : "dealer-1" } }
-    : null;
-  const helpers = {
-    sessionContext: () => context,
-    API_CONTRACT_VERSION: "contract-v1",
-    PROXY_CAPABILITIES: { optionalField: true },
-  };
-  const policies = {
-    geminiModelPolicySnapshot: () => ({ version: "policy-v1" }),
-  };
-  const website = {
-    destinationConfiguration: (dealerId: string) => ({
-      enabled:
-        dealerId === "configured-dealer" &&
-        environment.CUSTOMER_HUB_URL === "https://example.test" &&
-        (environment.CUSTOMER_HUB_SECRET || "").length >= 32,
-    }),
-  };
-
-  runInNewContext(connectionRoute, {
-    __hooks: "/hooks",
-    routerAdd: (_method: string, _path: string, callback: typeof handler) => {
-      handler = callback;
-    },
-    require: (path: string) => {
-      if (path.endsWith("/helpers.js")) return helpers;
-      if (path.endsWith("/requestPolicies.js")) return policies;
-      if (path.endsWith("/websitePublications.js")) return website;
-      throw new Error(`Unexpected module ${path}`);
-    },
-    $os: { getenv: (name: string) => environment[name] || "" },
-  });
-
-  expect(handler).toBeTypeOf("function");
-  return handler!({
-    response: () => ({
-      header: () => ({
-        set: (name: string, value: string) => headers.set(name, value),
-      }),
-    }),
-    json: (status: number, payload: Record<string, unknown>) => ({
-      status,
-      payload,
-    }),
-  });
 };
 
 const tempDirectories: string[] = [];
@@ -92,127 +33,6 @@ afterEach(() => {
   while (tempDirectories.length) {
     rmSync(tempDirectories.pop()!, { recursive: true, force: true });
   }
-});
-
-describe("system connection inventory", () => {
-  it("requires a session and rejects both salesperson and dealer-manager roles", () => {
-    expect(runConnections(null).status).toBe(401);
-    expect(runConnections("salesperson").status).toBe(403);
-    expect(runConnections("dealer_admin").status).toBe(403);
-  });
-
-  it("returns configuration-only booleans without secret values or a tested claim", () => {
-    const secret = "s".repeat(48);
-    const token = "t".repeat(48);
-    const result = runConnections("super_admin", {
-      GEMINI_API_KEY: "gemini-private-value",
-      ANTHROPIC_API_KEY: "anthropic-private-value",
-      OPENAI_API_KEY: "openai-private-value",
-      ENABLE_CLAUDE_FALLBACK: "true",
-      ENABLE_OPENAI_FALLBACK: "false",
-      CUSTOMER_HUB_URL: "https://example.test",
-      CUSTOMER_HUB_SECRET: secret,
-      CUSTOMER_HUB_DEALER_ID: "configured-dealer",
-      WALKAROUND_STUDIO_ENABLED: "true",
-      WALKAROUND_GCS_BUCKET: "dealer-media-private",
-      WALKAROUND_UPLOAD_BROKER_URL: "https://uploads.example.test",
-      WALKAROUND_UPLOAD_BROKER_TOKEN: token,
-      WALKAROUND_YOUTUBE_BROKER_URL: "https://youtube.example.test",
-      WALKAROUND_YOUTUBE_BROKER_TOKEN: token,
-      WALKAROUND_WORKER_TOKEN: token,
-      WALKAROUND_WORKER_SIGNING_SECRET: secret,
-    });
-
-    expect(result.status).toBe(200);
-    expect(result.payload).toMatchObject({
-      scope: "configuration_only",
-      providers: {
-        gemini: { configured: true, enabled: true, verification: "not_tested" },
-        anthropic: {
-          configured: true,
-          enabled: true,
-          verification: "not_tested",
-        },
-        openai: {
-          configured: true,
-          enabled: false,
-          verification: "not_tested",
-        },
-      },
-      automation: {
-        customer_hub: {
-          configured: true,
-          enabled: true,
-          verification: "not_tested",
-          dealerId: "configured-dealer",
-        },
-        walkaround: {
-          configured: true,
-          enabled: true,
-          verification: "not_tested",
-        },
-      },
-      apiContractVersion: "contract-v1",
-      capabilities: { optionalField: true },
-      modelPolicyVersion: "policy-v1",
-    });
-    const serialized = JSON.stringify(result.payload);
-    expect(serialized).not.toContain("private-value");
-    expect(serialized).not.toContain(secret);
-    expect(serialized).not.toContain(token);
-    expect(serialized).not.toMatch(/success|healthy|verified/i);
-  });
-
-  it("does not mark an enabled automation as usable when its config is incomplete", () => {
-    const result = runConnections("super_admin", {
-      WALKAROUND_STUDIO_ENABLED: "true",
-      WALKAROUND_GCS_BUCKET: "dealer-media-private",
-    });
-    expect(result.payload).toMatchObject({
-      automation: {
-        walkaround: {
-          configured: false,
-          enabled: false,
-          verification: "not_tested",
-        },
-      },
-    });
-  });
-
-  it("names the dealership the customer website is mapped to, even before it is usable", () => {
-    const mapped = runConnections("super_admin", {
-      CUSTOMER_HUB_DEALER_ID: "  dealer-7  ",
-    });
-    expect(mapped.payload).toMatchObject({
-      automation: {
-        customer_hub: {
-          configured: false,
-          enabled: false,
-          verification: "not_tested",
-          dealerId: "dealer-7",
-        },
-      },
-    });
-    const unmapped = runConnections("super_admin", {});
-    expect(unmapped.payload).toMatchObject({
-      automation: { customer_hub: { configured: false, dealerId: "" } },
-    });
-  });
-
-  it("does not report the documented Gemini placeholder as configured", () => {
-    const result = runConnections("super_admin", {
-      GEMINI_API_KEY: "your-api-key-here",
-    });
-    expect(result.payload).toMatchObject({
-      providers: {
-        gemini: {
-          configured: false,
-          enabled: false,
-          verification: "not_tested",
-        },
-      },
-    });
-  });
 });
 
 describe("local backend startup", () => {

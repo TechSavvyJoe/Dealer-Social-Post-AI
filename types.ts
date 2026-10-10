@@ -15,6 +15,7 @@ export enum AppStep {
   DEALER_ADMIN = 6,
   WORK = 7,
   VEHICLE_SPIN = 8,
+  WALKAROUND = 9,
   /** Compatibility names for older integrations and stored numeric steps. */
   CAPTURE = HOME,
   CUSTOMIZE = DETAILS,

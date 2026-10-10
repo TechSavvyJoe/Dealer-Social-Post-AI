@@ -176,26 +176,86 @@ function defaultReply(
       },
     };
   }
+  if (method === "GET" && path === "/api/app/studio-capabilities") {
+    return { json: { walkaround: false } };
+  }
   if (method === "GET" && path === "/api/app/connections") {
-    const connected = { configured: true, enabled: true, verification: "not_tested" };
+    const service = (
+      id: "gemini" | "anthropic" | "openai" | "website" | "walkaround",
+      scope: "global" | "dealer",
+      state: "needs_test" | "off",
+      dealerId?: string,
+    ) => ({
+      service: id,
+      scope,
+      ...(dealerId ? { dealerId } : {}),
+      configured: state !== "off",
+      enabled: state !== "off",
+      revision: state === "off" ? 0 : 1,
+      state,
+      capabilities:
+        id === "gemini"
+          ? [
+              { id: "caption_text", label: "Caption generation", state: "not_tested" },
+              { id: "images", label: "Image generation", state: "not_tested" },
+              { id: "video", label: "Video generation", state: "not_tested" },
+            ]
+          : id === "website"
+            ? [
+                {
+                  id: "websiteReady",
+                  label: "Private draft delivery",
+                  state: "not_tested",
+                },
+              ]
+            : [],
+      nextAction: state === "off" ? "Optional service is off." : "Run a test.",
+      settings: {},
+      credentialConfigured: {},
+    });
     return {
       json: {
-        scope: "configuration_only",
-        providers: {
-          gemini: connected,
-          anthropic: { ...connected, configured: false, enabled: false },
-          openai: connected,
-        },
-        automation: {
-          customer_hub: connected,
-          walkaround: { ...connected, configured: false, enabled: false },
-        },
+        scope: "guided_setup",
+        secureStorageAvailable: true,
+        dealers: [{ id: dealer.id, name: dealer.name }],
+        services: [
+          service("gemini", "global", "needs_test"),
+          service("anthropic", "global", "off"),
+          service("openai", "global", "off"),
+          service("website", "dealer", "off", dealer.id),
+          service("walkaround", "global", "off"),
+        ],
         apiContractVersion: "test",
         modelPolicyVersion: "5",
-        capabilities: { veoNegativePrompt: true },
+        capabilities: { veoNegativePrompt: true, walkaroundStudio: true },
       },
     };
   }
+  if (method === "GET" && path === "/api/app/dealer-connections")
+    return {
+      json: {
+        services: [
+          {
+            service: "website",
+            enabled: false,
+            configured: false,
+            revision: 0,
+            state: "off",
+            capabilities: [],
+          },
+          {
+            service: "walkaround",
+            enabled: false,
+            configured: false,
+            revision: 0,
+            state: "off",
+            capabilities: [
+              { id: "walkaroundStudio", label: "Video studio", state: "not_tested" },
+            ],
+          },
+        ],
+      },
+    };
   return undefined;
 }
 
@@ -846,13 +906,21 @@ for (const committed of [false, true]) {
       timeout: 30_000,
     });
     await expect(page.getByText("Your post is ready, but not saved")).toBeVisible();
-    const previewBytes = () =>
+    // Compare the entire payload without sending hundreds of thousands of
+    // numbers through the test protocol or constructing a huge failure diff.
+    const previewFingerprint = () =>
       page.getByRole("img", { name: "Post image" }).evaluate(async (element) => {
         const source = (element as HTMLImageElement).src;
         const bytes = await (await fetch(source)).arrayBuffer();
-        return Array.from(new Uint8Array(bytes));
+        const digest = await crypto.subtle.digest("SHA-256", bytes);
+        return {
+          length: bytes.byteLength,
+          sha256: Array.from(new Uint8Array(digest), (byte) =>
+            byte.toString(16).padStart(2, "0"),
+          ).join(""),
+        };
       });
-    const image = await previewBytes();
+    const image = await previewFingerprint();
     expect(image.length).toBeGreaterThan(0);
     const providerCalls = state.calls.filter((call) =>
       call.includes(" /api/proxy/"),
@@ -875,7 +943,7 @@ for (const committed of [false, true]) {
       exact: true,
     });
     await expect(shareButton).toBeEnabled({ timeout: 15_000 });
-    expect(await previewBytes()).toEqual(image);
+    expect(await previewFingerprint()).toEqual(image);
     expect(state.calls.filter((call) => call.includes(" /api/proxy/"))).toHaveLength(
       providerCalls,
     );
@@ -1199,7 +1267,15 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
     page.getByRole("heading", { name: "Your next great post." }),
   ).toBeVisible();
   await page.getByRole("button", { name: "See all" }).click();
-  await page.getByRole("button", { name: /^Open Team/ }).click();
+  // Home's preview has the same Open label. Wait for the destination before
+  // clicking so its image request cannot belong to the exiting Home screen.
+  const work = page.getByRole("region", { name: "My work", exact: true });
+  // The first visit compiles this lazy screen on Vite's CI development server.
+  // Use the workspace-load budget before exercising its saved-post controls.
+  await expect(work.getByRole("heading", { name: "My work", level: 1 })).toBeVisible({
+    timeout: 15000,
+  });
+  await work.getByRole("button", { name: /^Open Team/ }).click();
   await expect(page.getByRole("region", { name: "Post preview" })).toBeVisible();
   const channels = page.getByRole("group", { name: "Share to" });
   await channels.getByRole("button", { name: "LinkedIn" }).click();
@@ -1386,10 +1462,14 @@ test("system admin sees AI connections and setup guidance", async ({ page }, inf
   await fixture(page, "super_admin");
   await page.getByRole("tab", { name: "Connections" }).click();
   await expect(
-    page.getByRole("heading", { name: "Providers and automation" }),
+    page.getByRole("heading", { name: "Connections", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Setup instructions" }).first().click();
-  await expect(page.getByText("Set the Gemini key on the backend host.")).toBeVisible();
+  const gemini = page.getByRole("article", { name: "Google Gemini" });
+  await gemini.getByRole("button", { name: "Set up" }).click();
+  await expect(gemini.getByLabel("Gemini API key")).toHaveValue("");
+  await page.getByRole("main").locator("details").last().locator("summary").click();
+  await expect(page.getByText("API contract", { exact: true })).toBeVisible();
+  await expect(page.getByText("walkaroundStudio", { exact: true })).toBeVisible();
   await quality(page);
   await shot(page, "admin-connections", info.project.name);
 });

@@ -12,6 +12,7 @@ const STEP_TO_HASH: Record<AppStep, string> = {
   [AppStep.DEALER_ADMIN]: "#/dealership",
   [AppStep.WORK]: "#/work",
   [AppStep.VEHICLE_SPIN]: "#/vehicle-studio",
+  [AppStep.WALKAROUND]: "#/walkaround-studio",
 };
 const HASH_TO_STEP = new Map<string, AppStep>([
   ["#/login", AppStep.LOGIN],
@@ -20,6 +21,7 @@ const HASH_TO_STEP = new Map<string, AppStep>([
   ["#/post", AppStep.POST],
   ["#/work", AppStep.WORK],
   ["#/vehicle-studio", AppStep.VEHICLE_SPIN],
+  ["#/walkaround-studio", AppStep.WALKAROUND],
   ["#/admin", AppStep.ADMIN],
   ["#/dealership", AppStep.DEALER_ADMIN],
   ["#/capture", AppStep.HOME],
@@ -60,6 +62,8 @@ export const useUrlStepSync = (options?: {
   managementDirty?: boolean;
   spinDirty?: boolean;
   onBlockedSpinBack?: (target: AppStep) => void;
+  walkaroundDirty?: boolean;
+  onBlockedWalkaroundBack?: (target: AppStep) => void;
   onBlockedManagementBack?: (target: AppStep) => void;
 }) => {
   const step = useAppStore((s) => s.step);
@@ -163,6 +167,11 @@ export const useUrlStepSync = (options?: {
       if (current === AppStep.VEHICLE_SPIN && managementRef.current?.spinDirty) {
         restore();
         managementRef.current.onBlockedSpinBack?.(target);
+        return;
+      }
+      if (current === AppStep.WALKAROUND && managementRef.current?.walkaroundDirty) {
+        restore();
+        managementRef.current.onBlockedWalkaroundBack?.(target);
         return;
       }
       applyingPop.current = true;

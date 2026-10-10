@@ -60,7 +60,9 @@ const proxyHandler = (c) => {
     // provider traffic without both the explicit test flag and loopback host.
     GEMINI_API_URL_BASE = providerTestBase;
   }
-  const geminiApiKey = $os.getenv("GEMINI_API_KEY");
+  const geminiApiKey = require(__hooks + "/connectionConfig.js").runtimeValue(
+    "GEMINI_API_KEY",
+  );
 
   let path = null;
   let generationAudit = null;
@@ -593,9 +595,17 @@ const proxyHandler = (c) => {
 routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const policies = require(__hooks + "/requestPolicies.js");
-  const openaiKey = ($os.getenv("OPENAI_API_KEY") || "").trim();
+  const openaiKey = (
+    require(__hooks + "/connectionConfig.js").runtimeValue("OPENAI_API_KEY") || ""
+  ).trim();
   const enabled =
-    ($os.getenv("ENABLE_OPENAI_FALLBACK") || "").trim().toLowerCase() === "true";
+    (
+      require(__hooks + "/connectionConfig.js").runtimeValue(
+        "ENABLE_OPENAI_FALLBACK",
+      ) || ""
+    )
+      .trim()
+      .toLowerCase() === "true";
   // Session cookie required (same model as primary Gemini proxy).
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) {
@@ -711,9 +721,17 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
 routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const policies = require(__hooks + "/requestPolicies.js");
-  const anthropicKey = ($os.getenv("ANTHROPIC_API_KEY") || "").trim();
+  const anthropicKey = (
+    require(__hooks + "/connectionConfig.js").runtimeValue("ANTHROPIC_API_KEY") || ""
+  ).trim();
   const enabled =
-    ($os.getenv("ENABLE_CLAUDE_FALLBACK") || "").trim().toLowerCase() === "true";
+    (
+      require(__hooks + "/connectionConfig.js").runtimeValue(
+        "ENABLE_CLAUDE_FALLBACK",
+      ) || ""
+    )
+      .trim()
+      .toLowerCase() === "true";
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) {
     helpers.logCoalescedAuthEvent(
@@ -955,99 +973,38 @@ routerAdd("GET", "/api/app/proxy-readiness", (c) => {
   return c.json(trusted ? 200 : 503, { ok: trusted });
 });
 
-// System-administrator configuration inventory for Settings. This endpoint reports
-// only whether a connection is configured/enabled; it never echoes a secret
-// and never claims a provider was tested. Live provider canaries remain an
-// explicit release operation owned by the system administrator.
-routerAdd("GET", "/api/app/connections", (c) => {
+// Guided setup keeps secrets server-side; status reads never call providers.
+routerAdd("GET", "/api/app/connections", (c) =>
+  require(__hooks + "/connectionRoutes.js").inventory(c),
+);
+routerAdd("GET", "/api/app/studio-capabilities", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const policies = require(__hooks + "/requestPolicies.js");
+  c.response().header().set("Cache-Control", "private, no-store");
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
-  if (context.role !== "super_admin") {
-    return c.json(403, { error: "System administrator role required" });
-  }
-
-  const configured = function (name) {
-    const value = ($os.getenv(name) || "").toString().trim();
-    return !!value && value !== "your-api-key-here";
-  };
-  const enabled = function (name) {
-    return ($os.getenv(name) || "").toString().trim().toLowerCase() === "true";
-  };
-  const validSecret = function (name) {
-    const value = ($os.getenv(name) || "").toString();
-    return value.length >= 32 && value === value.trim();
-  };
-  const validHttpsUrl = function (name) {
-    return /^https:\/\/[A-Za-z0-9.-]+(?::\d{2,5})?(?:\/[^?#]*)?$/.test(
-      ($os.getenv(name) || "").toString().trim().replace(/\/+$/, ""),
-    );
-  };
-  const geminiConfigured = configured("GEMINI_API_KEY");
-  const anthropicConfigured = configured("ANTHROPIC_API_KEY");
-  const openaiConfigured = configured("OPENAI_API_KEY");
-  const modelPolicy = policies.geminiModelPolicySnapshot();
-  const configuredWebsiteDealer = ($os.getenv("CUSTOMER_HUB_DEALER_ID") || "")
-    .toString()
-    .trim();
-  const websiteConfigured = require(
-    __hooks + "/websitePublications.js",
-  ).destinationConfiguration(configuredWebsiteDealer).enabled;
-  const walkaroundEnabled = enabled("WALKAROUND_STUDIO_ENABLED");
-  const walkaroundBucket = ($os.getenv("WALKAROUND_GCS_BUCKET") || "")
-    .toString()
-    .trim();
-  const walkaroundConfigured =
-    /^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(walkaroundBucket) &&
-    validHttpsUrl("WALKAROUND_UPLOAD_BROKER_URL") &&
-    validSecret("WALKAROUND_UPLOAD_BROKER_TOKEN") &&
-    validHttpsUrl("WALKAROUND_YOUTUBE_BROKER_URL") &&
-    validSecret("WALKAROUND_YOUTUBE_BROKER_TOKEN") &&
-    validSecret("WALKAROUND_WORKER_TOKEN") &&
-    validSecret("WALKAROUND_WORKER_SIGNING_SECRET");
-
-  c.response().header().set("Cache-Control", "private, no-store");
-  c.response().header().set("Vary", "Cookie");
+  const snapshot = require(__hooks + "/connectionConfig.js").runtimeSnapshot(
+    "walkaround",
+  );
   return c.json(200, {
-    scope: "configuration_only",
-    providers: {
-      gemini: {
-        configured: geminiConfigured,
-        enabled: geminiConfigured,
-        verification: "not_tested",
-      },
-      anthropic: {
-        configured: anthropicConfigured,
-        enabled: anthropicConfigured && enabled("ENABLE_CLAUDE_FALLBACK"),
-        verification: "not_tested",
-      },
-      openai: {
-        configured: openaiConfigured,
-        enabled: openaiConfigured && enabled("ENABLE_OPENAI_FALLBACK"),
-        verification: "not_tested",
-      },
-    },
-    automation: {
-      customer_hub: {
-        configured: websiteConfigured,
-        enabled: websiteConfigured,
-        verification: "not_tested",
-        // A dealer record id, not a credential: the admin hub names the
-        // dealership the website destination is mapped to.
-        dealerId: configuredWebsiteDealer,
-      },
-      walkaround: {
-        configured: walkaroundConfigured,
-        enabled: walkaroundEnabled && walkaroundConfigured,
-        verification: "not_tested",
-      },
-    },
-    apiContractVersion: helpers.API_CONTRACT_VERSION,
-    capabilities: helpers.PROXY_CAPABILITIES,
-    modelPolicyVersion: String(modelPolicy.version),
+    walkaround:
+      context.role !== "super_admin" &&
+      snapshot.enabled &&
+      snapshot.configured &&
+      !snapshot.error,
   });
 });
+routerAdd("GET", "/api/app/dealer-connections", (c) =>
+  require(__hooks + "/connectionRoutes.js").dealerStatus(c),
+);
+routerAdd("GET", "/api/app/connections/proofs", (c) =>
+  require(__hooks + "/connectionRoutes.js").proofs(c),
+);
+routerAdd("PATCH", "/api/app/connections/:service", (c) =>
+  require(__hooks + "/connectionRoutes.js").save(c),
+);
+routerAdd("POST", "/api/app/connections/:service/test", (c) =>
+  require(__hooks + "/connectionRoutes.js").test(c),
+);
 
 // ----------------------------------------------------------------------------
 // Health + diagnostics endpoint. Public (no session required) so uptime
@@ -1348,19 +1305,37 @@ routerAdd("GET", "/api/app/health", (c) => {
   }
 
   // Env presence (booleans only — never echo the values)
-  checks.gemini_key_set = !!($os.getenv("GEMINI_API_KEY") || "").trim();
+  checks.gemini_key_set = !!(
+    require(__hooks + "/connectionConfig.js").runtimeValue("GEMINI_API_KEY") || ""
+  ).trim();
   // Retained in the health contract for one compatibility release. Shared
   // proxy tokens are intentionally unsupported; every paid route requires a
   // continuously revalidated application session.
   checks.proxy_token_set = false;
-  checks.anthropic_key_set = !!($os.getenv("ANTHROPIC_API_KEY") || "").trim();
-  checks.openai_key_set = !!($os.getenv("OPENAI_API_KEY") || "").trim();
+  checks.anthropic_key_set = !!(
+    require(__hooks + "/connectionConfig.js").runtimeValue("ANTHROPIC_API_KEY") || ""
+  ).trim();
+  checks.openai_key_set = !!(
+    require(__hooks + "/connectionConfig.js").runtimeValue("OPENAI_API_KEY") || ""
+  ).trim();
   checks.claude_fallback_enabled =
     checks.anthropic_key_set &&
-    ($os.getenv("ENABLE_CLAUDE_FALLBACK") || "").trim().toLowerCase() === "true";
+    (
+      require(__hooks + "/connectionConfig.js").runtimeValue(
+        "ENABLE_CLAUDE_FALLBACK",
+      ) || ""
+    )
+      .trim()
+      .toLowerCase() === "true";
   checks.openai_fallback_enabled =
     checks.openai_key_set &&
-    ($os.getenv("ENABLE_OPENAI_FALLBACK") || "").trim().toLowerCase() === "true";
+    (
+      require(__hooks + "/connectionConfig.js").runtimeValue(
+        "ENABLE_OPENAI_FALLBACK",
+      ) || ""
+    )
+      .trim()
+      .toLowerCase() === "true";
   try {
     // Creation-only self-heal covers fresh databases where migrations landed
     // after the bootstrap hook already ran.
@@ -1396,13 +1371,22 @@ routerAdd("GET", "/api/app/health", (c) => {
   checks.off_box_backup_configured = backupEnabled;
   checks.off_box_restore_ready = backupRestoreReady;
   try {
-    const websitePublications = require(__hooks + "/websitePublications.js");
-    const configuredDealerId = ($os.getenv("CUSTOMER_HUB_DEALER_ID") || "").trim();
-    checks.website_integration_configured =
-      !!configuredDealerId &&
-      websitePublications.destinationConfiguration(configuredDealerId).enabled;
+    checks.website_integration_configured = require(
+      __hooks + "/connectionConfig.js",
+    ).hasConfiguredWebsite();
   } catch (_e) {
     checks.website_integration_configured = false;
+  }
+
+  if (String($os.getenv("CONNECTIONS_RESTORE_CHECK") || "") === "true") {
+    try {
+      checks.managed_connections_recoverable = require(
+        __hooks + "/connectionConfig.js",
+      ).verifyStoredEncryption().ok;
+    } catch (_e) {
+      checks.managed_connections_recoverable = false;
+    }
+    if (!checks.managed_connections_recoverable) result.ok = false;
   }
 
   // Top-level ok = critical checks must pass (uptime monitors hit this).
