@@ -2646,9 +2646,14 @@ routerAdd("POST", "/api/app/posts", (c) => {
       )
         return respond(413, { error: "Choose a post image under 8 MB." });
       const payloadDigest = operationId
-        ? operations.fingerprint(body, creativeFile, creativeMime)
+        ? operations.matchFingerprint(
+            body,
+            creativeFile,
+            creativeMime,
+            String(body.save_payload_digest || ""),
+          )
         : "";
-      if (operationId && payloadDigest !== String(body.save_payload_digest || ""))
+      if (operationId && !payloadDigest)
         return respond(400, {
           code: "POST_SAVE_PAYLOAD_INVALID",
           error: "Generated save payload did not match its digest",

@@ -234,6 +234,8 @@ function makeOperationForm({
     return value;
   };
   const fields = POST_FIELDS.map((name) => {
+    // Deliberately mirror an already-open legacy client: LF is hashed before
+    // native FormData converts it to CRLF, and legacy CRLF hashes stay intact.
     let value = String(values[name] || "");
     if (
       ["platform_ids", "platform_captions", "website_draft"].includes(name) &&
@@ -595,10 +597,11 @@ exec ${shellQuote(duPath)} "$@"
   );
 
   const operationId = "mediaStorageSameOperation20261009";
+  const operationCaption = "Concurrent local result recovery fixture.\n\n#Synthetic";
   const operationRequest = makeOperationForm({
     person: b.seller,
     operation: operationId,
-    caption: "Concurrent local result recovery fixture.",
+    caption: operationCaption,
     png,
   });
   const beforeLedgerCounts = await countRecords();
@@ -610,7 +613,7 @@ exec ${shellQuote(duPath)} "$@"
       makeOperationForm({
         person: b.seller,
         operation: operationId,
-        caption: "Concurrent local result recovery fixture.",
+        caption: operationCaption,
         png,
       }),
       b.sellerCookie,
@@ -666,7 +669,7 @@ exec ${shellQuote(duPath)} "$@"
     const altered = makeOperationForm({
       person: b.seller,
       operation: operationId,
-      caption: variant.caption || "Concurrent local result recovery fixture.",
+      caption: variant.caption || operationCaption,
       png: variant.png || png,
       filename: variant.filename || "post-creative.png",
       mime: variant.mime || "image/png",
@@ -699,6 +702,54 @@ exec ${shellQuote(duPath)} "$@"
     "An exact operation replay recovered the existing post while the fake capacity was full without new assets.",
   );
   await setCapacity(2 * 1024 * 1024);
+
+  const legacyOperationId = "mediaStorageLegacyCrlfOperation20261010";
+  const legacyRequest = makeOperationForm({
+    person: b.seller,
+    operation: legacyOperationId,
+    caption: "Legacy multiline recovery fixture.\r\n\r\n#Synthetic",
+    png,
+  });
+  const beforeLegacy = await countRecords();
+  const legacySaved = await submitOperation(legacyRequest, b.sellerCookie);
+  assert.equal(legacySaved.status, 200);
+  const legacyRetry = await submitOperation(legacyRequest, b.sellerCookie);
+  assert.equal(legacyRetry.status, 200);
+  assert.equal(legacyRetry.value.id, legacySaved.value.id);
+  const legacyLookup = await api(
+    `/api/app/post-operations/${legacyOperationId}?payload_digest=${legacyRequest.digest}`,
+    { cookie: b.sellerCookie },
+  );
+  assert.equal(legacyLookup.value.id, legacySaved.value.id);
+  assert.equal((await countRecords()).posts - beforeLegacy.posts, 1);
+  const legacyDb = new DatabaseSync(join(dataDir, "data.db"));
+  try {
+    assert.equal(
+      legacyDb
+        .prepare(
+          "SELECT payload_digest FROM _post_save_operations WHERE operation_id = ?",
+        )
+        .get(legacyOperationId).payload_digest,
+      legacyRequest.digest,
+      "Legacy recovery must retain the verified original operation digest.",
+    );
+  } finally {
+    legacyDb.close();
+  }
+  const invalidDigestRequest = makeOperationForm({
+    person: b.seller,
+    operation: legacyOperationId,
+    caption: "Legacy multiline recovery fixture.\r\n\r\n#Synthetic",
+    png,
+  });
+  invalidDigestRequest.form.set("save_payload_digest", "0".repeat(64));
+  const invalidDigestSave = await submitOperation(invalidDigestRequest, b.sellerCookie);
+  assert.equal(invalidDigestSave.status, 400);
+  assert.equal(invalidDigestSave.value.code, "POST_SAVE_PAYLOAD_INVALID");
+  assert.equal((await countRecords()).posts - beforeLegacy.posts, 1);
+  checks.push(
+    "Native multipart LF and legacy CRLF saves/retries preserved one post, its exact operation digest, and rejected a forged digest.",
+  );
 
   let relay;
   const unknownOperationId = "mediaStorageLostResponse20261009";

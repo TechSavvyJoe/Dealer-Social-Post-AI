@@ -53,7 +53,7 @@ const sha256 = async (text: string): Promise<string> => {
 };
 export const postSaveFingerprint = async (form: FormData): Promise<string> => {
   const fields = POST_SAVE_FIELDS.map((name) => {
-    let value = String(form.get(name) || "");
+    let value = String(form.get(name) || "").replace(/\r\n?/g, "\n");
     if (
       ["platform_ids", "platform_captions", "website_draft"].includes(name) &&
       value
