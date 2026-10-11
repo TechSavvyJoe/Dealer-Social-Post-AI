@@ -77,7 +77,13 @@ function fingerprintMedia(creativeFile, creativeMime) {
         Number(creativeFile.size),
       );
     } finally {
-      if (reader) reader.close();
+      // Native encoding may close input before waiting for its copy goroutine.
+      // Cleanup must not turn a completed fingerprint into a failed save.
+      if (reader) {
+        try {
+          reader.close();
+        } catch (_error) {}
+      }
     }
   }
   return [

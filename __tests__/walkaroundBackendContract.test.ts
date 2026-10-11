@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import ts from "typescript";
 
 type WalkaroundModule = {
   MAX_CLIPS: number;
@@ -14,6 +15,83 @@ type WalkaroundModule = {
 };
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
+
+const NATIVE_ENCODER_ARGS = [
+  "/usr/bin/timeout",
+  "--foreground",
+  "--signal=KILL",
+  "10s",
+  "/usr/bin/base64",
+  "--wrap=0",
+];
+
+function enforceFixedCommandPolicy(source: string, allowNativeEncoder = false) {
+  const parsed = ts.createSourceFile(
+    "hook.js",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
+  let references = 0;
+  function reject(): never {
+    throw new Error("Unreviewed native command or OS alias");
+  }
+  function visit(node: ts.Node) {
+    // These hooks do not need global-object aliases or dynamic code execution.
+    if (ts.isIdentifier(node) && ["globalThis", "eval", "Function"].includes(node.text))
+      reject();
+    // Prevent aliases and computed OS access, including escaped identifiers.
+    if (ts.isIdentifier(node) && node.text === "$os") {
+      const parent = node.parent;
+      if (
+        !ts.isPropertyAccessExpression(parent) ||
+        parent.expression !== node ||
+        parent.questionDotToken
+      )
+        reject();
+    }
+    if (
+      ts.isElementAccessExpression(node) &&
+      ts.isStringLiteral(node.argumentExpression) &&
+      ["cmd", "$os"].includes(node.argumentExpression.text)
+    )
+      reject();
+    if (ts.isPropertyAccessExpression(node) && node.name.text === "cmd") {
+      references++;
+      const call = node.parent;
+      if (
+        !allowNativeEncoder ||
+        !ts.isIdentifier(node.expression) ||
+        node.expression.text !== "$os" ||
+        node.questionDotToken ||
+        !ts.isCallExpression(call) ||
+        call.expression !== node ||
+        call.questionDotToken
+      )
+        reject();
+      if (
+        call.arguments.length !== NATIVE_ENCODER_ARGS.length ||
+        call.arguments.some(
+          (argument, index) =>
+            !ts.isStringLiteral(argument) ||
+            argument.text !== NATIVE_ENCODER_ARGS[index],
+        )
+      )
+        reject();
+      let owner: ts.Node = call.parent;
+      while (owner.parent && !ts.isFunctionLike(owner)) owner = owner.parent;
+      if (
+        !ts.isFunctionDeclaration(owner) ||
+        owner.name?.text !== "nativeBase64EncodeReader"
+      )
+        reject();
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(parsed);
+  if (references !== (allowNativeEncoder ? 1 : 0)) reject();
+}
 
 const loadModule = (): WalkaroundModule => {
   const module = { exports: {} as WalkaroundModule };
@@ -129,9 +207,10 @@ describe("Vehicle Walkaround PocketBase boundary", () => {
   });
 
   it("keeps private-key material and shell execution out of the hooks", () => {
-    // The deleted legacy Vertex path minted service-account JWTs by writing
-    // the private key to disk and piping it through openssl. Nothing in
-    // pb_hooks may reintroduce shell execution or on-disk key material.
+    // The deleted Vertex path wrote a private key to disk and invoked openssl.
+    // These hooks still forbid private-key material, shells, and dynamic exec.
+    // The sole exception is the reviewed data-only native media encoder, with
+    // fixed timeout/base64 arguments and pinned-runtime lifecycle coverage.
     for (const file of [
       "pb_hooks/main.pb.js",
       "pb_hooks/helpers.js",
@@ -141,9 +220,39 @@ describe("Vehicle Walkaround PocketBase boundary", () => {
     ]) {
       const source = read(file);
       expect(source).not.toContain("openssl");
-      expect(source).not.toContain("$os.cmd(");
+      enforceFixedCommandPolicy(source, file === "pb_hooks/websitePublications.js");
       expect(source).not.toContain("VERTEX_SERVICE_ACCOUNT_JSON");
     }
+  });
+
+  it("allows only the single fixed native encoder command in its reviewed function", () => {
+    const args = NATIVE_ENCODER_ARGS.map((value) => JSON.stringify(value)).join(",");
+    const call = `$os.cmd(${args})`;
+    const allowed = `function nativeBase64EncodeReader() { return ${call}; }`;
+    expect(() => enforceFixedCommandPolicy(allowed, true)).not.toThrow();
+    expect(() => enforceFixedCommandPolicy(allowed, false)).toThrow();
+    const forbidden = [
+      allowed.replace("/usr/bin/base64", "/bin/sh"),
+      allowed.replace("10s", "60s"),
+      allowed.replace('"10s"', "deadline"),
+      allowed.replace(args, "...args"),
+      allowed.replace(args, `${args}, "extra"`),
+      allowed.replace("$os.cmd", '$os["cmd"]'),
+      allowed.replace("$os.cmd", '$os["c" + "md"]'),
+      allowed.replace("return", "const exec = $os.cmd; return"),
+      allowed.replace("return", "const os = $os; return"),
+      allowed.replace("return", 'const os = globalThis["$os"]; return'),
+      allowed.replace("return", 'const os = Reflect.get(globalThis, "$os"); return'),
+      allowed.replace("return", 'eval("unreviewed code"); return'),
+      allowed.replace("return", 'new Function("unreviewed code"); return'),
+      allowed.replace("return", `const first = ${call}; return`),
+      allowed.replace("nativeBase64EncodeReader", "differentFunction"),
+      allowed.replace("$os.cmd", "$os.cmd.call"),
+      allowed.replace("$os.cmd", "$os.cmd?."),
+      allowed.replace("return", "return () =>"),
+    ];
+    for (const source of forbidden)
+      expect(() => enforceFixedCommandPolicy(source, true)).toThrow();
   });
 
   it("binds worker signatures to method, path, idempotency key, and a nonce", () => {

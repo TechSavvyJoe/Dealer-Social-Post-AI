@@ -7449,18 +7449,19 @@ const BASE64_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function encodeBase64Block(bytes, count) {
-  let result = "";
+  const parts = [];
   for (let i = 0; i < count; i += 3) {
     const a = Number(bytes[i]) & 255;
     const b = Number(bytes[i + 1]) & 255;
     const c = Number(bytes[i + 2]) & 255;
-    result +=
+    parts.push(
       BASE64_ALPHABET.charAt(a >> 2) +
-      BASE64_ALPHABET.charAt(((a & 3) << 4) | (b >> 4)) +
-      BASE64_ALPHABET.charAt(((b & 15) << 2) | (c >> 6)) +
-      BASE64_ALPHABET.charAt(c & 63);
+        BASE64_ALPHABET.charAt(((a & 3) << 4) | (b >> 4)) +
+        BASE64_ALPHABET.charAt(((b & 15) << 2) | (c >> 6)) +
+        BASE64_ALPHABET.charAt(c & 63),
+    );
   }
-  return result;
+  return parts.join("");
 }
 
 function base64EncodeBytes(bytes) {
@@ -7484,6 +7485,98 @@ function base64EncodeBytes(bytes) {
   return result;
 }
 
+function nativeMediaEncoderAvailable() {
+  if (typeof $os.dirFS !== "function") return false;
+  const directory = $os.dirFS("/usr/bin");
+  for (const name of ["timeout", "base64"]) {
+    let file = null;
+    try {
+      file = directory.open(name);
+      const info = file.stat();
+      if (info.isDir() || !(Number(info.mode()) & 0o111))
+        throw new Error("creative_media_encoder_unavailable");
+    } catch (error) {
+      const message = String(error && error.message ? error.message : error);
+      if (
+        /no such file or directory|file does not exist|system cannot find the (?:file|path) specified/i.test(
+          message,
+        )
+      )
+        return false;
+      throw new Error("creative_media_encoder_unavailable");
+    } finally {
+      if (file) file.close();
+    }
+  }
+  return true;
+}
+
+function nativeBase64EncodeReader(reader, expectedSize) {
+  const expectedLength = 4 * Math.ceil(expectedSize / 3);
+  const maximumOutput = expectedLength + 2 * Math.ceil(expectedLength / 76) + 2;
+  let command = null,
+    output = null,
+    started = false,
+    failed = false,
+    raw = "";
+  try {
+    // The fixed native reader goes directly to Go os/exec: no JS byte bridge,
+    // shell, file path, image bytes, or credentials in the command arguments.
+    command = $os.cmd(
+      "/usr/bin/timeout",
+      "--foreground",
+      "--signal=KILL",
+      "10s",
+      "/usr/bin/base64",
+      "--wrap=0",
+    );
+    command.env = ["PATH=/usr/bin:/bin", "LC_ALL=C"];
+    command.stdin = reader;
+    // Go duration is nanoseconds; this bounds pipe cleanup, not execution.
+    command.waitDelay = 1000000000;
+    output = command.stdoutPipe();
+    command.start();
+    started = true;
+    raw = toString(output, maximumOutput + 1);
+    if (raw.length > maximumOutput) failed = true;
+  } catch (_error) {
+    failed = true;
+  } finally {
+    // Close input before Wait: its Go copy goroutine may be blocked in Read.
+    // Keep the timeout supervisor alive so it kills and reaps its direct child.
+    // readPostCreative also closes this owned filesystem reader in its finally.
+    try {
+      reader.close();
+    } catch (_error) {}
+    if (output) {
+      try {
+        output.close();
+      } catch (_error) {}
+    }
+    if (command && started) {
+      try {
+        command.wait();
+      } catch (_error) {
+        failed = true;
+      }
+    }
+  }
+  if (failed) throw new Error("creative_media_read_failed");
+  const encoded = raw.split("\n").join("").split("\r").join("");
+  if (encoded.length !== expectedLength || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded))
+    throw new Error("creative_media_read_failed");
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  if (
+    (encoded.length / 4) * 3 - padding !== expectedSize ||
+    (padding === 2 &&
+      (BASE64_ALPHABET.indexOf(encoded.charAt(encoded.length - 3)) & 15) !== 0) ||
+    (padding === 1 &&
+      (BASE64_ALPHABET.indexOf(encoded.charAt(encoded.length - 2)) & 3) !== 0)
+  )
+    throw new Error("creative_media_read_failed");
+  return encoded;
+}
+
 function base64EncodeReader(reader, expectedSize) {
   if (!Number.isFinite(expectedSize) || expectedSize < 1) {
     throw new Error("creative_media_empty");
@@ -7491,6 +7584,12 @@ function base64EncodeReader(reader, expectedSize) {
   if (expectedSize > WEBSITE_MEDIA_MAX_BYTES) {
     throw new Error("creative_media_too_large");
   }
+  if (!Number.isSafeInteger(expectedSize))
+    throw new Error("creative_media_read_failed");
+  // Probe fixed binaries before consuming the reader. Only absent binaries (or
+  // unsupported runtimes) use the portable encoder; native failures never retry.
+  if (nativeMediaEncoderAvailable())
+    return nativeBase64EncodeReader(reader, expectedSize);
 
   const bufferSize = Math.min(49152, expectedSize);
   const seedPath =
@@ -7514,7 +7613,12 @@ function base64EncodeReader(reader, expectedSize) {
   let carry = [];
   let total = 0;
   while (total < expectedSize) {
-    const count = Number(reader.read(buffer)) || 0;
+    let count;
+    try {
+      count = Number(reader.read(buffer)) || 0;
+    } catch (_error) {
+      throw new Error("creative_media_read_failed");
+    }
     if (count <= 0 || total + count > expectedSize) {
       throw new Error("creative_media_read_failed");
     }
@@ -7526,6 +7630,14 @@ function base64EncodeReader(reader, expectedSize) {
     total += count;
   }
   if (total !== expectedSize) throw new Error("creative_media_read_failed");
+  // A size snapshot cannot authorize silently truncating a file that grew.
+  try {
+    if ((Number(reader.read(buffer)) || 0) !== 0)
+      throw new Error("creative_media_read_failed");
+  } catch (error) {
+    if (String(error && error.message ? error.message : error) !== "EOF")
+      throw new Error("creative_media_read_failed");
+  }
   if (carry.length) chunks.push(base64EncodeBytes(carry));
   return chunks.join("");
 }
@@ -7565,7 +7677,13 @@ function readPostCreative(post) {
       base64: base64EncodeReader(reader, size),
     };
   } finally {
-    if (reader) reader.close();
+    if (reader) {
+      try {
+        reader.close();
+      } catch (_error) {
+        // The native encoder closes its input before waiting for its child.
+      }
+    }
     fsys.close();
   }
 }
