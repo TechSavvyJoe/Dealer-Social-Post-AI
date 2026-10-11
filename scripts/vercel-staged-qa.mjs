@@ -20,6 +20,10 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  validHubCanaryIdentity,
+  validHubPurgeResult,
+} from "./lib/website-handoff-evidence.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const VERCEL_CLI_VERSION = "58.4.4";
@@ -248,13 +252,25 @@ export const validateProviderCanaryEvidence = (evidence, releaseSha) => {
   return evidence;
 };
 
+const validHubBoundary = (boundary) =>
+  boundary?.passed === true &&
+  boundary.privateMediaStatus === 401 &&
+  boundary.privateMediaCacheControl === "private, no-store" &&
+  boundary.publicStatuses?.["/"] === 200 &&
+  boundary.publicStatuses?.["/api/hub-data/deliveries"] === 200 &&
+  boundary.publicStatuses?.["/api/hub-data/inventory"] === 200 &&
+  boundary.markerAbsent === true &&
+  boundary.identityAbsent === true &&
+  boundary.mediaAbsent === true &&
+  boundary.mediaHashChecked === true;
+
 export const validateWebsiteHandoffCanaryEvidence = (evidence, releaseSha) => {
   const startedAt = Date.parse(evidence?.startedAt || "");
   const completedAt = Date.parse(evidence?.completedAt || "");
   const cleanupCompletedAt = Date.parse(evidence?.cleanup?.completedAt || "");
   const checks = evidence?.checks || {};
   if (
-    evidence?.schemaVersion !== 1 ||
+    evidence?.schemaVersion !== 2 ||
     evidence.canary !== "production-website-private-draft" ||
     evidence.syntheticAsset !== "docs/marketing/demo/synthetic-delivery-photo.jpg" ||
     evidence.targetOrigin !== PRODUCTION_FLY_ORIGIN ||
@@ -287,14 +303,30 @@ export const validateWebsiteHandoffCanaryEvidence = (evidence, releaseSha) => {
     checks.privateDelivery?.passed !== true ||
     checks.privateDelivery?.status !== "draft_ready" ||
     checks.privateDelivery?.attempts !== 0 ||
-    checks.publicBoundary?.passed !== true ||
-    checks.publicBoundary?.imageStatus !== 404 ||
-    checks.publicBoundary?.markerAbsent !== true ||
+    !validHubBoundary(checks.publicBoundary) ||
+    !validHubCanaryIdentity(evidence.resources?.canaryIdentity) ||
+    !/^[a-f0-9]{64}$/.test(evidence.resources?.canaryMediaBase64Sha256 || "") ||
+    evidence.resources?.syntheticMarker !==
+      `QA-${releaseSha.slice(0, 8)}-${releaseSha.slice(8, 12)}` ||
+    evidence.resources?.hubDraftId !== evidence.resources?.canaryIdentity?.draftId ||
+    evidence.resources?.postId !== evidence.resources?.canaryIdentity?.sourcePostId ||
+    evidence.resources?.sourceDealerId !==
+      evidence.resources?.canaryIdentity?.sourceDealerId ||
+    evidence.resources?.reviewUrl !==
+      `${CUSTOMER_HUB_ORIGIN}/backend/#inbox-${evidence.resources?.hubDraftId}` ||
+    !validHubPurgeResult(
+      evidence.cleanup?.verification,
+      evidence.resources?.canaryIdentity,
+      evidence.completedAt,
+    ) ||
+    !validHubBoundary(evidence.cleanup?.publicBoundary) ||
     checks.sessionRevocation?.passed !== true ||
     evidence.cleanup?.required !== false ||
     evidence.cleanup?.status !== "complete" ||
     !Number.isFinite(cleanupCompletedAt) ||
     cleanupCompletedAt < completedAt ||
+    cleanupCompletedAt <
+      Date.parse(evidence.cleanup?.verification?.completedAt || "") ||
     cleanupCompletedAt > Date.now() + 300_000
   ) {
     fail(
