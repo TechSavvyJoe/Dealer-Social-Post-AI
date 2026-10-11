@@ -26,3 +26,10 @@ jobs:
           flyctl logs --app dealer-social-post-ai-production --no-tail
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: Report the deployed HTTP client version
+        # Read-only: no request bodies, credentials, database rows or settings.
+        run: >-
+          flyctl ssh console --quiet --app dealer-social-post-ai-production
+          --user pbuser --command 'curl --version'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
