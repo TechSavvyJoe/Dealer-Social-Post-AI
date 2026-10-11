@@ -1,5 +1,6 @@
 // PocketBase 0.22's $http.send follows redirects. Managed destinations use
-// curl without --location instead; credentials/body travel only through stdin.
+// curl without --location instead. Credential headers travel only through stdin;
+// request bytes use a private temporary file to avoid older curl config limits.
 // Never include request options or upstream response bodies in error/log output.
 function invalid() {
   throw new Error("CONNECTION_TRANSPORT_FAILED");
@@ -61,7 +62,6 @@ function send(options) {
       invalid();
     config.push("header = " + quoted(name + ": " + value));
   });
-  if (options.body !== undefined) config.push("data = " + quoted(body));
   const args = [
     "--disable",
     "--silent",
@@ -80,8 +80,27 @@ function send(options) {
   ];
   let command,
     started = false,
-    waited = false;
+    waited = false,
+    bodyDirectory = "",
+    bodyPath = "";
   try {
+    if (options.body !== undefined) {
+      const bodyBytes = bytes(body);
+      if (bodyBytes.length > 12 * 1024 * 1024) invalid();
+      // PB 0.22 has no createTemp/openFile. mkdir creates an exclusive private
+      // directory; a collision fails before writeFile can follow any symlink.
+      const candidate =
+        $os.tempDir() +
+        "/dealer-social-http-body-" +
+        $security.randomStringWithAlphabet(32, "abcdefghijklmnopqrstuvwxyz0123456789");
+      $os.mkdir(candidate, 448);
+      bodyDirectory = candidate;
+      bodyPath = bodyDirectory + "/body";
+      $os.writeFile(bodyPath, bodyBytes, 384);
+      // A single multi-megabyte data= line exceeds curl 7.81's 100 KiB cap.
+      // --data-binary reads exact UTF-8 bytes, without newline transformations.
+      config.push("data-binary = " + quoted("@" + bodyPath));
+    }
     command = $os.cmd.apply($os, ["curl"].concat(args));
     const input = command.stdinPipe(),
       output = command.stdoutPipe();
@@ -121,6 +140,17 @@ function send(options) {
       } catch (_ignored) {}
     }
     invalid();
+  } finally {
+    if (bodyPath) {
+      try {
+        $os.remove(bodyPath);
+      } catch (_e) {}
+    }
+    if (bodyDirectory) {
+      try {
+        $os.remove(bodyDirectory);
+      } catch (_e) {}
+    }
   }
 }
 module.exports = { send: send };
