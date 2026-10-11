@@ -301,6 +301,8 @@ jobs:
           TURNSTILE_HOSTNAMES: ${{ vars.TURNSTILE_ALLOWED_HOSTNAMES }}
           TURNSTILE_ENFORCEMENT: ${{ vars.TURNSTILE_ENFORCEMENT_ENABLED || 'false' }}
           LEGACY_CLIENT_COMPATIBILITY: ${{ vars.LEGACY_CLIENT_COMPATIBILITY_ENABLED }}
+          CUSTOMER_HUB_CANARY_DEALER_ID: ${{ secrets.CUSTOMER_HUB_CANARY_DEALER_ID }}
+          CUSTOMER_HUB_CANARY_SECRET: ${{ secrets.CUSTOMER_HUB_CANARY_SECRET }}
         run: |
           if ! printf '%s' "$TURNSTILE_SITE_KEY" | grep --quiet --extended-regexp '^[A-Za-z0-9_-]{20,}$'; then
             echo "Production deploy blocked: configure VITE_TURNSTILE_SITE_KEY in the production environment." >&2
@@ -346,6 +348,7 @@ jobs:
             POCKETBASE_R2_BACKUPS_ENABLED=true \
             POCKETBASE_BACKUP_LAST_VERIFIED_AT="$RESTORE_VERIFIED_AT" \
             POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA="$RELEASE_SHA"
+          node scripts/stage-website-canary-config.mjs
           flyctl deploy --app dealer-social-post-ai-production \
             --image "$CANDIDATE_IMAGE_REF" \
             --wait-timeout 10m
