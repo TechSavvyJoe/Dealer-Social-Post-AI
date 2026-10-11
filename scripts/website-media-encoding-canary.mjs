@@ -31,6 +31,7 @@ export async function runWebsiteMediaEncodingCanary() {
   let child, hardStop;
   let logs = "";
   const proofs = [];
+  let pendingProbe = null;
   try {
     for (const name of [
       "hooks",
@@ -53,7 +54,31 @@ export async function runWebsiteMediaEncodingCanary() {
       join(scratch, "hooks/websitePublications.js"),
       source + "\nmodule.exports.readPostCreative = readPostCreative;\n",
     );
-    const hashes = {};
+    await cp(
+      new URL("../pb_hooks/postSaveOperations.js", import.meta.url),
+      join(scratch, "hooks/postSaveOperations.js"),
+    );
+    const operationsSource = await readFile(
+      join(scratch, "hooks/postSaveOperations.js"),
+      "utf8",
+    );
+    const nodeOperations = { exports: {} };
+    new Function(
+      "module",
+      "exports",
+      "require",
+      "__hooks",
+      "$security",
+      operationsSource,
+    )(
+      nodeOperations,
+      nodeOperations.exports,
+      () => ({ base64EncodeReader: (reader) => reader.base64 }),
+      "/synthetic-hooks",
+      { sha256: (value) => createHash("sha256").update(value).digest("hex") },
+    );
+    const hashes = {},
+      fingerprintHashes = {};
     for (const size of sizes) {
       const bytes = Buffer.alloc(size);
       for (let index = 0; index < size; index++) bytes[index] = (index * 73 + 19) & 255;
@@ -63,6 +88,15 @@ export async function runWebsiteMediaEncodingCanary() {
       hashes[size] = createHash("sha256")
         .update(bytes.toString("base64"))
         .digest("hex");
+      fingerprintHashes[size] = nodeOperations.exports.fingerprint(
+        {},
+        {
+          reader: { open: () => ({ base64: bytes.toString("base64"), close() {} }) },
+          originalName: `${size}.jpg`,
+          size,
+        },
+        "image/jpeg",
+      );
     }
     await writeFile(join(scratch, "hang-marker"), "", { mode: 0o600 });
     await writeFile(
@@ -75,7 +109,7 @@ export async function runWebsiteMediaEncodingCanary() {
       let native = false, fsys = null, reader = null;
       try {
         try { const file=$os.dirFS("/usr/bin").open("timeout"); file.close(); native=true; } catch (_error) {}
-        if(mode === "fallback") $os.dirFS = undefined;
+        if(mode === "fallback" || mode === "fingerprint_fallback") $os.dirFS = undefined;
         $os.cmd = function() {
           const args=Array.prototype.slice.call(arguments); calls.push(args);
           if(JSON.stringify(args) !== JSON.stringify(["/usr/bin/timeout","--foreground","--signal=KILL","10s","/usr/bin/base64","--wrap=0"])) throw new Error("unexpected_encoder_arguments");
@@ -91,6 +125,15 @@ export async function runWebsiteMediaEncodingCanary() {
           let consumed=false; try { module.base64EncodeReader({read:()=>{consumed=true;return 0},close:()=>{}}, mode === "empty" ? 0 : 8388609); }
           catch(_error) { return c.json(200,{rejected:true,consumed:consumed,calls:calls.length}); }
           throw new Error("invalid_size_accepted");
+        }
+        if(mode === "fingerprint_native" || mode === "fingerprint_fallback") {
+          const operations=require(__hooks + "/postSaveOperations.js");
+          const file=$filesystem.fileFromPath(${JSON.stringify(runtimeRoot + "/data/storage/synthetic/")} + String(size) + ".jpg");
+          const probe=file.reader.open(); probe.close();
+          let repeatedCloseRejected=false;
+          try { probe.close(); } catch(_error) { repeatedCloseRejected=true; }
+          const hash=operations.fingerprint({},file,"image/jpeg");
+          return c.json(200,{hash:hash,ms:Date.now()-startedAt,calls:calls.length,repeatedCloseRejected:repeatedCloseRejected});
         }
         if(mode === "success") {
           const post={id:"synthetic",getString:field=>field === "creative_image" ? String(size)+".jpg" : "",baseFilesPath:()=>"synthetic"};
@@ -199,12 +242,14 @@ export async function runWebsiteMediaEncodingCanary() {
     }
     assert(ready, "scratch PocketBase did not start");
     async function probe(mode, size = 1) {
+      pendingProbe = { mode, size };
       const response = await fetch(`${base}/probe?mode=${mode}&size=${size}`, {
         signal: AbortSignal.timeout(30_000),
       });
       const value = await response.json();
       assert.equal(response.status, 200, `${mode}: ${JSON.stringify(value)}`);
       proofs.push({ mode, size, ...value });
+      pendingProbe = null;
       return value;
     }
     let native;
@@ -223,6 +268,19 @@ export async function runWebsiteMediaEncodingCanary() {
       assert.equal(result.rejected, true);
       assert.equal(result.consumed, false);
       assert.equal(result.calls, 0);
+    }
+    for (const mode of ["fingerprint_native", "fingerprint_fallback"]) {
+      const fingerprint = await probe(mode, 49154);
+      assert.equal(fingerprint.hash, fingerprintHashes[49154]);
+      assert.equal(
+        fingerprint.calls,
+        mode === "fingerprint_fallback" ? 0 : native ? 1 : 0,
+      );
+      assert.equal(
+        fingerprint.repeatedCloseRejected,
+        true,
+        "file-backed reader must exercise repeated-close failure",
+      );
     }
     const fallback = await probe("fallback", 49154);
     assert.equal(fallback.hash, hashes[49154]);
@@ -268,6 +326,12 @@ export async function runWebsiteMediaEncodingCanary() {
       }),
     );
   } catch (error) {
+    console.error(
+      JSON.stringify({
+        pendingProbe,
+        completed: proofs.map(({ mode, size, ms }) => ({ mode, size, ms })),
+      }),
+    );
     console.error(logs.slice(-4000));
     throw error;
   } finally {
