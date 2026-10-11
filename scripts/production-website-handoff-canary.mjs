@@ -406,16 +406,27 @@ async function expectedJsonResponse(response, status, code, label) {
   return payload;
 }
 
-function assertNotRequested(publication, label) {
+export function assertNotRequested(publication, label) {
+  // Status reads may overlay a documented review hold without enqueueing a
+  // publication. Only the matching image-review flag explains that error;
+  // flags do not relax the undelivered state, attempts, or private URL checks.
+  const lastError = publication?.lastError;
+  const permittedReviewError =
+    lastError === "image_review_required" &&
+    publication?.image_review_required === true;
+  const validReviewFlags = ["image_review_required", "identity_review_required"].every(
+    (key) => publication?.[key] === undefined || typeof publication[key] === "boolean",
+  );
   if (
     publication?.status !== "not_requested" ||
-    Number(publication?.attempts || 0) !== 0 ||
-    (publication?.reviewUrl || "") !== "" ||
-    (publication?.lastError || "") !== ""
+    publication?.attempts !== 0 ||
+    publication?.reviewUrl !== "" ||
+    !validReviewFlags ||
+    (lastError !== "" && !permittedReviewError)
   ) {
     throw new WebsiteHandoffCanaryError(
       "PREMATURE_WEBSITE_DELIVERY",
-      `${label} unexpectedly entered the website delivery queue.`,
+      `${label} did not remain an undelivered private website draft.`,
     );
   }
 }

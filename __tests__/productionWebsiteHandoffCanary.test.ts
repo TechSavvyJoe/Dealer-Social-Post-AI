@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  assertNotRequested,
   buildSyntheticDrafts,
   canonicalHubOrigin,
   canonicalProductionOrigin,
@@ -174,6 +175,70 @@ describe("production website handoff canary", () => {
   it("waits across the next worker minute with a grace period", () => {
     expect(nextMinuteBoundaryWaitMs(new Date("2026-08-05T12:34:00.000Z"))).toBe(68_000);
     expect(nextMinuteBoundaryWaitMs(new Date("2026-08-05T12:34:30.500Z"))).toBe(37_500);
+  });
+
+  it("recognizes documented review holds without mistaking them for delivery", () => {
+    const undelivered = {
+      status: "not_requested",
+      attempts: 0,
+      reviewUrl: "",
+      lastError: "",
+    };
+    for (const publication of [
+      undelivered,
+      { ...undelivered, image_review_required: false, identity_review_required: false },
+      { ...undelivered, identity_review_required: true },
+      {
+        ...undelivered,
+        image_review_required: true,
+        identity_review_required: false,
+        lastError: "image_review_required",
+      },
+      {
+        ...undelivered,
+        image_review_required: true,
+        identity_review_required: true,
+        lastError: "image_review_required",
+      },
+    ])
+      expect(() =>
+        assertNotRequested(publication, "Pre-Send worker check"),
+      ).not.toThrow();
+
+    const reviewHold = {
+      ...undelivered,
+      image_review_required: true,
+      lastError: "image_review_required",
+    };
+    for (const publication of [
+      { ...reviewHold, status: "queued" },
+      { ...reviewHold, status: "delivering" },
+      { ...reviewHold, status: "draft_ready" },
+      { ...reviewHold, status: "failed" },
+      { ...reviewHold, attempts: 1 },
+      { ...reviewHold, attempts: -1 },
+      { ...reviewHold, attempts: undefined },
+      { ...reviewHold, attempts: "0" },
+      {
+        ...reviewHold,
+        reviewUrl: "https://joegallant.me/backend/#inbox-dspc_" + "a".repeat(32),
+      },
+      { ...reviewHold, reviewUrl: undefined },
+      { ...reviewHold, lastError: "unexpected_error" },
+      {
+        ...reviewHold,
+        lastError: "identity_review_required",
+        identity_review_required: true,
+      },
+      { ...reviewHold, image_review_required: undefined },
+      { ...reviewHold, image_review_required: false },
+      { ...reviewHold, image_review_required: "true" },
+      { ...reviewHold, identity_review_required: "true" },
+      { ...undelivered, lastError: undefined },
+    ])
+      expect(() => assertNotRequested(publication, "Pre-Send worker check")).toThrow(
+        expect.objectContaining({ code: "PREMATURE_WEBSITE_DELIVERY" }),
+      );
   });
 
   it("accepts the backend's reset zero-attempt receipt for a ready draft", () => {
