@@ -421,7 +421,10 @@ export function assertNotRequested(publication, label) {
     lastError === "image_review_required" &&
     publication?.image_review_required === true;
   const validReviewFlags = ["image_review_required", "identity_review_required"].every(
-    (key) => publication?.[key] === undefined || typeof publication[key] === "boolean",
+    (key) =>
+      publication?.[key] === undefined ||
+      publication?.[key] === null ||
+      typeof publication[key] === "boolean",
   );
   if (
     publication?.status !== "not_requested" ||
@@ -462,20 +465,44 @@ function assertSafeRevision(value, label) {
 }
 
 export function assertCurrentImageProvenance(publication, label) {
-  if (
-    publication?.image_review_required === true ||
-    (publication?.image_review_required !== undefined &&
-      publication.image_review_required !== false) ||
-    publication?.identity_review_required === true ||
-    (publication?.identity_review_required !== undefined &&
-      publication.identity_review_required !== false) ||
-    publication?.lastError === "image_review_required"
-  ) {
+  // PocketBase 0.22 serializes the routes' false || undefined flags as null.
+  // Only these documented clear values are compatible with that wire contract.
+  const clearReviewFlags = ["image_review_required", "identity_review_required"].every(
+    (key) =>
+      publication?.[key] === undefined ||
+      publication?.[key] === null ||
+      publication?.[key] === false,
+  );
+  if (!clearReviewFlags || publication?.lastError === "image_review_required") {
     throw new WebsiteHandoffCanaryError(
       "IMAGE_PROVENANCE_NOT_READY",
       `${label} did not clear the current server image and identity review gates.`,
     );
   }
+}
+
+export async function recordCreatedPostIdentity(
+  created,
+  dealerId,
+  evidence,
+  evidencePath,
+) {
+  if (
+    typeof created?.id !== "string" ||
+    !/^[A-Za-z0-9_-]{10,40}$/.test(created?.id || "") ||
+    typeof dealerId !== "string" ||
+    !/^[A-Za-z0-9_-]{10,40}$/.test(dealerId || "")
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "POST_CREATE_CONTRACT_INVALID",
+      "Synthetic post save did not return a safe audit identity.",
+    );
+  }
+  evidence.resources.postId = created.id;
+  evidence.resources.sourceDealerId = dealerId;
+  evidence.cleanup.required = true;
+  evidence.cleanup.status = "dealer_post_created";
+  await writeEvidence(evidencePath, evidence);
 }
 
 export function assertNoUncertainImageRequest(previousEvidence) {
@@ -886,8 +913,10 @@ async function runLockedCanary() {
       "POST_CREATE_FAILED",
       "Synthetic post save",
     );
+    // Preserve the confirmed write's audit identity even when a later contract
+    // or review assertion fails. This does not mark the canary checks passed.
+    await recordCreatedPostIdentity(created, login.dealer.id, evidence, evidencePath);
     if (
-      !/^[A-Za-z0-9_-]{10,40}$/.test(created.id || "") ||
       created.approval_status !== "n_a" ||
       created.release_required !== false ||
       !Array.isArray(created.platform_ids) ||
@@ -910,8 +939,6 @@ async function runLockedCanary() {
     assertNotRequested(created.website_publication, "Initial post save");
     assertCurrentImageProvenance(created, "Initial post save");
     const createdRevision = assertSafeRevision(created.updated, "Initial post save");
-    evidence.resources.postId = created.id;
-    evidence.resources.sourceDealerId = login.dealer.id;
     evidence.checks.initialPrivateDraft = {
       passed: true,
       websiteOnly: true,
@@ -920,7 +947,6 @@ async function runLockedCanary() {
       imageAttemptId: generated.imageAttemptId,
       uploadedOutputSha256: createHash("sha256").update(image).digest("hex"),
     };
-    evidence.cleanup.status = "dealer_post_created";
     await writeEvidence(evidencePath, evidence);
 
     await waitInVisibleChunks(

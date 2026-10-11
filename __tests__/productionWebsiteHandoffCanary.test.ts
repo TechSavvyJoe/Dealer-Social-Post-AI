@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -18,6 +19,7 @@ import {
   jpegApplicationMarkers,
   nextMinuteBoundaryWaitMs,
   preflightSyntheticCanaryDestination,
+  recordCreatedPostIdentity,
   validateReadyPublication,
   validateRevisionContractSource,
   verifyHubPrivacyBoundary,
@@ -208,13 +210,21 @@ describe("production website handoff canary", () => {
     for (const value of [
       {},
       { image_review_required: false, identity_review_required: false, lastError: "" },
+      // Real PocketBase 0.22 responses serialize false || undefined as null.
+      { image_review_required: null, identity_review_required: null, lastError: "" },
+      { image_review_required: null, identity_review_required: false },
     ])
       expect(() => assertCurrentImageProvenance(value, "Save")).not.toThrow();
     for (const value of [
       { image_review_required: true },
       { image_review_required: "true" },
       { identity_review_required: true },
+      { identity_review_required: "false" },
+      { image_review_required: 0 },
+      { identity_review_required: {} },
+      { image_review_required: [] },
       { lastError: "image_review_required" },
+      { image_review_required: null, lastError: "image_review_required" },
     ])
       expect(() => assertCurrentImageProvenance(value, "Save")).toThrow(
         expect.objectContaining({ code: "IMAGE_PROVENANCE_NOT_READY" }),
@@ -229,9 +239,59 @@ describe("production website handoff canary", () => {
       runSource.indexOf("assertCurrentImageProvenance(presendStatus"),
     ).toBeLessThan(runSource.indexOf("const sendPath ="));
     expect(runSource).not.toContain("injectSyntheticJpegMetadata");
-    expect(source.indexOf("const imageConfirmation = requireEnv")).toBeLessThan(
-      source.indexOf("await writeEvidence(evidencePath, evidence)"),
+    expect(runSource.indexOf("const imageConfirmation = requireEnv")).toBeLessThan(
+      runSource.indexOf("await writeEvidence(evidencePath, evidence)"),
     );
+  });
+
+  it("durably records the created audit identity before a review assertion fails", async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "dsp-canary-audit-"));
+    const evidencePath = resolve(directory, "receipt.json");
+    const evidence = {
+      schemaVersion: 3,
+      outcome: "running",
+      checks: { imageGeneration: { status: "completed", passed: true } },
+      resources: { syntheticMarker: "QA-aaaaaaaa-aaaa" },
+      cleanup: { required: true, status: "dealer_post_create_in_flight" },
+    };
+    try {
+      const created = { id: "auditpost1234567", image_review_required: true };
+      await recordCreatedPostIdentity(
+        created,
+        "auditdealer1234",
+        evidence,
+        evidencePath,
+      );
+      expect(() => assertCurrentImageProvenance(created, "Save")).toThrow(
+        expect.objectContaining({ code: "IMAGE_PROVENANCE_NOT_READY" }),
+      );
+      expect(JSON.parse(readFileSync(evidencePath, "utf8"))).toMatchObject({
+        schemaVersion: 3,
+        outcome: "running",
+        resources: { postId: created.id, sourceDealerId: "auditdealer1234" },
+        cleanup: { required: true, status: "dealer_post_created" },
+        checks: { imageGeneration: { status: "completed", passed: true } },
+      });
+      expect(statSync(evidencePath).mode & 0o777).toBe(0o600);
+      await expect(
+        recordCreatedPostIdentity(
+          { id: "unsafe/id" },
+          "auditdealer1234",
+          evidence,
+          evidencePath,
+        ),
+      ).rejects.toMatchObject({ code: "POST_CREATE_CONTRACT_INVALID" });
+      const source = readFileSync(scriptPath, "utf8");
+      const afterCreate = source.slice(source.indexOf('"Synthetic post save",'));
+      expect(afterCreate.indexOf("await recordCreatedPostIdentity")).toBeLessThan(
+        afterCreate.indexOf("created.approval_status"),
+      );
+      expect(afterCreate.indexOf("await recordCreatedPostIdentity")).toBeLessThan(
+        afterCreate.indexOf("assertCurrentImageProvenance(created"),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("reproduces EXIF-without-Orientation and Photoshop metadata on synthetic JPEG only", () => {
@@ -382,6 +442,7 @@ describe("production website handoff canary", () => {
     for (const publication of [
       undelivered,
       { ...undelivered, image_review_required: false, identity_review_required: false },
+      { ...undelivered, image_review_required: null, identity_review_required: null },
       { ...undelivered, identity_review_required: true },
       {
         ...undelivered,
@@ -427,8 +488,12 @@ describe("production website handoff canary", () => {
       },
       { ...reviewHold, image_review_required: undefined },
       { ...reviewHold, image_review_required: false },
+      { ...reviewHold, image_review_required: null },
       { ...reviewHold, image_review_required: "true" },
       { ...reviewHold, identity_review_required: "true" },
+      { ...undelivered, image_review_required: 0 },
+      { ...undelivered, identity_review_required: "false" },
+      { ...undelivered, identity_review_required: {} },
       { ...undelivered, lastError: undefined },
     ])
       expect(() => assertNotRequested(publication, "Pre-Send worker check")).toThrow(
