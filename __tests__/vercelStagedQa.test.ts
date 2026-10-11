@@ -262,8 +262,39 @@ describe("Vercel staged browser QA receipt", () => {
 
   it("requires a cleaned-up private website handoff canary for the exact release", () => {
     const now = Date.now();
-    const validCanary = {
+    const identity = {
+      draftId: `dspc_${"a".repeat(32)}`,
+      eventId: `wp_s_${"b".repeat(32)}_${"c".repeat(40)}`,
+      payloadHash: "d".repeat(64),
+      sourceDealerId: "dealer123456789",
+      sourcePostId: "post12345678900",
+      sourceRevision: 2,
+    };
+    const boundary = {
+      passed: true,
+      privateMediaStatus: 401,
+      privateMediaCacheControl: "private, no-store",
+      publicStatuses: {
+        "/": 200,
+        "/api/hub-data/deliveries": 200,
+        "/api/hub-data/inventory": 200,
+      },
+      markerAbsent: true,
+      identityAbsent: true,
+      mediaAbsent: true,
+      mediaHashChecked: true,
+    };
+    const verification = {
+      ...identity,
       schemaVersion: 1,
+      status: "purged",
+      completedAt: new Date(now - 4.5 * 60 * 1000).toISOString(),
+      contentAbsent: true,
+      mediaAbsent: true,
+      replayBlocked: true,
+    };
+    const validCanary = {
+      schemaVersion: 2,
       canary: "production-website-private-draft",
       syntheticAsset: "docs/marketing/demo/synthetic-delivery-photo.jpg",
       targetOrigin: "https://dealer-social-post-ai-production.fly.dev",
@@ -272,6 +303,15 @@ describe("Vercel staged browser QA receipt", () => {
       startedAt: new Date(now - 10 * 60 * 1000).toISOString(),
       completedAt: new Date(now - 5 * 60 * 1000).toISOString(),
       outcome: "passed",
+      resources: {
+        canaryIdentity: identity,
+        canaryMediaBase64Sha256: "e".repeat(64),
+        syntheticMarker: `QA-${validEvidence.releaseSha.slice(0, 8)}-${validEvidence.releaseSha.slice(8, 12)}`,
+        hubDraftId: identity.draftId,
+        postId: identity.sourcePostId,
+        sourceDealerId: identity.sourceDealerId,
+        reviewUrl: `https://joegallant.me/backend/#inbox-${identity.draftId}`,
+      },
       checks: {
         authentication: {
           passed: true,
@@ -287,6 +327,8 @@ describe("Vercel staged browser QA receipt", () => {
           passed: true,
           id: "joe_customer_hub",
           mode: "private_draft",
+          namespace: "synthetic_canary",
+          dealerId: identity.sourceDealerId,
         },
         initialPrivateDraft: {
           passed: true,
@@ -302,12 +344,14 @@ describe("Vercel staged browser QA receipt", () => {
           changedReplayBlocked: true,
         },
         privateDelivery: { passed: true, status: "draft_ready", attempts: 0 },
-        publicBoundary: { passed: true, imageStatus: 404, markerAbsent: true },
+        publicBoundary: boundary,
         sessionRevocation: { passed: true },
       },
       cleanup: {
         required: false,
         status: "complete",
+        verification,
+        publicBoundary: boundary,
         completedAt: new Date(now - 4 * 60 * 1000).toISOString(),
       },
     };
@@ -318,6 +362,77 @@ describe("Vercel staged browser QA receipt", () => {
 
     for (const invalid of [
       { ...validCanary, expectedReleaseSha: "d".repeat(40) },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          destination: { ...validCanary.checks.destination, namespace: "real_dealer" },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          destination: {
+            ...validCanary.checks.destination,
+            dealerId: "other1234567890",
+          },
+        },
+      },
+      { ...validCanary, schemaVersion: 1 },
+      {
+        ...validCanary,
+        resources: { ...validCanary.resources, hubDraftId: `dspc_${"0".repeat(32)}` },
+      },
+      {
+        ...validCanary,
+        resources: {
+          ...validCanary.resources,
+          reviewUrl: `https://joegallant.me/studio/updates#draft-${identity.draftId}`,
+        },
+      },
+      { ...validCanary, cleanup: { ...validCanary.cleanup, verification: undefined } },
+      {
+        ...validCanary,
+        cleanup: {
+          ...validCanary.cleanup,
+          verification: { ...verification, draftId: `dspc_${"0".repeat(32)}` },
+        },
+      },
+      {
+        ...validCanary,
+        cleanup: {
+          ...validCanary.cleanup,
+          verification: { ...verification, replayBlocked: false },
+        },
+      },
+      {
+        ...validCanary,
+        cleanup: {
+          ...validCanary.cleanup,
+          verification: { ...verification, capability: "f".repeat(64) },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          publicBoundary: {
+            ...boundary,
+            publicStatuses: {
+              ...boundary.publicStatuses,
+              "/api/hub-data/inventory": 404,
+            },
+          },
+        },
+      },
+      {
+        ...validCanary,
+        cleanup: {
+          ...validCanary.cleanup,
+          publicBoundary: { ...boundary, mediaAbsent: false },
+        },
+      },
       {
         ...validCanary,
         checks: {
@@ -353,7 +468,7 @@ describe("Vercel staged browser QA receipt", () => {
           ...validCanary.checks,
           publicBoundary: {
             ...validCanary.checks.publicBoundary,
-            imageStatus: 200,
+            privateMediaStatus: 404,
           },
         },
       },

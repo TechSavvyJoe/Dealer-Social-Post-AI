@@ -13,6 +13,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { AuthenticatedClient, canonicalOrigin } from "./production-provider-canary.mjs";
 import { acquireReleaseLock } from "./vercel-staged-qa.mjs";
+import {
+  HUB_CANARY_DRAFT_ID,
+  validHubCanaryIdentity,
+  hubCanaryIdentityMatches,
+  validHubPurgeResult,
+} from "./lib/website-handoff-evidence.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const syntheticImagePath = resolve(
@@ -222,13 +228,13 @@ export function extractHubDraftId(reviewUrl, hubOrigin = CUSTOMER_HUB_ORIGIN) {
     );
   }
   const canonical = canonicalHubOrigin(hubOrigin);
-  const match = /^#draft-([0-9a-f-]{36})$/i.exec(url.hash);
+  const match = /^#inbox-(dspc_[a-f0-9]{32})$/.exec(url.hash);
   if (
     url.origin !== canonical ||
-    url.pathname !== "/studio/updates" ||
+    url.pathname !== "/backend/" ||
     url.search ||
     !match ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(match[1])
+    reviewUrl !== `${canonical}/backend/#inbox-${match[1]}`
   ) {
     throw new WebsiteHandoffCanaryError(
       "HUB_REVIEW_URL_INVALID",
@@ -514,6 +520,40 @@ function failureEvidence(error) {
   };
 }
 
+export async function preflightSyntheticCanaryDestination(
+  client,
+  dealerId,
+  hubOrigin = CUSTOMER_HUB_ORIGIN,
+) {
+  const destinations = await jsonOrFail(
+    await client.request("/api/app/website-destinations", {
+      method: "GET",
+      signal: AbortSignal.timeout(30_000),
+    }),
+    "DESTINATION_FAILED",
+    "Website destination check",
+  );
+  const destination =
+    Array.isArray(destinations.items) && destinations.items.length === 1
+      ? destinations.items[0]
+      : null;
+  if (
+    !destination ||
+    destination.enabled !== true ||
+    destination.id !== "joe_customer_hub" ||
+    destination.mode !== "private_draft" ||
+    destination.siteUrl !== hubOrigin ||
+    destination.namespace !== "synthetic_canary" ||
+    destination.dealerId !== dealerId
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "DESTINATION_UNAVAILABLE",
+      "The canary salesperson is not in the exact isolated Customer Hub canary dealership.",
+    );
+  }
+  return destination;
+}
+
 async function runLockedCanary() {
   const evidencePath = resolve(
     process.env.WEBSITE_HANDOFF_CANARY_EVIDENCE_PATH || DEFAULT_EVIDENCE_PATH,
@@ -559,7 +599,7 @@ async function runLockedCanary() {
   const client = new AuthenticatedClient(origin);
   const startedAt = new Date().toISOString();
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     canary: "production-website-private-draft",
     syntheticAsset: SYNTHETIC_ASSET,
     syntheticMetadataCase: "exif-without-orientation-plus-photoshop-app13",
@@ -653,34 +693,17 @@ async function runLockedCanary() {
       backupStatus: health.backup.status,
     };
 
-    const destinations = await jsonOrFail(
-      await client.request("/api/app/website-destinations", {
-        method: "GET",
-        signal: AbortSignal.timeout(30_000),
-      }),
-      "DESTINATION_FAILED",
-      "Website destination check",
+    const destination = await preflightSyntheticCanaryDestination(
+      client,
+      login.dealer.id,
+      hubOrigin,
     );
-    const destination =
-      Array.isArray(destinations.items) && destinations.items.length === 1
-        ? destinations.items[0]
-        : null;
-    if (
-      !destination ||
-      destination.enabled !== true ||
-      destination.id !== "joe_customer_hub" ||
-      destination.mode !== "private_draft" ||
-      destination.siteUrl !== hubOrigin
-    ) {
-      throw new WebsiteHandoffCanaryError(
-        "DESTINATION_UNAVAILABLE",
-        "The canary salesperson is not in the exact Customer Hub-enabled dealership.",
-      );
-    }
     evidence.checks.destination = {
       passed: true,
       id: destination.id,
       mode: "private_draft",
+      namespace: destination.namespace,
+      dealerId: destination.dealerId,
     };
 
     console.log("Saving a website-only synthetic post without sending it...");
@@ -723,6 +746,7 @@ async function runLockedCanary() {
     assertNotRequested(created.website_publication, "Initial post save");
     const createdRevision = assertSafeRevision(created.updated, "Initial post save");
     evidence.resources.postId = created.id;
+    evidence.resources.sourceDealerId = login.dealer.id;
     evidence.checks.initialPrivateDraft = {
       passed: true,
       websiteOnly: true,
@@ -901,38 +925,36 @@ async function runLockedCanary() {
     };
     await writeEvidence(evidencePath, evidence);
 
-    const imageBoundary = await fetch(
-      `${hubOrigin}/api/site-update-image?id=${encodeURIComponent(hubDraftId)}`,
-      {
-        method: "GET",
-        redirect: "error",
-        signal: AbortSignal.timeout(30_000),
-      },
-    );
-    if (imageBoundary.status !== 404) {
-      throw new WebsiteHandoffCanaryError(
-        "HUB_PUBLIC_IMAGE_EXPOSED",
-        "The private synthetic draft image was reachable without Studio authorization.",
-        { status: imageBoundary.status },
-      );
-    }
-    const publicPage = await fetch(`${hubOrigin}/updates`, {
-      method: "GET",
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!publicPage.ok || (await publicPage.text()).includes(marker)) {
-      throw new WebsiteHandoffCanaryError(
-        "HUB_PUBLIC_COPY_EXPOSED",
-        "The private synthetic draft appeared on the public updates page.",
-        { status: publicPage.status },
-      );
-    }
-    evidence.checks.publicBoundary = {
-      passed: true,
-      imageStatus: 404,
-      markerAbsent: true,
+    const identity = {
+      draftId: hubDraftId,
+      eventId: ready.canaryIdentity?.eventId,
+      payloadHash: ready.canaryIdentity?.payloadHash,
+      sourceDealerId: ready.canaryIdentity?.sourceDealerId,
+      sourcePostId: ready.canaryIdentity?.sourcePostId,
+      sourceRevision: ready.canaryIdentity?.sourceRevision,
     };
+    if (
+      !validHubCanaryIdentity(identity) ||
+      identity.sourceDealerId !== login.dealer.id ||
+      identity.sourcePostId !== created.id ||
+      !/^[a-f0-9]{64}$/.test(ready.canaryMediaBase64Sha256 || "")
+    ) {
+      throw new WebsiteHandoffCanaryError(
+        "HUB_CANARY_IDENTITY_INVALID",
+        "The server did not bind the delivered canary to this synthetic post and dealer.",
+      );
+    }
+    evidence.resources.canaryIdentity = identity;
+    evidence.resources.mediaHashes = [
+      SYNTHETIC_ASSET_SHA256,
+      createHash("sha256").update(image).digest("hex"),
+    ];
+    evidence.resources.canaryMediaBase64Sha256 = ready.canaryMediaBase64Sha256;
+    evidence.checks.publicBoundary = await verifyHubPrivacyBoundary(
+      hubOrigin,
+      evidence.resources,
+      [image, await readFile(syntheticImagePath)],
+    );
     evidence.cleanup.status = "owner_action_required";
     evidence.outcome = "passed";
   } catch (error) {
@@ -963,6 +985,179 @@ async function runLockedCanary() {
   );
 }
 
+export async function verifyHubPrivacyBoundary(
+  hubOrigin,
+  resources,
+  imageBuffers = [],
+  fetcher = fetch,
+) {
+  const origin = canonicalHubOrigin(hubOrigin);
+  const draftId = resources?.hubDraftId;
+  if (
+    !HUB_CANARY_DRAFT_ID.test(draftId || "") ||
+    !validHubCanaryIdentity(resources?.canaryIdentity) ||
+    resources.canaryIdentity.draftId !== draftId ||
+    !/^[a-f0-9]{64}$/.test(resources?.canaryMediaBase64Sha256 || "")
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "HUB_CANARY_IDENTITY_INVALID",
+      "Privacy checks require this-run canary identity.",
+    );
+  }
+  const mediaPath = `/backend/draft-media?draftId=${encodeURIComponent(draftId)}`;
+  const paths = [mediaPath, "/", "/api/hub-data/deliveries", "/api/hub-data/inventory"];
+  const responses = await Promise.all(
+    paths.map((path) =>
+      fetcher(`${origin}${path}`, {
+        method: "GET",
+        redirect: "error",
+        signal: AbortSignal.timeout(30_000),
+      }),
+    ),
+  );
+  const forbidden = [
+    resources.syntheticMarker,
+    draftId,
+    resources.postId,
+    resources.canaryIdentity.eventId,
+    resources.canaryIdentity.payloadHash,
+    resources.canaryMediaBase64Sha256,
+    mediaPath,
+    `${origin}${mediaPath}`,
+    ...(resources.mediaHashes || []),
+  ].filter(Boolean);
+  const publicStatuses = {};
+  for (let index = 0; index < responses.length; index += 1) {
+    const response = responses[index];
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const text = bytes.toString("utf8");
+    const cache = response.headers.get("cache-control") || "";
+    // Bind the exact sanitized outbound media, including binary responses and
+    // base64 embedded in a public JSON feed. JSON decoding catches escaped '/'.
+    const mediaHash = resources.canaryMediaBase64Sha256;
+    const strings = [text];
+    try {
+      const stack = [JSON.parse(text)];
+      while (stack.length) {
+        const value = stack.pop();
+        if (typeof value === "string") strings.push(value);
+        else if (value && typeof value === "object")
+          stack.push(...Object.values(value));
+      }
+    } catch {
+      /* Homepage HTML and denied responses need not be JSON. */
+    }
+    const imageHashPresent =
+      createHash("sha256").update(bytes.toString("base64")).digest("hex") ===
+        mediaHash ||
+      strings.some((value) =>
+        (value.match(/[A-Za-z0-9+/]{128,}={0,2}/g) || []).some(
+          (candidate) =>
+            createHash("sha256").update(candidate).digest("hex") === mediaHash,
+        ),
+      );
+    if (
+      (index === 0 &&
+        (response.status !== 401 ||
+          !/\bprivate\b/i.test(cache) ||
+          !/\bno-store\b/i.test(cache))) ||
+      (index > 0 && response.status !== 200) ||
+      strings.some((value) => forbidden.some((token) => value.includes(token))) ||
+      imageHashPresent ||
+      imageBuffers.some(
+        (buffer) => bytes.includes(buffer) || text.includes(buffer.toString("base64")),
+      )
+    ) {
+      throw new WebsiteHandoffCanaryError(
+        "HUB_PUBLIC_BOUNDARY_FAILED",
+        "The Hub did not prove private media authorization and clean successful public feeds.",
+        { status: response.status },
+      );
+    }
+    if (index > 0) publicStatuses[paths[index]] = response.status;
+  }
+  return {
+    passed: true,
+    privateMediaStatus: 401,
+    privateMediaCacheControl: "private, no-store",
+    publicStatuses,
+    markerAbsent: true,
+    identityAbsent: true,
+    mediaAbsent: true,
+    mediaHashChecked: true,
+  };
+}
+
+export async function verifyOwnerPurgeReceipt(receipt, evidence, fetcher = fetch) {
+  const identity = evidence?.resources?.canaryIdentity;
+  const completedAt = Date.parse(receipt?.completedAt || "");
+  const earliest = Date.parse(evidence?.completedAt || "");
+  const allowedKeys = [
+    "schemaVersion",
+    "status",
+    "draftId",
+    "eventId",
+    "payloadHash",
+    "sourceDealerId",
+    "sourcePostId",
+    "sourceRevision",
+    "completedAt",
+    "capability",
+  ];
+  if (
+    !hubCanaryIdentityMatches(receipt, identity) ||
+    receipt.schemaVersion !== 1 ||
+    receipt.status !== "purged" ||
+    !/^[a-f0-9]{64}$/.test(receipt.capability || "") ||
+    Object.keys(receipt).some((key) => !allowedKeys.includes(key)) ||
+    !Number.isFinite(completedAt) ||
+    !Number.isFinite(earliest) ||
+    completedAt < earliest ||
+    completedAt > Date.now() + 300_000
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "CLEANUP_RECEIPT_INVALID",
+      "The owner purge receipt does not match this-run canary.",
+    );
+  }
+  const response = await fetcher(
+    `${CUSTOMER_HUB_ORIGIN}/api/integrations/dealer-social/canary-cleanup/verify`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(receipt),
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
+  const verification = await jsonOrFail(
+    response,
+    "CLEANUP_VERIFICATION_FAILED",
+    "Hub purge verification",
+  );
+  if (
+    response.status !== 200 ||
+    !/\bno-store\b/i.test(response.headers.get("cache-control") || "") ||
+    !validHubPurgeResult(verification, identity, evidence.completedAt) ||
+    verification.completedAt !== receipt.completedAt ||
+    Object.keys(verification).some(
+      (key) =>
+        ![
+          ...allowedKeys.filter((key) => key !== "capability"),
+          "contentAbsent",
+          "mediaAbsent",
+          "replayBlocked",
+        ].includes(key),
+    )
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "CLEANUP_VERIFICATION_INVALID",
+      "Hub did not verify exact content/media removal and replay blocking.",
+    );
+  }
+  return verification;
+}
+
 async function confirmOwnerCleanup() {
   if (requireEnv("WEBSITE_HANDOFF_CANARY_CLEANUP_CONFIRM") !== CLEANUP_CONFIRMATION) {
     throw new WebsiteHandoffCanaryError(
@@ -986,56 +1181,71 @@ async function confirmOwnerCleanup() {
       "The website canary receipt is invalid.",
     );
   }
-  const marker = evidence?.resources?.syntheticMarker;
   const draftId = evidence?.resources?.hubDraftId;
   if (
-    evidence?.schemaVersion !== 1 ||
+    evidence?.schemaVersion !== 2 ||
     evidence.canary !== "production-website-private-draft" ||
+    evidence.customerHubOrigin !== CUSTOMER_HUB_ORIGIN ||
+    evidence.targetOrigin !== PRODUCTION_FLY_ORIGIN ||
+    !isFullCommitSha(evidence.expectedReleaseSha) ||
+    evidence.resources?.syntheticMarker !==
+      `QA-${evidence.expectedReleaseSha.slice(0, 8)}-${evidence.expectedReleaseSha.slice(8, 12)}` ||
     evidence.outcome !== "passed" ||
     evidence.cleanup?.required !== true ||
     evidence.cleanup?.status !== "owner_action_required" ||
-    !/^QA-[a-f0-9]{8}-[a-f0-9]{4}$/i.test(marker || "") ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      draftId || "",
-    ) ||
-    extractHubDraftId(evidence?.resources?.reviewUrl, CUSTOMER_HUB_ORIGIN) !== draftId
+    !HUB_CANARY_DRAFT_ID.test(draftId || "") ||
+    extractHubDraftId(evidence?.resources?.reviewUrl, CUSTOMER_HUB_ORIGIN) !==
+      draftId ||
+    !validHubCanaryIdentity(evidence?.resources?.canaryIdentity) ||
+    evidence.resources.canaryIdentity.draftId !== draftId ||
+    evidence.resources.canaryIdentity.sourcePostId !== evidence.resources.postId ||
+    evidence.resources.canaryIdentity.sourceDealerId !==
+      evidence.resources.sourceDealerId
   ) {
     throw new WebsiteHandoffCanaryError(
       "CLEANUP_RECEIPT_INVALID",
       "The website canary receipt is not eligible for cleanup confirmation.",
     );
   }
-
-  // Recheck that cleanup did not accidentally expose the synthetic marker.
-  // Owner authentication remains outside this least-privilege script; the
-  // explicit confirmation is entered only after Studio archive + purge.
-  const [imageResponse, publicResponse] = await Promise.all([
-    fetch(
-      `${CUSTOMER_HUB_ORIGIN}/api/site-update-image?id=${encodeURIComponent(draftId)}`,
-      { method: "GET", redirect: "error", signal: AbortSignal.timeout(30_000) },
-    ),
-    fetch(`${CUSTOMER_HUB_ORIGIN}/updates`, {
-      method: "GET",
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    }),
-  ]);
+  const receiptPath = resolve(requireEnv("WEBSITE_HANDOFF_CANARY_PURGE_RECEIPT_PATH"));
+  const receiptStat = await lstat(receiptPath);
   if (
-    imageResponse.status !== 404 ||
-    !publicResponse.ok ||
-    (await publicResponse.text()).includes(marker)
+    !receiptStat.isFile() ||
+    receiptStat.isSymbolicLink() ||
+    receiptStat.size > 16_384 ||
+    (receiptStat.mode & 0o077) !== 0
   ) {
     throw new WebsiteHandoffCanaryError(
-      "CLEANUP_PUBLIC_BOUNDARY_FAILED",
-      "The synthetic draft cleanup did not preserve the public boundary.",
+      "CLEANUP_RECEIPT_UNSAFE",
+      "The owner purge receipt must be a private regular file no larger than 16 KiB.",
     );
   }
-
+  let receipt;
+  try {
+    receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+  } catch {
+    throw new WebsiteHandoffCanaryError(
+      "CLEANUP_RECEIPT_INVALID",
+      "The owner purge receipt is invalid JSON.",
+    );
+  }
+  const verification = await verifyOwnerPurgeReceipt(receipt, evidence);
+  // An anonymous 401 proves authorization is required, never deletion. Purge
+  // proof comes exclusively from the capability-bound remote verifier above.
+  const source = await readFile(syntheticImagePath);
+  const boundary = await verifyHubPrivacyBoundary(
+    CUSTOMER_HUB_ORIGIN,
+    evidence.resources,
+    [source, injectSyntheticJpegMetadata(source)],
+  );
   evidence.cleanup = {
     required: false,
     status: "complete",
     completedAt: new Date().toISOString(),
-    instruction: "Owner archived and permanently purged the private synthetic draft.",
+    verification,
+    publicBoundary: boundary,
+    instruction:
+      "Owner permanently purged the exact isolated synthetic draft; Hub verified content/media removal and replay blocking.",
   };
   const written = await writeEvidence(DEFAULT_EVIDENCE_PATH, evidence);
   console.log(`Website handoff canary cleanup confirmed: ${written}`);

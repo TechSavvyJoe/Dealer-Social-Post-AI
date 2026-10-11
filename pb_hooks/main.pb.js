@@ -66,6 +66,9 @@ const proxyHandler = (c) => {
 
   let path = null;
   let generationAudit = null;
+  let actualVideoModel = "";
+  let omniAdapter = null;
+  let omniPollRecord = null;
   let generationAuditRecorded = false;
   const diagnosticStartedAt = Date.now();
   let diagnosticId = "unassigned";
@@ -221,6 +224,26 @@ const proxyHandler = (c) => {
       return c.json(403, { error: "Provider resource access denied" });
     }
 
+    // Ownership is checked above before looking up a private handle, keeping
+    // foreign/missing operation names indistinguishable and off the provider.
+    if (
+      operationStartProvider ||
+      (requestedProviderResource &&
+        /^operations\/omni-/.test(requestedProviderResource.resource_id))
+    ) {
+      omniAdapter = require(__hooks + "/omniVideo.js");
+      actualVideoModel = omniAdapter.MODEL;
+      if (!operationStartProvider) {
+        if (!omniAdapter.isOmniOperationName(requestedProviderResource.resource_id))
+          return c.json(403, { error: "Provider resource access denied" });
+        omniPollRecord = helpers.findOmniInteraction(
+          requestedProviderResource.resource_id,
+        );
+        if (!omniPollRecord)
+          return c.json(403, { error: "Provider resource access denied" });
+      }
+    }
+
     // Generation bodies are an authorization boundary too: a permitted model
     // must not become an arbitrary pass-through for tools, oversized prompts,
     // unsupported resolutions, or other cost-amplifying provider options.
@@ -274,6 +297,15 @@ const proxyHandler = (c) => {
       } catch (_usageErr) {
         /* accounting never blocks a validated request */
       }
+    }
+
+    if (operationStartProvider) {
+      const omniRequest = omniAdapter.buildOmniVideoRequest(
+        JSON.parse(sanitizedProxyBody),
+      );
+      if (!omniRequest)
+        return c.json(400, { error: "Invalid or unsupported generation request" });
+      sanitizedProxyBody = JSON.stringify(omniRequest);
     }
 
     const costPolicy = policies.proxyCostPolicy(path);
@@ -351,10 +383,18 @@ const proxyHandler = (c) => {
       targetUrl += separator + queryParts.join("&");
     }
 
+    if (operationStartProvider) targetUrl = finalBaseUrl + "v1beta/interactions";
+    if (omniPollRecord)
+      targetUrl =
+        finalBaseUrl +
+        "v1beta/interactions/" +
+        encodeURIComponent(omniPollRecord.getString("provider_id"));
+
     const safeLogUrl = targetUrl
       .replace(/key=[^&]+/, "key=HIDDEN")
       .replace(/(\/operations\/)[^?]+/, "$1[redacted]")
-      .replace(/(\/files\/)[^?]+/, "$1[redacted]");
+      .replace(/(\/files\/)[^?]+/, "$1[redacted]")
+      .replace(/(\/interactions\/)[^?]+/, "$1[redacted]");
     console.log(`[Proxy Gemini API] ${requestInfo.method} ${safeLogUrl}`);
 
     // Always pin binary file downloads to alt=media so Google returns bytes,
@@ -385,7 +425,7 @@ const proxyHandler = (c) => {
           requestInfo,
           policies,
           "gemini",
-          "",
+          actualVideoModel,
         )
       : null;
     diagnosticTask = diagnosticIdentity ? diagnosticIdentity.task : "read";
@@ -408,8 +448,15 @@ const proxyHandler = (c) => {
     phaseDiagnostic("upstream");
     // Buffered generateContent must settle before the browser's 110-second
     // transport deadline and Vercel's 120-second external rewrite ceiling.
-    // Veo starts, polls and downloads keep their existing separate budget.
-    const upstreamTimeoutSeconds = /:generateContent$/.test(cleanPath) ? 100 : 300;
+    // Omni starts/polls settle within the browser deadline; legacy downloads
+    // retain the existing independent budget.
+    const upstreamTimeoutSeconds = operationStartProvider
+      ? 80
+      : omniPollRecord
+        ? 30
+        : /:generateContent$/.test(cleanPath)
+          ? 100
+          : 300;
     const upstreamStartedAt = Date.now();
     const res = (function () {
       try {
@@ -426,6 +473,56 @@ const proxyHandler = (c) => {
         globalProviderSlot.release();
       }
     })();
+
+    let publicOmniName = "";
+    const persistOmniRecovery = (providerId) => {
+      publicOmniName =
+        "operations/omni-" +
+        helpers.secureRandomString(
+          32,
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+        );
+      try {
+        helpers.saveOmniInteraction(publicOmniName, providerId, geminiApiKey);
+      } catch (_e) {
+        try {
+          helpers.cleanupOmniProviderInteraction(providerId, {
+            baseUrl: finalBaseUrl,
+            apiKey: geminiApiKey,
+            keyFingerprint: helpers.omniKeyFingerprint(geminiApiKey),
+          });
+        } catch (_cleanupErr) {
+          /* never replay */
+        }
+        throw new Error("Video recovery save failed");
+      }
+    };
+    // Capture a received provider ID before any payload-size or projection
+    // rejection. Even unusable/oversized completions need durable cleanup.
+    if (operationStartProvider && res.statusCode >= 200 && res.statusCode < 300) {
+      const receivedId = omniAdapter.providerInteractionId({
+        id: res.json && res.json.id,
+      });
+      if (receivedId) {
+        try {
+          persistOmniRecovery(receivedId);
+        } catch (_e) {
+          helpers.recordProxyGenerationEvent(
+            c,
+            dealer,
+            requestInfo,
+            authorizedProxyPath,
+            502,
+            "gemini",
+            actualVideoModel,
+            null,
+            generationUsage,
+          );
+          generationAuditRecorded = true;
+          return c.json(502, { error: "Could not save video recovery state" });
+        }
+      }
+    }
 
     diagnosticStatus = res.statusCode;
     phaseDiagnostic("upstream_complete");
@@ -511,16 +608,119 @@ const proxyHandler = (c) => {
           authorizedProxyPath,
           res.statusCode,
           "gemini",
-          "",
+          actualVideoModel,
           null,
           generationUsage,
         );
         generationAuditRecorded = true;
       }
+      if (omniAdapter)
+        return c.json(502, { error: "Video provider response could not be read" });
       return c.string(res.statusCode, body);
     }
 
     phaseDiagnostic("parsed");
+
+    if (omniAdapter) {
+      // Never let an upstream 404 or validation-looking message make an old
+      // installed PWA replay an already dispatched paid generation request.
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        if (!isGet) {
+          helpers.recordProxyGenerationEvent(
+            c,
+            dealer,
+            requestInfo,
+            authorizedProxyPath,
+            502,
+            "gemini",
+            actualVideoModel,
+            null,
+            generationUsage,
+          );
+          generationAuditRecorded = true;
+        }
+        return c.json(502, { error: "Video provider request did not complete" });
+      }
+      let publicName =
+        requestedProviderResource && requestedProviderResource.resource_id;
+      if (operationStartProvider) {
+        const providerId = omniAdapter.providerInteractionId({ id: jsonBody.id });
+        if (!providerId) {
+          helpers.recordProxyGenerationEvent(
+            c,
+            dealer,
+            requestInfo,
+            authorizedProxyPath,
+            502,
+            "gemini",
+            actualVideoModel,
+            null,
+            generationUsage,
+          );
+          generationAuditRecorded = true;
+          return c.json(502, { error: "Invalid video provider response" });
+        }
+        // Recovery is normally saved immediately after dispatch. If the
+        // runtime supplied only raw JSON, save as soon as its ID is parsed.
+        if (!publicOmniName) {
+          try {
+            persistOmniRecovery(providerId);
+          } catch (_e) {
+            helpers.recordProxyGenerationEvent(
+              c,
+              dealer,
+              requestInfo,
+              authorizedProxyPath,
+              502,
+              "gemini",
+              actualVideoModel,
+              null,
+              generationUsage,
+            );
+            generationAuditRecorded = true;
+            return c.json(502, { error: "Could not save video recovery state" });
+          }
+        }
+        publicName = publicOmniName;
+        try {
+          helpers.claimProviderResources(dealer.id, [
+            { provider: "gemini", resource_type: "operation", resource_id: publicName },
+          ]);
+        } catch (_e) {
+          helpers.recordProxyGenerationEvent(
+            c,
+            dealer,
+            requestInfo,
+            authorizedProxyPath,
+            502,
+            "gemini",
+            actualVideoModel,
+            null,
+            generationUsage,
+          );
+          generationAuditRecorded = true;
+          return c.json(502, { error: "Could not secure video operation" });
+        }
+      }
+      const projected = omniAdapter.projectOmniVideoResponse(jsonBody, publicName);
+      if (!projected) return c.json(502, { error: "Invalid video provider response" });
+      if (!isGet) {
+        helpers.recordProxyGenerationEvent(
+          c,
+          dealer,
+          requestInfo,
+          authorizedProxyPath,
+          projected.error ? 502 : 200,
+          "gemini",
+          actualVideoModel,
+          projected,
+          generationUsage,
+        );
+        generationAuditRecorded = true;
+      }
+      c.response().header().set("Cache-Control", "private, no-store");
+      return c.json(200, projected);
+    }
 
     if (
       dealer &&
@@ -552,7 +752,7 @@ const proxyHandler = (c) => {
           authorizedProxyPath,
           502,
           "gemini",
-          "",
+          actualVideoModel,
           jsonBody,
           generationUsage,
         );
@@ -574,7 +774,7 @@ const proxyHandler = (c) => {
           authorizedProxyPath,
           502,
           "gemini",
-          "",
+          actualVideoModel,
           jsonBody,
           generationUsage,
         );
@@ -592,7 +792,7 @@ const proxyHandler = (c) => {
         authorizedProxyPath,
         res.statusCode,
         "gemini",
-        "",
+        actualVideoModel,
         jsonBody,
         generationUsage,
       );
@@ -617,7 +817,7 @@ const proxyHandler = (c) => {
         generationAudit.path,
         0,
         "gemini",
-        "",
+        actualVideoModel,
         null,
         generationUsage,
       );
@@ -6334,5 +6534,23 @@ cronAdd("walkaround_abandoned_upload_cleanup", "30 3 * * *", () => {
     require(__hooks + "/walkarounds.js").cleanupAbandonedUploads();
   } catch (_e) {
     console.error("[cron:walkaround_cleanup] failed");
+  }
+});
+
+// Retained background interactions expire locally after a 24-hour recovery
+// window. The private queue survives dealer/resource deletion and retries
+// failed cancellation/deletion without re-running paid generation.
+cronAdd("prune-omni-interactions", "*/15 * * * *", () => {
+  try {
+    const apiKey = require(__hooks + "/connectionConfig.js").runtimeValue(
+      "GEMINI_API_KEY",
+    );
+    if (!apiKey) return;
+    require(__hooks + "/helpers.js").pruneOmniInteractions({
+      baseUrl: "https://generativelanguage.googleapis.com/",
+      apiKey: apiKey,
+    });
+  } catch (_e) {
+    console.error("[cron:omni-cleanup] failed");
   }
 });

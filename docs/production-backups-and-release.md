@@ -101,6 +101,37 @@ refuses a Cloudflare test sitekey, builds with `VITE_RELEASE_SHA`, and refuses a
 bundle that is not stamped with its own SHA. It deploys with `--skip-domain`,
 verifies the immutable deployment, and only then moves traffic.
 
+The repository variable `PRODUCTION_FRONTEND_RELEASE_MODE` controls only the
+frontend promotion job. Leave it unset/empty or set it to `automatic` for the
+existing automatic release. Set it to `staged` to skip `release-frontend` and
+report that Vercel staging and browser QA are required; the backup and Fly
+backend gates still run normally. Set the repository or organization variable
+before the relevant CI run. The workflow job condition cannot read an
+environment-scoped variable, so do not configure this selector only in the
+`production` environment. Any other nonempty value fails closed after backend
+deployment and does not promote the frontend.
+
+Set the hold before merging the media change:
+
+```bash
+gh variable set PRODUCTION_FRONTEND_RELEASE_MODE --repo TechSavvyJoe/Dealer-Social-Post-AI --body staged
+```
+
+Keep it set through manual staging, QA, and promotion. After the verified release
+is complete, restore automatic releases by deleting the selector:
+
+```bash
+gh variable delete PRODUCTION_FRONTEND_RELEASE_MODE --repo TechSavvyJoe/Dealer-Social-Post-AI
+```
+
+Staging the frontend does not stage or roll back the backend. The Fly backend
+can deploy first while Vercel continues serving its previous frontend. During a
+video-model migration, that older client may still send Veo-shaped requests;
+the deployed backend's compatibility adapter can translate those requests to
+Omni, so old-client compatibility does not mean the old provider model remains
+in use or that video generation is held. Treat backend adapter exposure and
+possible provider usage as part of the backend rollout.
+
 The backend-first workflow cannot safely introduce a newly required client
 request field in one release. Split a revision contract into three compatible
 stages: (1) release an additive backend that returns every new revision token
@@ -216,7 +247,7 @@ needs a human to look at generated output before customers do.
 
    Review and archive the redacted JSON evidence with the release record. Starting a canary atomically replaces any older pass with a non-authorizing `running` receipt. Both staging and promotion refuse a missing, failed, mismatched, or more-than-six-hours-old receipt, and require every authentication, health, caption, standard-image, standard-video, quality-video, and session-revocation check to pass for the exact Fly SHA. A failed canary exits nonzero and records only a stable failure code, safe message, and HTTP status when applicable. Never run it with customer media or place either credential on the command line, in a receipt, or in chat. Rotate the dedicated PIN or invitation after any suspected exposure; never substitute the system-admin secret.
 
-4. Run the authenticated private website-handoff canary against that exact Fly SHA. Use only the checked-in synthetic delivery image and the dedicated `Release Canary` salesperson in the approval-free Customer Hub-enabled canary dealership. The canary first saves a website-only post and proves it stays `not_requested` across a worker boundary. Only its explicit final Send may enqueue the edited draft. It then proves the missing/stale revision blocks, exact replay idempotency, changed-replay block, clean zero-attempt private delivery, public image `404`, absent public marker, and session revocation.
+4. Run the authenticated private website-handoff canary against that exact Fly SHA. Before deployment, configure the paired GitHub production environment secrets `CUSTOMER_HUB_CANARY_DEALER_ID` (the dedicated canary dealer) and `CUSTOMER_HUB_CANARY_SECRET` (exactly 64 lowercase hex characters representing 256 random bits). Both remain server-side. Omitting both preserves current production configuration; a partial or malformed pair fails deployment. The Hub must have the matching isolated canary mapping before the operator run. Use only the checked-in synthetic delivery image and the dedicated `Release Canary` salesperson in the approval-free Customer Hub-enabled canary dealership. The canary first saves a website-only post and proves it stays `not_requested` across a worker boundary. Only its explicit final Send may enqueue the edited draft. It then proves the missing/stale revision blocks, exact replay idempotency, changed-replay block, clean zero-attempt private delivery, anonymous private-media `401` with `private, no-store`, successful public homepage/deliveries/inventory responses without canary identifiers or media, and session revocation.
 
    ```bash
    set +x
@@ -233,16 +264,19 @@ needs a human to look at generated output before customers do.
    unset WEBSITE_HANDOFF_CANARY_CONFIRM
    ```
 
-   The command records a private `reviewUrl` and synthetic marker in `.release-evidence/production-website-handoff-canary.json`; it never publishes the draft. Open that exact `reviewUrl` while signed in to Customer Hub Studio, confirm the marker belongs to this release canary, archive it, and permanently purge that exact synthetic draft. Keep the Dealer Social synthetic post private as release audit evidence. After the Studio purge succeeds, explicitly complete the cleanup receipt:
+   The command records a private `reviewUrl` and synthetic marker in `.release-evidence/production-website-handoff-canary.json`; it never publishes the draft. The accepted route is only `https://joegallant.me/backend/#inbox-dspc_<32 lowercase hex>` in the isolated canary namespace. Open that exact `reviewUrl` while signed in to Customer Hub, confirm the marker belongs to this release canary, and permanently purge that exact synthetic draft using the owner backend. Download the owner purge receipt into a private local file (mode `600`). Keep the Dealer Social synthetic post private as release audit evidence. After the owner purge succeeds, import the receipt and explicitly complete cleanup:
 
    ```bash
+   chmod 600 /absolute/private/path/hub-canary-purge.json
+   export WEBSITE_HANDOFF_CANARY_PURGE_RECEIPT_PATH=/absolute/private/path/hub-canary-purge.json
    export WEBSITE_HANDOFF_CANARY_CLEANUP_CONFIRM=private-synthetic-draft-purged
    npm run release:website-handoff-canary:confirm-cleanup
-   unset WEBSITE_HANDOFF_CANARY_CLEANUP_CONFIRM RELEASE_CANARY_PERSON_PIN RELEASE_CANARY_INVITATION_TOKEN \
+   unset WEBSITE_HANDOFF_CANARY_CLEANUP_CONFIRM WEBSITE_HANDOFF_CANARY_PURGE_RECEIPT_PATH \
+     RELEASE_CANARY_PERSON_PIN RELEASE_CANARY_INVITATION_TOKEN \
      RELEASE_CANARY_BASE_URL RELEASE_CANARY_EXPECTED_SHA
    ```
 
-   Starting the canary replaces any older pass with a non-authorizing receipt. Both Vercel staging and promotion require the canonical receipt for the exact Fly SHA, completed no more than six hours earlier, with every private-delivery check passed and owner cleanup recorded as `required: false` and `status: "complete"`. A passed canary awaiting Studio cleanup cannot authorize a release. Never use customer media, publish the synthetic draft, or substitute an administrator credential.
+   Starting the canary replaces any older pass with a non-authorizing receipt. Both Vercel staging and promotion require the canonical receipt for the exact Fly SHA, completed no more than six hours earlier, with every private-delivery check passed and owner cleanup recorded as `required: false` and `status: "complete"`. The schema-2 release evidence requires a schema-1 `purged` owner receipt with exact `draftId`, `eventId`, `payloadHash`, `sourceDealerId`, `sourcePostId`, `sourceRevision`, and `completedAt`, plus its 256-bit opaque capability. The command sends that receipt to the Hub cleanup verifier and requires the same identity, `contentAbsent`, `mediaAbsent`, and `replayBlocked` all true; the capability is never copied to release evidence or logs. Anonymous `401`/`404` responses and an operator acknowledgement alone do not prove deletion. A passed canary awaiting verified owner cleanup cannot authorize a release. Never use customer media, publish the synthetic draft, or substitute an administrator credential.
 
 5. Build the same SHA for Vercel. Main-branch production-domain auto-assignment is disabled in `vercel.ts`; branch previews remain available. The staging command refuses a dirty worktree, a stale `main`, a local `HEAD` that differs from Fly health, or any frontend output that does not contain the exact release SHA used by client telemetry.
 6. Stage the production-configured artifact without assigning the production domain. The script captures the canonical deployment URL and immutable Vercel deployment ID in a permission-restricted, gitignored `.release-evidence/vercel-staged-release.json` receipt. This directory is separate from Playwright's disposable `test-results` output. Staging invalidates any earlier browser-QA receipt and rechecks same-origin health, proxy readiness, security headers, PWA assets, service-worker release binding, and the frontend bundle's exact SHA:
@@ -253,7 +287,7 @@ needs a human to look at generated output before customers do.
    unset RELEASE_SHA
    ```
 
-   The provider canary, private website-handoff canary, owner cleanup confirmation, staging, hosted QA, and promotion share one atomic owner-bearing lock so they cannot overlap. An interrupted process deliberately leaves that lock in place instead of guessing that it is stale; remove `.release-evidence/vercel-release.lock` only after directly confirming that no release command is still running.
+   The provider canary, private website-handoff canary, owner cleanup verification, staging, hosted QA, and promotion share one atomic owner-bearing lock so they cannot overlap. An interrupted process deliberately leaves that lock in place instead of guessing that it is stale; remove `.release-evidence/vercel-release.lock` only after directly confirming that no release command is still running.
 
 7. Run the hosted-artifact browser gate against the exact staged URL. The gate is deliberately non-mutating: it never submits an invalid code, creates production data, or depends on source-only TypeScript modules that are absent from a production Vite build. It verifies the exact frontend SHA, same-origin health and proxy readiness, security headers, PWA metadata/icons/service worker, case-preserving masked admin entry, serious accessibility issues, horizontal overflow, Dynamic Island safe areas, and the complete Chromium/WebKit viewport matrix. The full stubbed UI, sharing, login-recovery, and real-PocketBase workflows already ran in CI before Fly deployment.
 

@@ -326,7 +326,52 @@ function validateValues(service, settings, credentials, enforceOrigins) {
       fail("CONNECTION_CREDENTIAL_INVALID");
   });
 }
+function isWebsiteCanaryDealer(dealerId) {
+  const canaryDealer = environment("CUSTOMER_HUB_CANARY_DEALER_ID");
+  return (
+    /^[A-Za-z0-9_-]{1,64}$/.test(canaryDealer.trim()) &&
+    dealerId === canaryDealer.trim() &&
+    dealerId !== environment("CUSTOMER_HUB_DEALER_ID")
+  );
+}
+function websiteCanaryEnvelope(dealerId) {
+  const realDealer = environment("CUSTOMER_HUB_DEALER_ID");
+  const secret = environment("CUSTOMER_HUB_CANARY_SECRET");
+  let real = null;
+  try {
+    real = snapshot("website", realDealer);
+  } catch (_e) {}
+  const valid =
+    environment("CUSTOMER_HUB_CANARY_DEALER_ID") === dealerId &&
+    !!real &&
+    real.enabled &&
+    real.configured &&
+    !real.error &&
+    /^[\x21-\x7e]{32,512}$/.test(secret) &&
+    secret !== environment("CUSTOMER_HUB_SECRET") &&
+    secret !== real.values.CUSTOMER_HUB_SECRET;
+  return {
+    enabled: valid,
+    settings: valid ? real.settings : {},
+    credentials: valid ? { sharedSecret: secret } : {},
+    // This discriminator binds proofs to the server's reserved synthetic mapping.
+    canaryMapping: [
+      "synthetic_canary",
+      dealerId,
+      realDealer,
+      $security.sha256(
+        JSON.stringify([
+          environment("CUSTOMER_HUB_CANARY_DEALER_ID"),
+          secret,
+          real ? real.identity : "",
+        ]),
+      ),
+    ],
+  };
+}
 function envEnvelope(service, dealerId) {
+  if (service === "website" && isWebsiteCanaryDealer(dealerId))
+    return websiteCanaryEnvelope(dealerId);
   const def = definition(service);
   const settings = {},
     credentials = {};
@@ -362,6 +407,7 @@ function identity(key, revision, envelope) {
           return [field, envelope.credentials[field] || ""];
         }),
     );
+  if (envelope.canaryMapping) values.push(["canaryMapping", envelope.canaryMapping]);
   return $security.sha256(
     JSON.stringify([
       VERSION,
@@ -403,6 +449,20 @@ function snapshot(service, dealerId, dao) {
     } catch (e) {
       error = safeCode(String(e.message), "CONNECTION_CONFIG_CORRUPT");
     }
+  }
+  if (service === "website" && isWebsiteCanaryDealer(dealerId)) {
+    const pinned = websiteCanaryEnvelope(dealerId);
+    // Managed off/corrupt remains authoritative. A managed record cannot select
+    // a different endpoint or key for the reserved synthetic dealership.
+    if (
+      !pinned.enabled ||
+      (record &&
+        (envelope.settings.origin !== pinned.settings.origin ||
+          envelope.settings.destinationId !== pinned.settings.destinationId ||
+          envelope.credentials.sharedSecret !== pinned.credentials.sharedSecret))
+    )
+      error = error || "CONNECTION_FIELDS_INVALID";
+    envelope.canaryMapping = pinned.canaryMapping;
   }
   const configured =
     !error &&

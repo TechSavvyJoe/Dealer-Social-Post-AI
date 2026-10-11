@@ -273,7 +273,7 @@ const checkRows: Array<{
     label: "Gemini API key",
     icon: KeyRound,
     critical: true,
-    hint: "GEMINI_API_KEY env var. Required for text, image, and Veo video generation.",
+    hint: "GEMINI_API_KEY env var. Required for text, image, and video generation.",
   },
   {
     key: "anthropic_key_set",

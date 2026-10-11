@@ -543,7 +543,7 @@ describe("Veo negative prompt", () => {
     }
   });
 
-  it("suppresses audio only when the salesperson picked Silent", () => {
+  it("requests no audio only when the salesperson picked No music", () => {
     const silent = generateVideoNegativePrompt({ ...options, soundtrack: "none" });
     const scored = generateVideoNegativePrompt({
       ...options,

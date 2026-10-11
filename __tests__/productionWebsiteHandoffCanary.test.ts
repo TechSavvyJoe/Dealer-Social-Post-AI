@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -11,8 +12,11 @@ import {
   injectSyntheticJpegMetadata,
   jpegApplicationMarkers,
   nextMinuteBoundaryWaitMs,
+  preflightSyntheticCanaryDestination,
   validateReadyPublication,
   validateRevisionContractSource,
+  verifyHubPrivacyBoundary,
+  verifyOwnerPurgeReceipt,
 } from "../scripts/production-website-handoff-canary.mjs";
 
 const scriptPath = resolve(
@@ -65,18 +69,84 @@ describe("production website handoff canary", () => {
   });
 
   it("accepts only the canonical private Hub review URL", () => {
-    const id = "12345678-1234-4abc-8def-1234567890ab";
-    expect(extractHubDraftId(`https://joegallant.me/studio/updates#draft-${id}`)).toBe(
-      id,
-    );
+    const id = `dspc_${"a".repeat(32)}`;
+    expect(extractHubDraftId(`https://joegallant.me/backend/#inbox-${id}`)).toBe(id);
     expect(() =>
-      extractHubDraftId(`https://evil.example/studio/updates#draft-${id}`),
+      extractHubDraftId(`https://evil.example/backend/#inbox-${id}`),
     ).toThrow(/outside the expected private draft route/);
     expect(() =>
-      extractHubDraftId(`https://joegallant.me/updates#draft-${id}`),
+      extractHubDraftId(`https://joegallant.me/updates#inbox-${id}`),
     ).toThrow(/outside the expected private draft route/);
+    for (const url of [
+      `https://joegallant.me/backend/#inbox-dsp_${"a".repeat(32)}`,
+      `https://joegallant.me/backend/#inbox-${id.toUpperCase()}`,
+      `https://joegallant.me/backend/#inbox-${id}?extra`,
+      `https://user@joegallant.me/backend/#inbox-${id}`,
+      `https://joegallant.me/studio/updates#draft-12345678-1234-4abc-8def-1234567890ab`,
+    ])
+      expect(() => extractHubDraftId(url)).toThrow();
     expect(() => canonicalHubOrigin("https://evil.example")).toThrow(
       expect.objectContaining({ code: "CONFIG_UNTRUSTED_HUB_ORIGIN" }),
+    );
+  });
+
+  it("rejects a real or wrong-dealer destination before any post create or send", async () => {
+    const dealerId = "dealer123456789";
+    const valid = {
+      enabled: true,
+      id: "joe_customer_hub",
+      mode: "private_draft",
+      siteUrl: "https://joegallant.me",
+      namespace: "synthetic_canary",
+      dealerId,
+    };
+    for (const destination of [
+      { ...valid, namespace: undefined },
+      { ...valid, namespace: "real_dealer" },
+      { ...valid, dealerId: "other1234567890" },
+      { ...valid, dealerId: undefined },
+    ]) {
+      const requests: { path: string; method: string }[] = [];
+      const client = {
+        request: async (path: string, options: RequestInit) => {
+          requests.push({ path, method: options.method || "GET" });
+          return Response.json({ items: [destination] });
+        },
+      };
+      // Exercise the same awaited gate used before the live write sequence.
+      const attempt = async () => {
+        await preflightSyntheticCanaryDestination(client, dealerId);
+        await client.request("/api/app/posts", { method: "POST" });
+        await client.request("/api/app/posts/post12345678900/website-publication", {
+          method: "POST",
+        });
+      };
+      await expect(attempt()).rejects.toMatchObject({
+        code: "DESTINATION_UNAVAILABLE",
+      });
+      expect(requests).toEqual([
+        { path: "/api/app/website-destinations", method: "GET" },
+      ]);
+    }
+    await expect(
+      preflightSyntheticCanaryDestination(
+        { request: async () => Response.json({ items: [valid] }) },
+        dealerId,
+      ),
+    ).resolves.toEqual(valid);
+    const source = readFileSync(scriptPath, "utf8");
+    const runStart = source.indexOf("async function runLockedCanary()");
+    const runSource = source.slice(runStart);
+    expect(
+      runSource.indexOf("await preflightSyntheticCanaryDestination("),
+    ).toBeGreaterThan(0);
+    expect(
+      runSource.indexOf("await preflightSyntheticCanaryDestination("),
+    ).toBeLessThan(runSource.indexOf('await client.request("/api/app/posts"'));
+    expect(
+      runSource.indexOf("await preflightSyntheticCanaryDestination("),
+    ).toBeLessThan(
+      runSource.indexOf('evidence.cleanup.status = "dealer_post_create_in_flight"'),
     );
   });
 
@@ -211,5 +281,182 @@ describe("production website handoff canary", () => {
     expect(
       source.indexOf("const releaseLockCleanup = acquireReleaseLock()"),
     ).toBeLessThan(source.indexOf('process.argv.includes("--confirm-cleanup")'));
+  });
+  const identity = {
+    draftId: `dspc_${"a".repeat(32)}`,
+    eventId: `wp_s_${"b".repeat(32)}_${"c".repeat(40)}`,
+    payloadHash: "d".repeat(64),
+    sourceDealerId: "dealer123456789",
+    sourcePostId: "post12345678900",
+    sourceRevision: 2,
+  };
+  const completedAt = new Date(Date.now() - 60_000).toISOString();
+  const resources = {
+    canaryIdentity: identity,
+    hubDraftId: identity.draftId,
+    postId: identity.sourcePostId,
+    syntheticMarker: "QA-01234567-89ab",
+    mediaHashes: ["e".repeat(64)],
+    canaryMediaBase64Sha256: createHash("sha256")
+      .update(Buffer.from("z".repeat(200)).toString("base64"))
+      .digest("hex"),
+  };
+  const receipt = {
+    ...identity,
+    schemaVersion: 1,
+    status: "purged",
+    completedAt: new Date().toISOString(),
+    capability: "f".repeat(64),
+  };
+  const { capability: _capability, ...publicReceipt } = receipt;
+  const result = {
+    ...publicReceipt,
+    contentAbsent: true,
+    mediaAbsent: true,
+    replayBlocked: true,
+  };
+
+  it("checks real private-media authorization and all successful public feeds", async () => {
+    const calls: string[] = [];
+    const fetcher = async (url: RequestInfo | URL) => {
+      calls.push(String(url));
+      return String(url).includes("draft-media")
+        ? new Response('{"error":"unauthorized"}', {
+            status: 401,
+            headers: { "cache-control": "private, no-store" },
+          })
+        : new Response("clean", { status: 200 });
+    };
+    await expect(
+      verifyHubPrivacyBoundary(
+        "https://joegallant.me",
+        resources,
+        [Buffer.from("unique-image-bytes")],
+        fetcher,
+      ),
+    ).resolves.toMatchObject({
+      privateMediaStatus: 401,
+      publicStatuses: {
+        "/": 200,
+        "/api/hub-data/deliveries": 200,
+        "/api/hub-data/inventory": 200,
+      },
+    });
+    expect(calls).toHaveLength(4);
+    for (const leaked of [
+      resources.syntheticMarker,
+      identity.draftId,
+      identity.sourcePostId,
+      identity.payloadHash,
+      resources.mediaHashes[0],
+      "unique-image-bytes",
+      "z".repeat(200),
+      JSON.stringify({ image: Buffer.from("z".repeat(200)).toString("base64") }),
+      Buffer.from("unique-image-bytes").toString("base64"),
+      `/backend/draft-media?draftId=${identity.draftId}`,
+    ]) {
+      await expect(
+        verifyHubPrivacyBoundary(
+          "https://joegallant.me",
+          resources,
+          [Buffer.from("unique-image-bytes")],
+          async (url: RequestInfo | URL) =>
+            String(url).includes("draft-media") ? fetcher(url) : new Response(leaked),
+        ),
+      ).rejects.toMatchObject({ code: "HUB_PUBLIC_BOUNDARY_FAILED" });
+    }
+    for (const status of [401, 404, 500])
+      await expect(
+        verifyHubPrivacyBoundary(
+          "https://joegallant.me",
+          resources,
+          [],
+          async (url: RequestInfo | URL) =>
+            String(url).includes("draft-media")
+              ? fetcher(url)
+              : new Response("clean", { status }),
+        ),
+      ).rejects.toThrow();
+    for (const [status, cache] of [
+      [404, "private, no-store"],
+      [200, "private, no-store"],
+      [401, "public"],
+      [401, "private"],
+    ] as const)
+      await expect(
+        verifyHubPrivacyBoundary(
+          "https://joegallant.me",
+          resources,
+          [],
+          async (url: RequestInfo | URL) =>
+            String(url).includes("draft-media")
+              ? new Response("denied", { status, headers: { "cache-control": cache } })
+              : new Response("clean"),
+        ),
+      ).rejects.toThrow();
+  });
+
+  it("imports exact owner purge receipt and requires remote content/media/replay proof", async () => {
+    let request: RequestInit | undefined;
+    const evidence = { resources, completedAt };
+    await expect(
+      verifyOwnerPurgeReceipt(
+        receipt,
+        evidence,
+        async (url: RequestInfo | URL, options?: RequestInit) => {
+          expect(url).toBe(
+            "https://joegallant.me/api/integrations/dealer-social/canary-cleanup/verify",
+          );
+          request = options;
+          return Response.json(result, {
+            headers: { "cache-control": "private, no-store" },
+          });
+        },
+      ),
+    ).resolves.toEqual(result);
+    expect(request?.method).toBe("POST");
+    expect(JSON.parse(request?.body as string)).toEqual(receipt);
+    for (const invalid of [
+      { status: "complete" },
+      { draftId: `dspc_${"0".repeat(32)}` },
+      { payloadHash: "0".repeat(64) },
+      { eventId: `wp_s_${"0".repeat(32)}_${"c".repeat(40)}` },
+      { sourceDealerId: "other1234567890" },
+      { sourcePostId: "other1234567890" },
+      { sourceRevision: 3 },
+      { capability: "short" },
+      { completedAt: "2000-01-01T00:00:00Z" },
+    ]) {
+      let called = false;
+      await expect(
+        verifyOwnerPurgeReceipt({ ...receipt, ...invalid }, evidence, async () => {
+          called = true;
+          return Response.json(result);
+        }),
+      ).rejects.toMatchObject({ code: "CLEANUP_RECEIPT_INVALID" });
+      expect(called).toBe(false);
+    }
+    for (const invalid of [
+      { contentAbsent: false },
+      { mediaAbsent: false },
+      { replayBlocked: false },
+      { sourceRevision: 3 },
+      { capability: receipt.capability },
+      { completedAt },
+    ])
+      await expect(
+        verifyOwnerPurgeReceipt(receipt, evidence, async () =>
+          Response.json(
+            { ...result, ...invalid },
+            { headers: { "cache-control": "no-store" } },
+          ),
+        ),
+      ).rejects.toMatchObject({ code: "CLEANUP_VERIFICATION_INVALID" });
+    for (const status of [401, 404])
+      await expect(
+        verifyOwnerPurgeReceipt(receipt, evidence, async () =>
+          Response.json({}, { status }),
+        ),
+      ).rejects.toMatchObject({ code: "CLEANUP_VERIFICATION_FAILED" });
   });
 });

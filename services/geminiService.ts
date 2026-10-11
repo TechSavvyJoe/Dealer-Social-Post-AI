@@ -2925,8 +2925,8 @@ export const generatePostVideo = async (
   const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
 
-  // Resolve final Veo params FIRST so the prompt matches the wire body.
-  // Veo 3.1 accepts only 16:9 | 9:16 and duration 4 | 6 | 8 (1080p → 8s).
+  // Preserve the app's output choices: 16:9 | 9:16 and 4 | 6 | 8 seconds.
+  // The quality preset remains an eight-second 1080p export.
   const { width, height } = await getImageDimensions(normalisedImage);
   assertAuthEpoch(requestAuthEpoch);
   const aspectRatio = resolveVeoAspect(
@@ -2952,11 +2952,8 @@ export const generatePostVideo = async (
     pacing: options.pacing || "cinematic",
   });
 
-  // The identity locks and the silent-clip request ride as a real request
-  // parameter, not only as prose the model may weigh against the rest of the
-  // prompt. `generateAudio` is deliberately not sent: it is a Vertex/GEAP-only
-  // parameter that both official Google SDKs refuse to forward to
-  // generativelanguage.googleapis.com, so it would risk a 400 on every clip.
+  // The server adds these exclusions to Omni's ordinary prompt. They are
+  // creative guidance, not a provider safety override or guaranteed mute.
   const negativePrompt = generateVideoNegativePrompt({
     ...options,
     durationSeconds,
@@ -2987,17 +2984,14 @@ export const generatePostVideo = async (
     ],
     parameters: {
       aspectRatio: aspectRatio,
-      personGeneration: "allow_adult", // Required for image-to-video with people
+      personGeneration: "allow_adult", // Legacy compatibility marker; provider safety stays server-owned
       durationSeconds: durationSeconds,
       resolution: resolvedResolution,
       ...(includeNegativePrompt ? { negativePrompt } : {}),
     },
   });
 
-  // Veo 3.1 bakes native audio from the prompt (no separate track upload).
-  // When soundtrack !== none, the prompt requires score/ambience so the MP4
-  // is not silent; when it is none, negativePrompt suppresses music, score,
-  // and speech. Log for support when diagnosing "no sound" reports.
+  // Audio preferences guide generation; users should preview the result.
   console.log(
     `[VideoGen] Options: aspect=${aspectRatio} duration=${durationSeconds}s soundtrack=${options.soundtrack || "cinematic"}`,
   );
@@ -3136,7 +3130,7 @@ export const generatePostVideo = async (
       console.log("[VideoGen] Async operation started; polling.");
       return finishVideo(
         await pollGeminiVideoOperation(operationName, 360000, signal, requestAuthEpoch),
-      ); // 6 minute timeout for Veo 3.1
+      ); // Bounded recovery window for the accepted video job.
     }
 
     // `:predictLongRunning` documents exactly one accepted-start shape: an
@@ -3217,6 +3211,11 @@ const pollGeminiVideoOperation = async (
 
       if (!response.ok) {
         if (response.status === 401) notifySessionRejected(requestAuthEpoch);
+        if ([401, 403, 404, 410].includes(response.status)) {
+          throw new Error(
+            "Video generation failed: This video session is no longer available. Sign in again if needed, then return to your post.",
+          );
+        }
         const text = await response.text();
         console.error(`[VideoGen] Poll failed:`, text);
         await sleepWithSignal(pollInterval, signal);
