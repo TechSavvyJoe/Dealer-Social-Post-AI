@@ -15,6 +15,10 @@ export function websiteCanaryEnvironment(env = process.env) {
   return `CUSTOMER_HUB_CANARY_DEALER_ID=${dealer}\nCUSTOMER_HUB_CANARY_SECRET=${secret}\n`;
 }
 
+/**
+ * @param {Record<string, string | undefined>} env
+ * @param {(command: string, args: string[], options: import("node:child_process").SpawnSyncOptionsWithStringEncoding) => {status: number | null, error?: Error}} run
+ */
 export function stageWebsiteCanaryConfiguration(env = process.env, run = spawnSync) {
   const input = websiteCanaryEnvironment(env);
   if (!input) return false;

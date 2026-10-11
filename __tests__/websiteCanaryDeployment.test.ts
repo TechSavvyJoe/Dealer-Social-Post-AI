@@ -38,7 +38,11 @@ describe("isolated website canary deployment", () => {
 
   it("stages only the paired identity through stdin and fails closed without echoing secrets", () => {
     const valid = { ...env, CUSTOMER_HUB_CANARY_DEALER_ID: "canarydealer001" };
-    const run = vi.fn(() => ({ status: 0 }));
+    const run = vi.fn(
+      (_command: string, _args: string[], _options: { input?: unknown }) => ({
+        status: 0,
+      }),
+    );
     expect(stageWebsiteCanaryConfiguration(valid, run)).toBe(true);
     expect(run.mock.calls[0][1]).toEqual([
       "secrets",
