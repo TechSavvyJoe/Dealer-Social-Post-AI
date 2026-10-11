@@ -329,7 +329,9 @@ export function inlineVideoBytes(completed) {
     !encoded ||
     encoded.length > Math.ceil(MAX_VIDEO_BYTES / 3) * 4 ||
     encoded.length % 4 !== 0 ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded) ||
+    // Repeated quartet groups exhaust V8's regexp stack on multi-MiB videos.
+    // Length, alphabet/padding, and the decode/encode round trip stay strict.
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) ||
     typeof mimeType !== "string" ||
     mimeType.trim().toLowerCase() !== "video/mp4"
   ) {

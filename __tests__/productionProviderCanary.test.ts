@@ -364,6 +364,50 @@ describe("production provider canary", () => {
     ).toThrow(/valid inline MP4 media/);
   });
 
+  it.each([0, 1, 2])(
+    "accepts a canonical 4 MiB inline video with padding variant %i without overflowing the regex stack",
+    (extraBytes) => {
+      const bytes = Buffer.alloc(4 * 1024 * 1024 + extraBytes, 0x5a);
+      bytes.write("ftyp", 4, "ascii");
+      const result = inlineVideoBytes({
+        generateVideoResponse: {
+          generatedSamples: [
+            {
+              video: { encodedVideo: bytes.toString("base64"), encoding: "video/mp4" },
+            },
+          ],
+        },
+      });
+      expect(result?.bytes.equals(bytes)).toBe(true);
+      expect(result?.mimeType).toBe("video/mp4");
+    },
+  );
+
+  it("retains strict inline video size, alphabet, and canonical padding checks", () => {
+    const valid = Buffer.alloc(4096).toString("base64");
+    const wrap = (encodedVideo: string) => ({
+      generateVideoResponse: {
+        generatedSamples: [{ video: { encodedVideo, encoding: "video/mp4" } }],
+      },
+    });
+    for (const invalid of [
+      "",
+      valid.slice(0, -1),
+      valid.slice(0, -2) + "===",
+      valid.slice(0, 4) + "=" + valid.slice(5),
+      "-" + valid.slice(1),
+      "_" + valid.slice(1),
+      "\n" + valid.slice(1),
+      valid.slice(0, -3) + "B==", // Nonzero unused padding bits.
+      Buffer.alloc(4095).toString("base64"),
+      "A".repeat(Math.ceil((100 * 1024 * 1024) / 3) * 4 + 4),
+    ]) {
+      expect(() => inlineVideoBytes(wrap(invalid))).toThrow(
+        expect.objectContaining({ code: "VIDEO_OUTPUT_INVALID" }),
+      );
+    }
+  });
+
   it("records real image pixels and rejects the wrong provider aspect ratio", () => {
     const syntheticPng = (width: number, height: number) => {
       const bytes = Buffer.alloc(24);
