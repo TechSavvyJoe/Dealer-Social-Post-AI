@@ -79,6 +79,10 @@ jobs:
         run: node scripts/guided-connections-canary.mjs
         env:
           POCKETBASE_TEST_BINARY: /tmp/launch-pocketbase/pocketbase
+      - name: Exercise large private payload transport and cleanup
+        run: node scripts/safe-http-canary.mjs
+        env:
+          POCKETBASE_TEST_BINARY: /tmp/launch-pocketbase/pocketbase
       - name: Exercise Omni compatibility and recovery cleanup
         run: node scripts/omni-video-canary.mjs
         env:
@@ -253,6 +257,10 @@ jobs:
             --tag dealer-social-post-ai:ci .
           docker run --rm --entrypoint /bin/sh dealer-social-post-ai:ci \
             -c 'grep -Rqs --fixed-strings 1x00000000000000000000AA /pb/pb_public/assets'
+      - name: Verify large payloads with the production HTTP client
+        run: node scripts/safe-http-canary.mjs
+        env:
+          SAFE_HTTP_TEST_IMAGE: dealer-social-post-ai:ci
       - name: Boot fresh database and verify protected routes
         run: |
           provider_stub_pid=""
