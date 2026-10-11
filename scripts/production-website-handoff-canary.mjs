@@ -738,7 +738,7 @@ async function runLockedCanary() {
       required: false,
       status: "not_created",
       instruction:
-        "Find the synthetic marker in Dealer Social; archive and purge any matching Customer Hub draft.",
+        "Retain the labeled synthetic Dealer Social post as private release audit evidence. Purge only this run's exact isolated Customer Hub draft. After all tests, optionally deactivate the synthetic person; never delete the dealer.",
     },
   };
   await writeEvidence(evidencePath, evidence);
@@ -1419,7 +1419,7 @@ async function confirmOwnerCleanup() {
     verification,
     publicBoundary: boundary,
     instruction:
-      "Owner permanently purged the exact isolated synthetic draft; Hub verified content/media removal and replay blocking.",
+      "Owner permanently purged the exact isolated Hub draft; Hub verified content/media removal and replay blocking. Retain the labeled synthetic Dealer Social audit post; optionally deactivate the synthetic person after all tests, never delete the dealer.",
   };
   const written = await writeEvidence(DEFAULT_EVIDENCE_PATH, evidence);
   console.log(`Website handoff canary cleanup confirmed: ${written}`);
