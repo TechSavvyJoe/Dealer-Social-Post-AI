@@ -4,11 +4,15 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  assertCurrentImageProvenance,
+  assertNoUncertainImageRequest,
   assertNotRequested,
   buildSyntheticDrafts,
   canonicalHubOrigin,
   canonicalProductionOrigin,
   createDraftForm,
+  createPostForm,
+  generateWebsiteCanaryImage,
   extractHubDraftId,
   injectSyntheticJpegMetadata,
   jpegApplicationMarkers,
@@ -37,6 +41,197 @@ describe("production website handoff canary", () => {
         encoding: "utf8",
       }),
     ).toContain("Website handoff canary contract is valid");
+  });
+
+  const policy = JSON.parse(
+    readFileSync(resolve(process.cwd(), "config/gemini-model-policy.json"), "utf8"),
+  );
+  const imageConfirmation = "one-paid-image-from-reviewed-synthetic-source";
+  const generatedPng = () => {
+    const bytes = Buffer.alloc(2048);
+    Buffer.from("89504e470d0a1a0a", "hex").copy(bytes);
+    bytes.writeUInt32BE(1856, 16);
+    bytes.writeUInt32BE(2304, 20);
+    return bytes;
+  };
+
+  it("generates once from the reviewed source and saves unchanged output with its exact app attempt", async () => {
+    const source = readFileSync(syntheticImagePath);
+    const output = generatedPng();
+    const imageAttemptId = "a".repeat(40);
+    const requests: { path: string; options: RequestInit }[] = [];
+    const client = {
+      request: async (path: string, options: RequestInit) => {
+        requests.push({ path, options });
+        return Response.json({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: "image/png",
+                      data: output.toString("base64"),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      },
+    };
+    const generated = await generateWebsiteCanaryImage(
+      client,
+      policy,
+      source,
+      imageAttemptId,
+      imageConfirmation,
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].path).toBe(
+      "/api/proxy/v1beta/models/gemini-3-pro-image:generateContent",
+    );
+    expect(requests[0].options.method).toBe("POST");
+    expect(requests[0].options.headers).toMatchObject({
+      "X-Generation-Task": "image_standard",
+      "X-Generation-Attempt-ID": imageAttemptId,
+      "X-Model-Policy-Version": "5",
+    });
+    const body = JSON.parse(requests[0].options.body as string);
+    expect(body.contents[0].parts[1].inlineData).toEqual({
+      mimeType: "image/jpeg",
+      data: source.toString("base64"),
+    });
+    expect(body.generationConfig).toMatchObject({
+      responseModalities: ["TEXT", "IMAGE"],
+      imageConfig: { imageSize: "2K", aspectRatio: "4:5" },
+      maxOutputTokens: 4096,
+    });
+    expect(generated.imageBytes).toEqual(output);
+    expect(generated.evidence).toMatchObject({
+      width: 1856,
+      height: 2304,
+      byteCount: 2048,
+      outputSha256: createHash("sha256").update(output).digest("hex"),
+      outputBase64Sha256: createHash("sha256")
+        .update(output.toString("base64"))
+        .digest("hex"),
+    });
+    const form = createPostForm(
+      generated.imageBytes,
+      buildSyntheticDrafts("QA-01234567-89ab").initial,
+      generated.imageMimeType,
+      generated.imageAttemptId,
+    );
+    const upload = form.get("creative_image") as File;
+    expect(upload.type).toBe("image/png");
+    const uploadedBytes = await new Promise<ArrayBuffer>((done, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => done(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(upload);
+    });
+    expect(Buffer.from(uploadedBytes)).toEqual(output);
+    expect(form.get("image_attempt_id")).toBe(imageAttemptId);
+    expect(form.get("platform_ids")).toBe("[]");
+    for (const untrustedField of [
+      "model_policy_version",
+      "generation_tier",
+      "generation_model",
+      "image_policy_verified",
+    ])
+      expect(form.has(untrustedField)).toBe(false);
+  });
+
+  it("requires the operator paid-image confirmation and original source hash before requesting", async () => {
+    let count = 0;
+    const client = {
+      request: async () => {
+        count += 1;
+        return Response.json({});
+      },
+    };
+    const source = readFileSync(syntheticImagePath);
+    await expect(
+      generateWebsiteCanaryImage(client, policy, source, "a".repeat(40), ""),
+    ).rejects.toMatchObject({ code: "IMAGE_CONFIRMATION_REQUIRED" });
+    await expect(
+      generateWebsiteCanaryImage(
+        client,
+        policy,
+        injectSyntheticJpegMetadata(source),
+        "a".repeat(40),
+        imageConfirmation,
+      ),
+    ).rejects.toMatchObject({ code: "SYNTHETIC_ASSET_CHANGED" });
+    expect(count).toBe(0);
+  });
+
+  it("never retries an uncertain paid request and refuses a later run until it is resolved", async () => {
+    for (const response of [
+      new Error("connection lost"),
+      Response.json({}, { status: 502 }),
+      new Response("invalid json", { status: 200 }),
+    ]) {
+      let count = 0;
+      const client = {
+        request: async () => {
+          count += 1;
+          if (response instanceof Error) throw response;
+          return response;
+        },
+      };
+      await expect(
+        generateWebsiteCanaryImage(
+          client,
+          policy,
+          readFileSync(syntheticImagePath),
+          "a".repeat(40),
+          imageConfirmation,
+        ),
+      ).rejects.toMatchObject({ code: "IMAGE_REQUEST_UNCERTAIN" });
+      expect(count).toBe(1);
+    }
+    for (const status of ["request_in_flight", "uncertain"])
+      expect(() =>
+        assertNoUncertainImageRequest({ checks: { imageGeneration: { status } } }),
+      ).toThrow(expect.objectContaining({ code: "IMAGE_REQUEST_UNCERTAIN_BLOCKED" }));
+    expect(() =>
+      assertNoUncertainImageRequest({
+        checks: { imageGeneration: { status: "completed" } },
+      }),
+    ).not.toThrow();
+  });
+
+  it("requires clear current server image and identity review gates before Send", () => {
+    for (const value of [
+      {},
+      { image_review_required: false, identity_review_required: false, lastError: "" },
+    ])
+      expect(() => assertCurrentImageProvenance(value, "Save")).not.toThrow();
+    for (const value of [
+      { image_review_required: true },
+      { image_review_required: "true" },
+      { identity_review_required: true },
+      { lastError: "image_review_required" },
+    ])
+      expect(() => assertCurrentImageProvenance(value, "Save")).toThrow(
+        expect.objectContaining({ code: "IMAGE_PROVENANCE_NOT_READY" }),
+      );
+    const source = readFileSync(scriptPath, "utf8");
+    const runStart = source.indexOf("async function runLockedCanary()");
+    const runSource = source.slice(
+      runStart,
+      source.indexOf("\nexport async function verifyHubPrivacyBoundary(", runStart),
+    );
+    expect(
+      runSource.indexOf("assertCurrentImageProvenance(presendStatus"),
+    ).toBeLessThan(runSource.indexOf("const sendPath ="));
+    expect(runSource).not.toContain("injectSyntheticJpegMetadata");
+    expect(source.indexOf("const imageConfirmation = requireEnv")).toBeLessThan(
+      source.indexOf("await writeEvidence(evidencePath, evidence)"),
+    );
   });
 
   it("reproduces EXIF-without-Orientation and Photoshop metadata on synthetic JPEG only", () => {

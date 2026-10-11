@@ -294,9 +294,15 @@ describe("Vercel staged browser QA receipt", () => {
       replayBlocked: true,
     };
     const validCanary = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       canary: "production-website-private-draft",
       syntheticAsset: "docs/marketing/demo/synthetic-delivery-photo.jpg",
+      syntheticSourceSha256:
+        "828593892b475286726555359248bc2e47bd2a59239e8c750ca2cb885c6b1139",
+      generatedOutputHandling: "unchanged-provider-bytes",
+      syntheticMetadataCase:
+        "offline-contract-only-exif-without-orientation-plus-photoshop-app13",
+      modelPolicyVersion: "5",
       targetOrigin: "https://dealer-social-post-ai-production.fly.dev",
       customerHubOrigin: "https://joegallant.me",
       expectedReleaseSha: validEvidence.releaseSha,
@@ -304,6 +310,10 @@ describe("Vercel staged browser QA receipt", () => {
       completedAt: new Date(now - 5 * 60 * 1000).toISOString(),
       outcome: "passed",
       resources: {
+        mediaHashes: [
+          "f".repeat(64),
+          "828593892b475286726555359248bc2e47bd2a59239e8c750ca2cb885c6b1139",
+        ],
         canaryIdentity: identity,
         canaryMediaBase64Sha256: "e".repeat(64),
         syntheticMarker: `QA-${validEvidence.releaseSha.slice(0, 8)}-${validEvidence.releaseSha.slice(8, 12)}`,
@@ -313,6 +323,24 @@ describe("Vercel staged browser QA receipt", () => {
         reviewUrl: `https://joegallant.me/backend/#inbox-${identity.draftId}`,
       },
       checks: {
+        imageGeneration: {
+          passed: true,
+          status: "completed",
+          attempts: 1,
+          task: "image_standard",
+          sameSession: true,
+          imageAttemptId: "a".repeat(40),
+          modelPolicyVersion: "5",
+          model: "gemini-3-pro-image",
+          mimeType: "image/png",
+          byteCount: 2048,
+          imageSize: "2K",
+          aspectRatio: "4:5",
+          width: 1856,
+          height: 2304,
+          outputSha256: "f".repeat(64),
+          outputBase64Sha256: "b".repeat(64),
+        },
         authentication: {
           passed: true,
           role: "salesperson",
@@ -322,6 +350,7 @@ describe("Vercel staged browser QA receipt", () => {
           passed: true,
           releaseSha: validEvidence.releaseSha,
           backupStatus: "verified",
+          modelPolicyVersion: "5",
         },
         destination: {
           passed: true,
@@ -333,9 +362,12 @@ describe("Vercel staged browser QA receipt", () => {
         initialPrivateDraft: {
           passed: true,
           websiteOnly: true,
+          imageReviewCleared: true,
+          imageAttemptId: "a".repeat(40),
+          uploadedOutputSha256: "f".repeat(64),
           status: "not_requested",
         },
-        noPrematureDelivery: { passed: true },
+        noPrematureDelivery: { passed: true, imageReviewCleared: true },
         revisionGuard: {
           passed: true,
           missingBlocked: true,
@@ -380,6 +412,79 @@ describe("Vercel staged browser QA receipt", () => {
         },
       },
       { ...validCanary, schemaVersion: 1 },
+      { ...validCanary, schemaVersion: 2 },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          initialPrivateDraft: {
+            ...validCanary.checks.initialPrivateDraft,
+            uploadedOutputSha256: "0".repeat(64),
+          },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          initialPrivateDraft: {
+            ...validCanary.checks.initialPrivateDraft,
+            imageAttemptId: "0".repeat(40),
+          },
+        },
+      },
+      {
+        ...validCanary,
+        generatedOutputHandling: "converted-with-claimed-original-hash",
+      },
+      {
+        ...validCanary,
+        syntheticMetadataCase: "exif-without-orientation-plus-photoshop-app13",
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          imageGeneration: { ...validCanary.checks.imageGeneration, attempts: 2 },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          imageGeneration: {
+            ...validCanary.checks.imageGeneration,
+            status: "uncertain",
+          },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          imageGeneration: {
+            ...validCanary.checks.imageGeneration,
+            sameSession: false,
+          },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          imageGeneration: {
+            ...validCanary.checks.imageGeneration,
+            outputSha256: "0".repeat(64),
+          },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          noPrematureDelivery: { passed: true, imageReviewCleared: false },
+        },
+      },
       {
         ...validCanary,
         resources: { ...validCanary.resources, hubDraftId: `dspc_${"0".repeat(32)}` },

@@ -270,7 +270,7 @@ export const validateWebsiteHandoffCanaryEvidence = (evidence, releaseSha) => {
   const cleanupCompletedAt = Date.parse(evidence?.cleanup?.completedAt || "");
   const checks = evidence?.checks || {};
   if (
-    evidence?.schemaVersion !== 2 ||
+    evidence?.schemaVersion !== 3 ||
     evidence.canary !== "production-website-private-draft" ||
     evidence.syntheticAsset !== "docs/marketing/demo/synthetic-delivery-photo.jpg" ||
     evidence.targetOrigin !== PRODUCTION_FLY_ORIGIN ||
@@ -288,6 +288,7 @@ export const validateWebsiteHandoffCanaryEvidence = (evidence, releaseSha) => {
     checks.health?.passed !== true ||
     checks.health?.releaseSha !== releaseSha ||
     checks.health?.backupStatus !== "verified" ||
+    checks.health?.modelPolicyVersion !== evidence.modelPolicyVersion ||
     checks.destination?.passed !== true ||
     checks.destination?.id !== "joe_customer_hub" ||
     checks.destination?.mode !== "private_draft" ||
@@ -296,6 +297,41 @@ export const validateWebsiteHandoffCanaryEvidence = (evidence, releaseSha) => {
     checks.initialPrivateDraft?.passed !== true ||
     checks.initialPrivateDraft?.websiteOnly !== true ||
     checks.initialPrivateDraft?.status !== "not_requested" ||
+    evidence.syntheticSourceSha256 !==
+      "828593892b475286726555359248bc2e47bd2a59239e8c750ca2cb885c6b1139" ||
+    evidence.generatedOutputHandling !== "unchanged-provider-bytes" ||
+    evidence.syntheticMetadataCase !==
+      "offline-contract-only-exif-without-orientation-plus-photoshop-app13" ||
+    checks.imageGeneration?.passed !== true ||
+    checks.imageGeneration?.status !== "completed" ||
+    checks.imageGeneration?.attempts !== 1 ||
+    checks.imageGeneration?.sameSession !== true ||
+    checks.imageGeneration?.task !== "image_standard" ||
+    checks.imageGeneration?.model !== "gemini-3-pro-image" ||
+    !/^[a-f0-9]{40}$/.test(checks.imageGeneration?.imageAttemptId || "") ||
+    checks.imageGeneration?.modelPolicyVersion !== evidence.modelPolicyVersion ||
+    evidence.modelPolicyVersion !== "5" ||
+    checks.imageGeneration?.imageSize !== "2K" ||
+    checks.imageGeneration?.aspectRatio !== "4:5" ||
+    checks.imageGeneration?.width !== 1856 ||
+    checks.imageGeneration?.height !== 2304 ||
+    !Number.isSafeInteger(checks.imageGeneration?.byteCount) ||
+    checks.imageGeneration.byteCount < 1024 ||
+    checks.imageGeneration.byteCount > 8 * 1024 * 1024 ||
+    !["image/jpeg", "image/png", "image/webp"].includes(
+      checks.imageGeneration?.mimeType,
+    ) ||
+    !/^[a-f0-9]{64}$/.test(checks.imageGeneration?.outputSha256 || "") ||
+    !/^[a-f0-9]{64}$/.test(checks.imageGeneration?.outputBase64Sha256 || "") ||
+    !Array.isArray(evidence.resources?.mediaHashes) ||
+    !evidence.resources.mediaHashes.includes(checks.imageGeneration.outputSha256) ||
+    !evidence.resources.mediaHashes.includes(evidence.syntheticSourceSha256) ||
+    checks.initialPrivateDraft?.imageReviewCleared !== true ||
+    checks.initialPrivateDraft?.imageAttemptId !==
+      checks.imageGeneration.imageAttemptId ||
+    checks.initialPrivateDraft?.uploadedOutputSha256 !==
+      checks.imageGeneration.outputSha256 ||
+    checks.noPrematureDelivery?.imageReviewCleared !== true ||
     checks.noPrematureDelivery?.passed !== true ||
     checks.revisionGuard?.passed !== true ||
     checks.revisionGuard?.missingBlocked !== true ||

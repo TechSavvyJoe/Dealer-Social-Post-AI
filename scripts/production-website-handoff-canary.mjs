@@ -3,15 +3,19 @@
 /**
  * Authenticated production canary for the private Dealer Social -> Customer
  * Hub handoff. The live mode is intentionally write-gated and uses only a
- * reviewed, checked-in synthetic image. It never uses customer media, never
- * publishes a Hub draft, and never records the salesperson PIN or cookie.
+ * reviewed, checked-in synthetic source for one app-generated image. It never
+ * uses customer media, publishes a Hub draft, or records the PIN or cookie.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
-import { AuthenticatedClient, canonicalOrigin } from "./production-provider-canary.mjs";
+import {
+  AuthenticatedClient,
+  canonicalOrigin,
+  generateStandardCanaryImage,
+} from "./production-provider-canary.mjs";
 import { acquireReleaseLock } from "./vercel-staged-qa.mjs";
 import {
   HUB_CANARY_DRAFT_ID,
@@ -36,6 +40,8 @@ const SYNTHETIC_ASSET_SHA256 =
 const PRODUCTION_FLY_ORIGIN = "https://dealer-social-post-ai-production.fly.dev";
 const CUSTOMER_HUB_ORIGIN = "https://joegallant.me";
 const CONFIRMATION = "website-private-draft-synthetic-only";
+const IMAGE_CONFIRMATION = "one-paid-image-from-reviewed-synthetic-source";
+const policyPath = resolve(root, "config/gemini-model-policy.json");
 const CLEANUP_CONFIRMATION = "private-synthetic-draft-purged";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const POLL_TIMEOUT_MS = 180_000;
@@ -455,7 +461,78 @@ function assertSafeRevision(value, label) {
   return value;
 }
 
-function createPostForm(image, websiteDraft) {
+export function assertCurrentImageProvenance(publication, label) {
+  if (
+    publication?.image_review_required === true ||
+    (publication?.image_review_required !== undefined &&
+      publication.image_review_required !== false) ||
+    publication?.identity_review_required === true ||
+    (publication?.identity_review_required !== undefined &&
+      publication.identity_review_required !== false) ||
+    publication?.lastError === "image_review_required"
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "IMAGE_PROVENANCE_NOT_READY",
+      `${label} did not clear the current server image and identity review gates.`,
+    );
+  }
+}
+
+export function assertNoUncertainImageRequest(previousEvidence) {
+  if (
+    ["request_in_flight", "uncertain"].includes(
+      previousEvidence?.checks?.imageGeneration?.status,
+    )
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "IMAGE_REQUEST_UNCERTAIN_BLOCKED",
+      "A prior paid image request has no confirmed outcome. Resolve that attempt before starting another canary.",
+    );
+  }
+}
+
+export async function generateWebsiteCanaryImage(
+  client,
+  policy,
+  source,
+  imageAttemptId,
+  confirmation,
+) {
+  if (confirmation !== IMAGE_CONFIRMATION)
+    throw new WebsiteHandoffCanaryError(
+      "IMAGE_CONFIRMATION_REQUIRED",
+      `WEBSITE_HANDOFF_CANARY_IMAGE_CONFIRM must equal ${IMAGE_CONFIRMATION}.`,
+    );
+  if (
+    !Buffer.isBuffer(source) ||
+    createHash("sha256").update(source).digest("hex") !== SYNTHETIC_ASSET_SHA256
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "SYNTHETIC_ASSET_CHANGED",
+      "The reviewed synthetic source image has changed.",
+    );
+  }
+  return generateStandardCanaryImage(client, policy, source.toString("base64"), {
+    sourceMimeType: "image/jpeg",
+    imageAttemptId,
+    prompt:
+      "Create one polished synthetic dealership release-test image using only the attached synthetic source. Preserve the two AI-generated figures and vehicle. Use no real customer data. Add no names, lettering, logos, VINs, license plates, contact details, prices, financial details, or paperwork. This is only for a private synthetic draft and must never be published.",
+  });
+}
+
+export function createPostForm(image, websiteDraft, imageMimeType, imageAttemptId) {
+  if (
+    !Buffer.isBuffer(image) ||
+    image.length < 1024 ||
+    image.length > MAX_IMAGE_BYTES ||
+    !["image/png", "image/jpeg", "image/webp"].includes(imageMimeType) ||
+    !/^[a-f0-9]{40}$/.test(imageAttemptId || "")
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "GENERATED_IMAGE_SAVE_INVALID",
+      "Post save requires the actual app-generated image and attempt ID.",
+    );
+  }
   const form = new FormData();
   form.append("style", "friendly");
   form.append("tone", "family");
@@ -463,13 +540,24 @@ function createPostForm(image, websiteDraft) {
   form.append("scenario_id", "community_event");
   form.append("vin", "");
   form.append("caption_source", "custom");
+  form.append("image_attempt_id", imageAttemptId);
   form.append("caption", "Synthetic setup caption. Never publish.");
   form.append("disclosures", "");
   form.append("platform_ids", "[]");
   form.append("platform_captions", "{}");
   form.append("media_output_mode", "photo");
   form.append("website_draft", JSON.stringify(websiteDraft));
-  form.append("creative_image", new Blob([image], { type: "image/jpeg" }), "qa.jpg");
+  const extension =
+    imageMimeType === "image/png"
+      ? "png"
+      : imageMimeType === "image/webp"
+        ? "webp"
+        : "jpg";
+  form.append(
+    "creative_image",
+    new Blob([image], { type: imageMimeType }),
+    `qa.${extension}`,
+  );
   return form;
 }
 
@@ -582,6 +670,24 @@ async function runLockedCanary() {
     );
   }
 
+  const imageConfirmation = requireEnv("WEBSITE_HANDOFF_CANARY_IMAGE_CONFIRM");
+  if (imageConfirmation !== IMAGE_CONFIRMATION)
+    throw new WebsiteHandoffCanaryError(
+      "IMAGE_CONFIRMATION_REQUIRED",
+      `WEBSITE_HANDOFF_CANARY_IMAGE_CONFIRM must equal ${IMAGE_CONFIRMATION}.`,
+    );
+  try {
+    const previousStat = await lstat(evidencePath);
+    if (!previousStat.isFile() || previousStat.isSymbolicLink())
+      throw new WebsiteHandoffCanaryError(
+        "EVIDENCE_PATH_UNSAFE",
+        "The prior canary receipt must be a private regular file.",
+      );
+    assertNoUncertainImageRequest(JSON.parse(await readFile(evidencePath, "utf8")));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+
   // Finish every local/configuration preflight before invalidating the prior
   // receipt. Once a running receipt exists, all live work is inside the
   // evidence try/finally below.
@@ -606,14 +712,19 @@ async function runLockedCanary() {
 
   const marker = `QA-${expectedReleaseSha.slice(0, 8)}-${expectedReleaseSha.slice(8, 12)}`;
   const drafts = buildSyntheticDrafts(marker);
-  const image = injectSyntheticJpegMetadata(await readFile(syntheticImagePath));
+  const sourceImage = await readFile(syntheticImagePath);
+  const policy = JSON.parse(await readFile(policyPath, "utf8"));
   const client = new AuthenticatedClient(origin);
   const startedAt = new Date().toISOString();
   const evidence = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     canary: "production-website-private-draft",
     syntheticAsset: SYNTHETIC_ASSET,
-    syntheticMetadataCase: "exif-without-orientation-plus-photoshop-app13",
+    syntheticSourceSha256: SYNTHETIC_ASSET_SHA256,
+    syntheticMetadataCase:
+      "offline-contract-only-exif-without-orientation-plus-photoshop-app13",
+    generatedOutputHandling: "unchanged-provider-bytes",
+    modelPolicyVersion: String(policy.version),
     targetOrigin: origin,
     customerHubOrigin: hubOrigin,
     expectedReleaseSha,
@@ -683,7 +794,8 @@ async function runLockedCanary() {
     if (
       health.ok !== true ||
       health.releaseSha !== expectedReleaseSha ||
-      health.backup?.status !== "verified"
+      health.backup?.status !== "verified" ||
+      String(health.modelPolicyVersion) !== String(policy.version)
     ) {
       throw new WebsiteHandoffCanaryError(
         "HEALTH_RELEASE_MISMATCH",
@@ -702,6 +814,7 @@ async function runLockedCanary() {
       passed: true,
       releaseSha: health.releaseSha,
       backupStatus: health.backup.status,
+      modelPolicyVersion: String(health.modelPolicyVersion),
     };
 
     const destination = await preflightSyntheticCanaryDestination(
@@ -717,6 +830,41 @@ async function runLockedCanary() {
       dealerId: destination.dealerId,
     };
 
+    const imageAttemptId = randomBytes(20).toString("hex");
+    evidence.checks.imageGeneration = {
+      passed: false,
+      status: "request_in_flight",
+      attempts: 1,
+      task: "image_standard",
+      sameSession: true,
+      imageAttemptId,
+      modelPolicyVersion: String(policy.version),
+    };
+    await writeEvidence(evidencePath, evidence);
+    console.log("Generating one app image from the reviewed synthetic source...");
+    let generated;
+    try {
+      generated = await generateWebsiteCanaryImage(
+        client,
+        policy,
+        sourceImage,
+        imageAttemptId,
+        imageConfirmation,
+      );
+    } catch (error) {
+      evidence.checks.imageGeneration.status =
+        error?.code === "IMAGE_REQUEST_UNCERTAIN" ? "uncertain" : "failed";
+      throw error;
+    }
+    const image = generated.imageBytes;
+    evidence.checks.imageGeneration = {
+      ...evidence.checks.imageGeneration,
+      passed: true,
+      status: "completed",
+      ...generated.evidence,
+    };
+    await writeEvidence(evidencePath, evidence);
+
     console.log("Saving a website-only synthetic post without sending it...");
     // A lost/malformed create response can still leave a synthetic post. Mark
     // cleanup before the write so the durable marker remains actionable even
@@ -727,7 +875,12 @@ async function runLockedCanary() {
     const created = await jsonOrFail(
       await client.request("/api/app/posts", {
         method: "POST",
-        body: createPostForm(image, drafts.initial),
+        body: createPostForm(
+          image,
+          drafts.initial,
+          generated.imageMimeType,
+          generated.imageAttemptId,
+        ),
         signal: AbortSignal.timeout(60_000),
       }),
       "POST_CREATE_FAILED",
@@ -755,6 +908,7 @@ async function runLockedCanary() {
       );
     }
     assertNotRequested(created.website_publication, "Initial post save");
+    assertCurrentImageProvenance(created, "Initial post save");
     const createdRevision = assertSafeRevision(created.updated, "Initial post save");
     evidence.resources.postId = created.id;
     evidence.resources.sourceDealerId = login.dealer.id;
@@ -762,6 +916,9 @@ async function runLockedCanary() {
       passed: true,
       websiteOnly: true,
       status: "not_requested",
+      imageReviewCleared: true,
+      imageAttemptId: generated.imageAttemptId,
+      uploadedOutputSha256: createHash("sha256").update(image).digest("hex"),
     };
     evidence.cleanup.status = "dealer_post_created";
     await writeEvidence(evidencePath, evidence);
@@ -770,11 +927,10 @@ async function runLockedCanary() {
       nextMinuteBoundaryWaitMs(),
       "Waiting through a website worker boundary before explicit Send",
     );
-    assertNotRequested(
-      await publicationStatus(client, created.id),
-      "Pre-Send worker check",
-    );
-    evidence.checks.noPrematureDelivery = { passed: true };
+    const presendStatus = await publicationStatus(client, created.id);
+    assertNotRequested(presendStatus, "Pre-Send worker check");
+    assertCurrentImageProvenance(presendStatus, "Pre-Send worker check");
+    evidence.checks.noPrematureDelivery = { passed: true, imageReviewCleared: true };
 
     const savedSetup = await jsonOrFail(
       await client.request(`/api/app/posts/${encodeURIComponent(created.id)}/draft`, {
@@ -841,10 +997,9 @@ async function runLockedCanary() {
       REVISION_CONFLICT_CODE,
       "Stale website Send",
     );
-    assertNotRequested(
-      await publicationStatus(client, created.id),
-      "Stale revision check",
-    );
+    const staleStatus = await publicationStatus(client, created.id);
+    assertNotRequested(staleStatus, "Stale revision check");
+    assertCurrentImageProvenance(staleStatus, "Stale revision check");
 
     const queued = await jsonOrFail(
       await client.request(sendPath, {
@@ -958,13 +1113,13 @@ async function runLockedCanary() {
     evidence.resources.canaryIdentity = identity;
     evidence.resources.mediaHashes = [
       SYNTHETIC_ASSET_SHA256,
-      createHash("sha256").update(image).digest("hex"),
+      generated.evidence.outputSha256,
     ];
     evidence.resources.canaryMediaBase64Sha256 = ready.canaryMediaBase64Sha256;
     evidence.checks.publicBoundary = await verifyHubPrivacyBoundary(
       hubOrigin,
       evidence.resources,
-      [image, await readFile(syntheticImagePath)],
+      [image, sourceImage],
     );
     evidence.cleanup.status = "owner_action_required";
     evidence.outcome = "passed";
@@ -1059,12 +1214,20 @@ export async function verifyHubPrivacyBoundary(
       /* Homepage HTML and denied responses need not be JSON. */
     }
     const imageHashPresent =
+      (resources.mediaHashes || []).includes(
+        createHash("sha256").update(bytes).digest("hex"),
+      ) ||
       createHash("sha256").update(bytes.toString("base64")).digest("hex") ===
         mediaHash ||
       strings.some((value) =>
         (value.match(/[A-Za-z0-9+/]{128,}={0,2}/g) || []).some(
           (candidate) =>
-            createHash("sha256").update(candidate).digest("hex") === mediaHash,
+            createHash("sha256").update(candidate).digest("hex") === mediaHash ||
+            (resources.mediaHashes || []).includes(
+              createHash("sha256")
+                .update(Buffer.from(candidate, "base64"))
+                .digest("hex"),
+            ),
         ),
       );
     if (
@@ -1194,7 +1357,7 @@ async function confirmOwnerCleanup() {
   }
   const draftId = evidence?.resources?.hubDraftId;
   if (
-    evidence?.schemaVersion !== 2 ||
+    evidence?.schemaVersion !== 3 ||
     evidence.canary !== "production-website-private-draft" ||
     evidence.customerHubOrigin !== CUSTOMER_HUB_ORIGIN ||
     evidence.targetOrigin !== PRODUCTION_FLY_ORIGIN ||

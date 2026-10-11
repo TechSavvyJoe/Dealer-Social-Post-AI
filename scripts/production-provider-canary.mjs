@@ -9,7 +9,7 @@
  * text, image bytes, video bytes, operation names, or provider file URIs.
  */
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   chmod,
   mkdir,
@@ -678,43 +678,111 @@ async function runCaption(client, policy) {
   return { model, characterCount: text.length, wordCount: words };
 }
 
-async function runImage(client, policy, imageBase64) {
+export async function generateStandardCanaryImage(
+  client,
+  policy,
+  imageBase64,
+  options = {},
+) {
+  const sourceMimeType = options.sourceMimeType || "image/png";
+  const prompt =
+    options.prompt ||
+    "Create a polished, brand-neutral release-canary graphic derived only from this synthetic application icon. Preserve the icon as a clearly recognizable central element. Do not add people, names, vehicles, prices, license plates, VINs, contact details, or other customer data.";
+  const imageAttemptId = options.imageAttemptId || attemptId();
+  if (
+    !/^[a-f0-9]{40}$/.test(imageAttemptId) ||
+    !isRecognizedImage(imageBase64, sourceMimeType) ||
+    typeof prompt !== "string" ||
+    !prompt ||
+    prompt.length > 2048
+  ) {
+    throw new CanaryError(
+      "IMAGE_INPUT_INVALID",
+      "The synthetic image request contract is invalid.",
+    );
+  }
   const task = policy.tasks.image_standard;
   const model = task.models[0];
   const imageSize = task.imageSizes[model];
-  const response = await client.request(
-    `/api/proxy/v1beta/models/${model}:generateContent`,
-    {
-      method: "POST",
-      headers: generationHeaders(policy, "image_standard"),
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: "Create a polished, brand-neutral release-canary graphic derived only from this synthetic application icon. Preserve the icon as a clearly recognizable central element. Do not add people, names, vehicles, prices, license plates, VINs, contact details, or other customer data.",
-              },
-              {
-                inlineData: { mimeType: "image/png", data: imageBase64 },
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          responseModalities: ["TEXT", "IMAGE"],
-          imageConfig: {
-            imageSize,
-            aspectRatio: EXACT_STANDARD_IMAGE.aspectRatio,
-          },
-          maxOutputTokens: task.maxOutputTokens,
+  if (
+    model !== EXACT_STANDARD_IMAGE.model ||
+    imageSize !== EXACT_STANDARD_IMAGE.imageSize ||
+    task.maxOutputTokens !== 4096
+  ) {
+    throw new CanaryError(
+      "POLICY_INVALID",
+      "The image canary must use the exact canonical standard image contract.",
+    );
+  }
+  let response;
+  try {
+    response = await client.request(
+      `/api/proxy/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          ...generationHeaders(policy, "image_standard"),
+          "X-Generation-Attempt-ID": imageAttemptId,
         },
-      }),
-    },
-  );
-  const payload = await jsonOrFail(response, "IMAGE_HTTP_FAILED", "Image canary");
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: prompt,
+                },
+                {
+                  inlineData: { mimeType: sourceMimeType, data: imageBase64 },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseModalities: ["TEXT", "IMAGE"],
+            imageConfig: {
+              imageSize,
+              aspectRatio: EXACT_STANDARD_IMAGE.aspectRatio,
+            },
+            maxOutputTokens: task.maxOutputTokens,
+          },
+        }),
+      },
+    );
+  } catch {
+    throw new CanaryError(
+      "IMAGE_REQUEST_UNCERTAIN",
+      "The image request did not return a confirmed result. Do not retry it automatically.",
+    );
+  }
+  if (response.status >= 500 || response.status === 408)
+    throw new CanaryError(
+      "IMAGE_REQUEST_UNCERTAIN",
+      "The image request returned an uncertain server result. Do not retry it automatically.",
+      { status: response.status },
+    );
+  if (!response.ok)
+    throw new CanaryError(
+      "IMAGE_HTTP_FAILED",
+      `Image canary failed with HTTP ${response.status}.`,
+      { status: response.status },
+    );
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new CanaryError(
+      "IMAGE_REQUEST_UNCERTAIN",
+      "The image request returned unreadable output. Do not retry it automatically.",
+    );
+  }
   const image = finalInlineImage(payload.candidates?.[0]?.content?.parts);
   const byteCount = image?.data ? decodedBase64Bytes(image.data) : 0;
-  if (byteCount < 1024) {
+  if (
+    byteCount < 1024 ||
+    byteCount > 8 * 1024 * 1024 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(image?.data || "") ||
+    Buffer.from(image.data, "base64").toString("base64") !== image.data
+  ) {
     throw new CanaryError(
       "IMAGE_OUTPUT_INVALID",
       "Image provider output was not a meaningful supported image.",
@@ -727,13 +795,26 @@ async function runImage(client, policy, imageBase64) {
     EXACT_STANDARD_IMAGE,
   );
   return {
-    model,
-    mimeType: image.mimeType.toLowerCase(),
-    byteCount,
-    imageSize,
-    aspectRatio: EXACT_STANDARD_IMAGE.aspectRatio,
-    ...dimensions,
+    imageBytes: Buffer.from(image.data, "base64"),
+    imageMimeType: image.mimeType.toLowerCase(),
+    imageAttemptId,
+    evidence: {
+      model,
+      mimeType: image.mimeType.toLowerCase(),
+      byteCount,
+      imageSize,
+      aspectRatio: EXACT_STANDARD_IMAGE.aspectRatio,
+      ...dimensions,
+      outputSha256: createHash("sha256")
+        .update(Buffer.from(image.data, "base64"))
+        .digest("hex"),
+      outputBase64Sha256: createHash("sha256").update(image.data).digest("hex"),
+    },
   };
+}
+
+async function runImage(client, policy, imageBase64) {
+  return (await generateStandardCanaryImage(client, policy, imageBase64)).evidence;
 }
 
 export function validateVideoProbeMetadata(metadata, expected) {
