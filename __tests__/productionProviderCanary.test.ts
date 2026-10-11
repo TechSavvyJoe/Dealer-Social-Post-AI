@@ -10,6 +10,7 @@ import {
   inlineVideoBytes,
   probeImageEvidence,
   probeVideoEvidence,
+  runVideo,
   validateVideoProbeMetadata,
 } from "../scripts/production-provider-canary.mjs";
 import { acquireReleaseLock } from "../scripts/vercel-staged-qa.mjs";
@@ -212,61 +213,124 @@ describe("production provider canary", () => {
     expect(source).toContain("evidence.checks.qualityVideo");
   });
 
-  it("requires a playable H.264 video stream and a readable AAC audio stream", () => {
-    const expected = { width: 1920, height: 1080, durationSeconds: 8 };
-    const validMetadata = {
-      format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2", duration: "8.04" },
-      streams: [
-        {
-          codec_type: "video",
-          codec_name: "h264",
-          pix_fmt: "yuv420p",
-          width: 1920,
-          height: 1080,
-          duration: "8.04",
-          nb_read_packets: "240",
+  it.each([
+    ["video_standard", 720, 1280, 6, "720p"],
+    ["video_quality", 1920, 1080, 8, "1080p"],
+  ] as const)(
+    "requests native original instrumental audio for %s before generation",
+    async (taskName, width, height, durationSeconds, resolution) => {
+      const stopBeforeGeneration = new Error("offline request captured");
+      const requests: Array<{ path: string; body: string }> = [];
+      const client = {
+        request: async (path: string, init: RequestInit) => {
+          requests.push({ path, body: String(init.body) });
+          throw stopBeforeGeneration;
         },
-        {
-          codec_type: "audio",
-          codec_name: "aac",
-          nb_read_packets: "376",
-        },
-      ],
-    };
+      };
+      await expect(
+        runVideo(
+          client,
+          {
+            version: 5,
+            tasks: {
+              [taskName]: { models: ["gemini-omni-1.1-flash"], resolution },
+            },
+          },
+          "synthetic-icon-only",
+          taskName,
+          {
+            width,
+            height,
+            durationSeconds,
+            aspectRatio: width < height ? "9:16" : "16:9",
+          },
+        ),
+      ).rejects.toBe(stopBeforeGeneration);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].path).toBe(
+        "/api/proxy/v1beta/models/gemini-omni-1.1-flash:predictLongRunning",
+      );
+      const body = JSON.parse(requests[0].body);
+      expect(body.instances[0].prompt).toContain("NATIVE AUDIO REQUIRED");
+      expect(body.instances[0].prompt).toContain(
+        "bake an original instrumental music score and subtle ambient sound into the video file",
+      );
+      expect(body.instances[0].prompt).toContain("Silent output is a failure");
+      expect(body.instances[0].prompt).toContain(
+        "No voices, dialogue, vocals, or copyrighted tunes",
+      );
+      expect(body.parameters).toEqual({
+        aspectRatio: width < height ? "9:16" : "16:9",
+        personGeneration: "allow_adult",
+        durationSeconds,
+        resolution,
+      });
+    },
+  );
 
-    expect(validateVideoProbeMetadata(validMetadata, expected)).toMatchObject({
-      width: 1920,
-      height: 1080,
-      videoCodec: "h264",
-      audioCodec: "aac",
-      videoPacketCount: 240,
-      audioPacketCount: 376,
-    });
-    expect(() =>
-      validateVideoProbeMetadata(
-        {
-          ...validMetadata,
-          streams: validMetadata.streams.filter(
-            (stream) => stream.codec_type !== "audio",
-          ),
+  it.each([
+    { width: 720, height: 1280, durationSeconds: 6 },
+    { width: 1920, height: 1080, durationSeconds: 8 },
+  ])(
+    "requires readable AAC audio for $width×$height/$durationSeconds seconds",
+    (expected) => {
+      const validMetadata = {
+        format: {
+          format_name: "mov,mp4,m4a,3gp,3g2,mj2",
+          duration: String(expected.durationSeconds),
         },
-        expected,
-      ),
-    ).toThrow(/exact playable MP4 delivery contract/);
-    expect(() =>
-      validateVideoProbeMetadata(
-        {
-          ...validMetadata,
-          streams: validMetadata.streams.map((stream) =>
-            stream.codec_type === "audio"
-              ? { ...stream, nb_read_packets: "0" }
-              : stream,
-          ),
-        },
-        expected,
-      ),
-    ).toThrow(/exact playable MP4 delivery contract/);
-  });
+        streams: [
+          {
+            codec_type: "video",
+            codec_name: "h264",
+            pix_fmt: "yuv420p",
+            width: expected.width,
+            height: expected.height,
+            duration: String(expected.durationSeconds),
+            nb_read_packets: String(expected.durationSeconds * 24),
+          },
+          {
+            codec_type: "audio",
+            codec_name: "aac",
+            nb_read_packets: "376",
+          },
+        ],
+      };
+
+      expect(validateVideoProbeMetadata(validMetadata, expected)).toMatchObject({
+        width: expected.width,
+        height: expected.height,
+        videoCodec: "h264",
+        audioCodec: "aac",
+        videoPacketCount: expected.durationSeconds * 24,
+        audioPacketCount: 376,
+      });
+      expect(() =>
+        validateVideoProbeMetadata(
+          {
+            ...validMetadata,
+            streams: validMetadata.streams.filter(
+              (stream) => stream.codec_type !== "audio",
+            ),
+          },
+          expected,
+        ),
+      ).toThrow(/exact playable MP4 delivery contract/);
+      expect(() =>
+        validateVideoProbeMetadata(
+          {
+            ...validMetadata,
+            streams: validMetadata.streams.map((stream) =>
+              stream.codec_type === "audio"
+                ? { ...stream, nb_read_packets: "0" }
+                : stream,
+            ),
+          },
+          expected,
+        ),
+      ).toThrow(/exact playable MP4 delivery contract/);
+    },
+  );
 
   it("accepts the projected inline Omni MP4 response and rejects malformed media", () => {
     const mp4 = Buffer.alloc(4096);

@@ -979,7 +979,7 @@ async function readVideoEvidence(response, expected) {
   }
 }
 
-async function runVideo(client, policy, imageBase64, taskName, expected) {
+export async function runVideo(client, policy, imageBase64, taskName, expected) {
   const task = policy.tasks[taskName];
   const model = task.models[0];
   const headers = generationHeaders(policy, taskName);
@@ -992,7 +992,7 @@ async function runVideo(client, policy, imageBase64, taskName, expected) {
         instances: [
           {
             prompt:
-              "Animate only this synthetic application icon with subtle light movement and a slow premium push-in. Keep the same single graphic throughout. Do not add people, vehicles, names, prices, plates, VINs, text, or customer data.",
+              "Animate only this synthetic application icon with subtle light movement and a slow premium push-in. Keep the same single graphic throughout. Do not add people, vehicles, names, prices, plates, VINs, text, or customer data. NATIVE AUDIO REQUIRED: bake an original instrumental music score and subtle ambient sound into the video file. Silent output is a failure. No voices, dialogue, vocals, or copyrighted tunes.",
             image: {
               bytesBase64Encoded: imageBase64,
               mimeType: "image/png",
