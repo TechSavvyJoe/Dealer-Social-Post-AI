@@ -213,6 +213,49 @@ describe("website media base64 reader", () => {
     expect(native.calls).toContain("capture");
   });
 
+  it.each([false, true])(
+    "fingerprints native uploads despite repeated close (encoder failure: %s)",
+    (waitFails) => {
+      const bytes = Uint8Array.from([0, 255, 128, 65]);
+      const reader = makeReader(bytes);
+      const close = reader.close.bind(reader);
+      reader.close = () => {
+        close();
+        if (reader.closes > 1) throw new Error("file already closed");
+      };
+      installNativeOs({ reader, waitFails });
+      vi.stubGlobal("$security", { sha256: (value: string) => value });
+      const source = readFileSync(
+        resolve(process.cwd(), "pb_hooks/postSaveOperations.js"),
+        "utf8",
+      );
+      const module = {
+        exports: {} as {
+          fingerprint: (body: object, file: unknown, mime: string) => string;
+        },
+      };
+      new Function("module", "exports", "require", "__hooks", source)(
+        module,
+        module.exports,
+        () => ({ base64EncodeReader: encode }),
+        "/hooks",
+      );
+      const fingerprint = () =>
+        module.exports.fingerprint(
+          {},
+          {
+            reader: { open: () => reader },
+            size: bytes.length,
+            originalName: "creative.png",
+          },
+          "image/png",
+        );
+      if (waitFails) expect(fingerprint).toThrow("creative_media_read_failed");
+      else expect(fingerprint()).toContain(Buffer.from(bytes).toString("base64"));
+      expect(reader.closes).toBe(2);
+    },
+  );
+
   it("uses portable fallback when fixed native binaries are absent on Windows", () => {
     const bytes = Uint8Array.from([17, 34, 51]);
     const reader = makeReader(bytes);
