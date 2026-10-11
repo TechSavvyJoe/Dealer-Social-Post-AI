@@ -331,6 +331,21 @@ try {
     for (const field of fields)
       assert(names.includes(field), `Up migration missing ${table}.${field}`);
   }
+  // Select the rollback range from the named feature boundary, rather than
+  // assuming these are forever the last two migrations. Newer migrations must
+  // be reversed first on this stopped, disposable copy of populated data.
+  const guidedBoundary = "1791581401_guided_connections.js";
+  const appliedBeforeDown = sql("SELECT file FROM _migrations ORDER BY file DESC").map(
+    (row) => row.file,
+  );
+  const boundaryIndex = appliedBeforeDown.indexOf(guidedBoundary);
+  assert(boundaryIndex >= 0, "Guided migration boundary was not applied");
+  const rollbackFiles = appliedBeforeDown.slice(0, boundaryIndex + 1);
+  assert(rollbackFiles.includes("1791581402_connection_target_bindings.js"));
+  const unrelatedSchemaBeforeDown = {
+    dealers: sql('PRAGMA table_info("dealers")'),
+    posts: sql('PRAGMA table_info("posts")'),
+  };
   // PB's confirmation widget cancels even with exit 0 when stdin is a pipe.
   // Supply a real PTY and respond to its cursor-position queries and confirm
   // key. This wrapper runs exclusively against the copied synthetic DB.
@@ -380,7 +395,7 @@ sys.exit(code)`,
       resolve(binary),
       "migrate",
       "down",
-      "2",
+      String(rollbackFiles.length),
       `--dir=${downData}`,
       `--migrationsDir=${join(scratch, "migrations")}`,
       `--hooksDir=${join(scratch, "empty-hooks")}`,
@@ -421,8 +436,17 @@ sys.exit(code)`,
         !JSON.parse(collection.schema).some((row) => row.name === field),
         `Stored schema retained ${collection.name}.${field}`,
       );
+  const appliedAfterDown = sql("SELECT file FROM _migrations ORDER BY file DESC").map(
+    (row) => row.file,
+  );
+  assert.deepEqual(appliedAfterDown, appliedBeforeDown.slice(rollbackFiles.length));
+  assert.deepEqual(
+    sql('PRAGMA table_info("dealers")'),
+    unrelatedSchemaBeforeDown.dealers,
+  );
+  assert.deepEqual(sql('PRAGMA table_info("posts")'), unrelatedSchemaBeforeDown.posts);
   checks.push(
-    "both new down migrations on copied scratch DB",
+    "named guided down migrations on copied scratch DB",
     "physical columns and collection schemas removed",
   );
   // A wrong vault key must not recover credentials or resurrect the legacy
