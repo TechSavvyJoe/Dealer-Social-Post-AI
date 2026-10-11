@@ -417,7 +417,10 @@ jobs:
   release-frontend:
     name: Release verified frontend
     needs: deploy
-    if: needs.deploy.result == 'success'
+    if: >-
+      needs.deploy.result == 'success' &&
+      (vars.PRODUCTION_FRONTEND_RELEASE_MODE == '' ||
+      vars.PRODUCTION_FRONTEND_RELEASE_MODE == 'automatic')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
@@ -622,3 +625,31 @@ jobs:
             echo "- Immutable URL: $DEPLOYMENT_URL"
             echo "- Canonical origin: $PRODUCTION_ORIGIN"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  report-frontend-release-mode:
+    name: Report frontend staging or reject an unknown mode
+    needs: deploy
+    if: >-
+      needs.deploy.result == 'success' &&
+      vars.PRODUCTION_FRONTEND_RELEASE_MODE != '' &&
+      vars.PRODUCTION_FRONTEND_RELEASE_MODE != 'automatic'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report staging requirement or fail closed
+        env:
+          FRONTEND_RELEASE_MODE: ${{ vars.PRODUCTION_FRONTEND_RELEASE_MODE }}
+        run: |
+          case "$FRONTEND_RELEASE_MODE" in
+            staged)
+              {
+                echo "### Frontend promotion held"
+                echo
+                echo "The backend passed its release gates and deployed. The frontend was intentionally not promoted. Staged Vercel release and browser QA are required before the canonical frontend is updated."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "Frontend promotion held: complete the documented Vercel staging and browser-QA steps before promotion."
+              ;;
+            *)
+              echo "Frontend release blocked: unsupported PRODUCTION_FRONTEND_RELEASE_MODE='$FRONTEND_RELEASE_MODE'. Use empty, automatic, or staged." >&2
+              exit 1
+              ;;
+          esac

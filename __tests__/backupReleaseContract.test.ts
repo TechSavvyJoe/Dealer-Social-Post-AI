@@ -154,8 +154,20 @@ describe("Fly backup source identity", () => {
     // The frontend must never publish ahead of the backend it proxies to.
     expect(flyDeploy).toContain("release-frontend:");
     expect(flyDeploy).toContain("needs: deploy");
-    expect(flyDeploy).toContain("if: needs.deploy.result == 'success'");
+    expect(flyDeploy).toContain("vars.PRODUCTION_FRONTEND_RELEASE_MODE == ''");
+    expect(flyDeploy).toContain("vars.PRODUCTION_FRONTEND_RELEASE_MODE == 'automatic'");
     expect(flyDeploy).toContain("Confirm the backend already serves this release");
+
+    // Repository/org variables select frontend promotion after the backend
+    // gate. A staged value reports the hold; an unknown value fails closed.
+    expect(flyDeploy).toContain("report-frontend-release-mode:");
+    expect(flyDeploy).toContain("vars.PRODUCTION_FRONTEND_RELEASE_MODE != 'automatic'");
+    expect(flyDeploy).toContain("staged)");
+    expect(flyDeploy).toContain(
+      "FRONTEND_RELEASE_MODE: ${{ vars.PRODUCTION_FRONTEND_RELEASE_MODE }}",
+    );
+    expect(flyDeploy).toContain("The frontend was intentionally not promoted.");
+    expect(flyDeploy).toContain("unsupported PRODUCTION_FRONTEND_RELEASE_MODE");
 
     // The build must be bound to its release, or the service worker keeps
     // serving the previous app shell under a "dsp-development" cache key.

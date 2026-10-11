@@ -101,6 +101,37 @@ refuses a Cloudflare test sitekey, builds with `VITE_RELEASE_SHA`, and refuses a
 bundle that is not stamped with its own SHA. It deploys with `--skip-domain`,
 verifies the immutable deployment, and only then moves traffic.
 
+The repository variable `PRODUCTION_FRONTEND_RELEASE_MODE` controls only the
+frontend promotion job. Leave it unset/empty or set it to `automatic` for the
+existing automatic release. Set it to `staged` to skip `release-frontend` and
+report that Vercel staging and browser QA are required; the backup and Fly
+backend gates still run normally. Set the repository or organization variable
+before the relevant CI run. The workflow job condition cannot read an
+environment-scoped variable, so do not configure this selector only in the
+`production` environment. Any other nonempty value fails closed after backend
+deployment and does not promote the frontend.
+
+Set the hold before merging the media change:
+
+```bash
+gh variable set PRODUCTION_FRONTEND_RELEASE_MODE --repo TechSavvyJoe/Dealer-Social-Post-AI --body staged
+```
+
+Keep it set through manual staging, QA, and promotion. After the verified release
+is complete, restore automatic releases by deleting the selector:
+
+```bash
+gh variable delete PRODUCTION_FRONTEND_RELEASE_MODE --repo TechSavvyJoe/Dealer-Social-Post-AI
+```
+
+Staging the frontend does not stage or roll back the backend. The Fly backend
+can deploy first while Vercel continues serving its previous frontend. During a
+video-model migration, that older client may still send Veo-shaped requests;
+the deployed backend's compatibility adapter can translate those requests to
+Omni, so old-client compatibility does not mean the old provider model remains
+in use or that video generation is held. Treat backend adapter exposure and
+possible provider usage as part of the backend rollout.
+
 The backend-first workflow cannot safely introduce a newly required client
 request field in one release. Split a revision contract into three compatible
 stages: (1) release an additive backend that returns every new revision token
