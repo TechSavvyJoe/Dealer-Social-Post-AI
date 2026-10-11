@@ -12,6 +12,7 @@ import {
   injectSyntheticJpegMetadata,
   jpegApplicationMarkers,
   nextMinuteBoundaryWaitMs,
+  preflightSyntheticCanaryDestination,
   validateReadyPublication,
   validateRevisionContractSource,
   verifyHubPrivacyBoundary,
@@ -86,6 +87,66 @@ describe("production website handoff canary", () => {
       expect(() => extractHubDraftId(url)).toThrow();
     expect(() => canonicalHubOrigin("https://evil.example")).toThrow(
       expect.objectContaining({ code: "CONFIG_UNTRUSTED_HUB_ORIGIN" }),
+    );
+  });
+
+  it("rejects a real or wrong-dealer destination before any post create or send", async () => {
+    const dealerId = "dealer123456789";
+    const valid = {
+      enabled: true,
+      id: "joe_customer_hub",
+      mode: "private_draft",
+      siteUrl: "https://joegallant.me",
+      namespace: "synthetic_canary",
+      dealerId,
+    };
+    for (const destination of [
+      { ...valid, namespace: undefined },
+      { ...valid, namespace: "real_dealer" },
+      { ...valid, dealerId: "other1234567890" },
+      { ...valid, dealerId: undefined },
+    ]) {
+      const requests: { path: string; method: string }[] = [];
+      const client = {
+        request: async (path: string, options: RequestInit) => {
+          requests.push({ path, method: options.method || "GET" });
+          return Response.json({ items: [destination] });
+        },
+      };
+      // Exercise the same awaited gate used before the live write sequence.
+      const attempt = async () => {
+        await preflightSyntheticCanaryDestination(client, dealerId);
+        await client.request("/api/app/posts", { method: "POST" });
+        await client.request("/api/app/posts/post12345678900/website-publication", {
+          method: "POST",
+        });
+      };
+      await expect(attempt()).rejects.toMatchObject({
+        code: "DESTINATION_UNAVAILABLE",
+      });
+      expect(requests).toEqual([
+        { path: "/api/app/website-destinations", method: "GET" },
+      ]);
+    }
+    await expect(
+      preflightSyntheticCanaryDestination(
+        { request: async () => Response.json({ items: [valid] }) },
+        dealerId,
+      ),
+    ).resolves.toEqual(valid);
+    const source = readFileSync(scriptPath, "utf8");
+    const runStart = source.indexOf("async function runLockedCanary()");
+    const runSource = source.slice(runStart);
+    expect(
+      runSource.indexOf("await preflightSyntheticCanaryDestination("),
+    ).toBeGreaterThan(0);
+    expect(
+      runSource.indexOf("await preflightSyntheticCanaryDestination("),
+    ).toBeLessThan(runSource.indexOf('await client.request("/api/app/posts"'));
+    expect(
+      runSource.indexOf("await preflightSyntheticCanaryDestination("),
+    ).toBeLessThan(
+      runSource.indexOf('evidence.cleanup.status = "dealer_post_create_in_flight"'),
     );
   });
 

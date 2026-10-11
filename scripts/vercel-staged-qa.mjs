@@ -291,6 +291,8 @@ export const validateWebsiteHandoffCanaryEvidence = (evidence, releaseSha) => {
     checks.destination?.passed !== true ||
     checks.destination?.id !== "joe_customer_hub" ||
     checks.destination?.mode !== "private_draft" ||
+    checks.destination?.namespace !== "synthetic_canary" ||
+    checks.destination?.dealerId !== evidence.resources?.sourceDealerId ||
     checks.initialPrivateDraft?.passed !== true ||
     checks.initialPrivateDraft?.websiteOnly !== true ||
     checks.initialPrivateDraft?.status !== "not_requested" ||

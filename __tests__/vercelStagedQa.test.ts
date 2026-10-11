@@ -327,6 +327,8 @@ describe("Vercel staged browser QA receipt", () => {
           passed: true,
           id: "joe_customer_hub",
           mode: "private_draft",
+          namespace: "synthetic_canary",
+          dealerId: identity.sourceDealerId,
         },
         initialPrivateDraft: {
           passed: true,
@@ -360,6 +362,23 @@ describe("Vercel staged browser QA receipt", () => {
 
     for (const invalid of [
       { ...validCanary, expectedReleaseSha: "d".repeat(40) },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          destination: { ...validCanary.checks.destination, namespace: "real_dealer" },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          destination: {
+            ...validCanary.checks.destination,
+            dealerId: "other1234567890",
+          },
+        },
+      },
       { ...validCanary, schemaVersion: 1 },
       {
         ...validCanary,

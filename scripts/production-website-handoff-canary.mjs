@@ -520,6 +520,40 @@ function failureEvidence(error) {
   };
 }
 
+export async function preflightSyntheticCanaryDestination(
+  client,
+  dealerId,
+  hubOrigin = CUSTOMER_HUB_ORIGIN,
+) {
+  const destinations = await jsonOrFail(
+    await client.request("/api/app/website-destinations", {
+      method: "GET",
+      signal: AbortSignal.timeout(30_000),
+    }),
+    "DESTINATION_FAILED",
+    "Website destination check",
+  );
+  const destination =
+    Array.isArray(destinations.items) && destinations.items.length === 1
+      ? destinations.items[0]
+      : null;
+  if (
+    !destination ||
+    destination.enabled !== true ||
+    destination.id !== "joe_customer_hub" ||
+    destination.mode !== "private_draft" ||
+    destination.siteUrl !== hubOrigin ||
+    destination.namespace !== "synthetic_canary" ||
+    destination.dealerId !== dealerId
+  ) {
+    throw new WebsiteHandoffCanaryError(
+      "DESTINATION_UNAVAILABLE",
+      "The canary salesperson is not in the exact isolated Customer Hub canary dealership.",
+    );
+  }
+  return destination;
+}
+
 async function runLockedCanary() {
   const evidencePath = resolve(
     process.env.WEBSITE_HANDOFF_CANARY_EVIDENCE_PATH || DEFAULT_EVIDENCE_PATH,
@@ -659,34 +693,17 @@ async function runLockedCanary() {
       backupStatus: health.backup.status,
     };
 
-    const destinations = await jsonOrFail(
-      await client.request("/api/app/website-destinations", {
-        method: "GET",
-        signal: AbortSignal.timeout(30_000),
-      }),
-      "DESTINATION_FAILED",
-      "Website destination check",
+    const destination = await preflightSyntheticCanaryDestination(
+      client,
+      login.dealer.id,
+      hubOrigin,
     );
-    const destination =
-      Array.isArray(destinations.items) && destinations.items.length === 1
-        ? destinations.items[0]
-        : null;
-    if (
-      !destination ||
-      destination.enabled !== true ||
-      destination.id !== "joe_customer_hub" ||
-      destination.mode !== "private_draft" ||
-      destination.siteUrl !== hubOrigin
-    ) {
-      throw new WebsiteHandoffCanaryError(
-        "DESTINATION_UNAVAILABLE",
-        "The canary salesperson is not in the exact Customer Hub-enabled dealership.",
-      );
-    }
     evidence.checks.destination = {
       passed: true,
       id: destination.id,
       mode: "private_draft",
+      namespace: destination.namespace,
+      dealerId: destination.dealerId,
     };
 
     console.log("Saving a website-only synthetic post without sending it...");
