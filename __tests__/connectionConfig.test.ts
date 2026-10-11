@@ -197,6 +197,157 @@ function harness() {
 afterEach(() => vi.useRealTimers());
 
 describe("encrypted managed connection config", () => {
+  function canaryHarness() {
+    const h = harness();
+    Object.assign(h.env, {
+      CUSTOMER_HUB_URL: "https://approved.example",
+      CUSTOMER_HUB_DESTINATION_ID: "joe_customer_hub",
+      CUSTOMER_HUB_DEALER_ID: "dealer-a",
+      CUSTOMER_HUB_SECRET: "r".repeat(48),
+      CUSTOMER_HUB_CANARY_DEALER_ID: "dealer-canary",
+      CUSTOMER_HUB_CANARY_SECRET: "c".repeat(48),
+    });
+    return h;
+  }
+  it("isolates the exact server canary dealer and binds credential rotation to its identity", () => {
+    const h = canaryHarness();
+    const real = h.api.runtimeSnapshot("website", "dealer-a");
+    const canary = h.api.runtimeSnapshot("website", "dealer-canary");
+    expect(canary).toMatchObject({
+      enabled: true,
+      configured: true,
+      values: {
+        CUSTOMER_HUB_DEALER_ID: "dealer-canary",
+        CUSTOMER_HUB_SECRET: "c".repeat(48),
+        CUSTOMER_HUB_URL: "https://approved.example",
+        CUSTOMER_HUB_DESTINATION_ID: "joe_customer_hub",
+      },
+    });
+    expect(canary.identity).not.toBe(real.identity);
+    expect(h.api.runtimeSnapshot("website", "dealer-other").configured).toBe(false);
+    const publicConfig = h.api.getPublicConfig("website", "dealer-canary");
+    expect(JSON.stringify(publicConfig)).not.toContain("c".repeat(48));
+    expect(JSON.stringify(publicConfig)).not.toContain(canary.identity);
+    h.env.CUSTOMER_HUB_CANARY_SECRET = "d".repeat(48);
+    expect(h.api.runtimeSnapshot("website", "dealer-canary").identity).not.toBe(
+      canary.identity,
+    );
+    expect(h.api.runtimeSnapshot("website", "dealer-a").identity).toBe(real.identity);
+  });
+  it.each(["", "short", "r".repeat(48), " c".repeat(24)])(
+    "holds an invalid canary secret without changing the real connection",
+    (secret) => {
+      const h = canaryHarness();
+      const real = h.api.runtimeSnapshot("website", "dealer-a");
+      h.env.CUSTOMER_HUB_CANARY_SECRET = secret;
+      expect(h.api.runtimeSnapshot("website", "dealer-canary")).toMatchObject({
+        enabled: false,
+        configured: false,
+      });
+      expect(h.api.runtimeSnapshot("website", "dealer-a")).toEqual(real);
+    },
+  );
+  it("holds an incomplete or whitespace-padded canary identity without affecting real delivery", () => {
+    const h = canaryHarness();
+    const real = h.api.runtimeSnapshot("website", "dealer-a");
+    h.env.CUSTOMER_HUB_CANARY_DEALER_ID = " dealer-canary ";
+    expect(h.api.runtimeSnapshot("website", "dealer-canary")).toMatchObject({
+      enabled: false,
+      configured: false,
+    });
+    expect(h.api.runtimeSnapshot("website", "dealer-a")).toEqual(real);
+    delete h.env.CUSTOMER_HUB_CANARY_DEALER_ID;
+    expect(h.api.runtimeSnapshot("website", "dealer-canary").configured).toBe(false);
+  });
+  it("keeps managed canary off authoritative and invalidates a pinned managed identity after server key rotation", () => {
+    const h = canaryHarness();
+    h.api.saveConfig(
+      "website",
+      "dealer-canary",
+      { enabled: true, confirmApply: true, expectedRevision: 0 },
+      0,
+      admin,
+    );
+    const current = h.api.runtimeSnapshot("website", "dealer-canary");
+    expect(current).toMatchObject({
+      enabled: true,
+      configured: true,
+      source: "managed",
+      revision: 1,
+    });
+    h.env.CUSTOMER_HUB_CANARY_SECRET = "d".repeat(48);
+    const changed = h.api.runtimeSnapshot("website", "dealer-canary");
+    expect(changed).toMatchObject({ enabled: false, configured: false });
+    expect(changed.identity).not.toBe(current.identity);
+    h.env.CUSTOMER_HUB_CANARY_SECRET = "c".repeat(48);
+    h.api.saveConfig(
+      "website",
+      "dealer-canary",
+      { enabled: false, confirmApply: true, expectedRevision: 1 },
+      1,
+      admin,
+    );
+    expect(h.api.runtimeSnapshot("website", "dealer-canary")).toMatchObject({
+      enabled: false,
+      source: "managed",
+      revision: 2,
+    });
+    expect(h.api.runtimeSnapshot("website", "dealer-a").enabled).toBe(true);
+  });
+  it("never replaces the real mapping when the canary dealer overlaps", () => {
+    const h = canaryHarness();
+    const real = h.api.runtimeSnapshot("website", "dealer-a");
+    h.env.CUSTOMER_HUB_CANARY_DEALER_ID = "dealer-a";
+    expect(h.api.runtimeSnapshot("website", "dealer-a")).toEqual(real);
+    expect(h.api.runtimeSnapshot("website", "dealer-canary").configured).toBe(false);
+  });
+  it("uses the real managed target but rejects client-selected canary targets and credentials", () => {
+    const h = canaryHarness();
+    h.save("website", 0, {
+      settings: { origin: "https://approved.example", destinationId: "managed-hub" },
+      credentials: { sharedSecret: "m".repeat(48) },
+    });
+    expect(
+      h.api.runtimeSnapshot("website", "dealer-canary").values
+        .CUSTOMER_HUB_DESTINATION_ID,
+    ).toBe("managed-hub");
+    h.api.saveConfig(
+      "website",
+      "dealer-canary",
+      {
+        enabled: true,
+        confirmApply: true,
+        expectedRevision: 0,
+        settings: {
+          origin: "https://approved.example",
+          destinationId: "client-picked",
+        },
+        credentials: { sharedSecret: "x".repeat(48) },
+      },
+      0,
+      admin,
+    );
+    expect(h.api.runtimeSnapshot("website", "dealer-canary")).toMatchObject({
+      enabled: false,
+      configured: false,
+      source: "managed",
+    });
+    expect(h.api.runtimeSnapshot("website", "dealer-a")).toMatchObject({
+      enabled: true,
+      configured: true,
+    });
+  });
+  it("holds canary mapping on real credential overlap or managed storage failure", () => {
+    const h = canaryHarness();
+    h.save("website", 0, {
+      settings: { origin: "https://approved.example", destinationId: "managed-hub" },
+      credentials: { sharedSecret: h.env.CUSTOMER_HUB_CANARY_SECRET },
+    });
+    expect(h.api.runtimeSnapshot("website", "dealer-canary").enabled).toBe(false);
+    expect(h.api.runtimeSnapshot("website", "dealer-a").enabled).toBe(true);
+    h.setStorageFailure();
+    expect(h.api.runtimeSnapshot("website", "dealer-canary").enabled).toBe(false);
+  });
   it("writes authenticated ciphertext and returns only credential presence", () => {
     const h = harness();
     const result = h.save("gemini", 0, {

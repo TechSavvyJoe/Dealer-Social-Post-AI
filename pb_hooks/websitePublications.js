@@ -316,8 +316,19 @@ function destinationConfiguration(dealerId) {
     typeof __hooks !== "undefined"
       ? require(__hooks + "/connectionConfig.js").runtimeSnapshot("website", dealerId)
       : null;
-  const value = (name) =>
-    snapshot ? snapshot.values[name] || "" : readEnvironment(name);
+  const canaryDealerId = readEnvironment("CUSTOMER_HUB_CANARY_DEALER_ID");
+  const realDealerId = readEnvironment("CUSTOMER_HUB_DEALER_ID");
+  const canary =
+    /^[A-Za-z0-9_-]{1,64}$/.test(canaryDealerId.trim()) &&
+    dealerId === canaryDealerId.trim() &&
+    dealerId !== realDealerId;
+  const value = (name) => {
+    if (snapshot) return snapshot.values[name] || "";
+    if (canary && name === "CUSTOMER_HUB_DEALER_ID") return canaryDealerId;
+    if (canary && name === "CUSTOMER_HUB_SECRET")
+      return readEnvironment("CUSTOMER_HUB_CANARY_SECRET");
+    return readEnvironment(name);
+  };
   const siteUrl = normalizeSiteUrl(value("CUSTOMER_HUB_URL"));
   const secret = value("CUSTOMER_HUB_SECRET");
   const destinationId = value("CUSTOMER_HUB_DESTINATION_ID");
@@ -331,7 +342,14 @@ function destinationConfiguration(dealerId) {
     !!allowedDealerId &&
     allowedDealerId === allowedDealerId.trim() &&
     /^[A-Za-z0-9_-]{1,64}$/.test(allowedDealerId);
+  const canaryValid =
+    !canary ||
+    (canaryDealerId === dealerId &&
+      /^[A-Za-z0-9_-]{1,64}$/.test(realDealerId) &&
+      secret !== readEnvironment("CUSTOMER_HUB_SECRET") &&
+      /^[\x21-\x7e]{32,512}$/.test(secret));
   const enabled =
+    canaryValid &&
     (!snapshot || snapshot.enabled) &&
     !!siteUrl &&
     secretValid &&
@@ -350,8 +368,22 @@ function destinationConfiguration(dealerId) {
     enabled: enabled,
     mode: WEBSITE_DESTINATION_MODE,
     revision: snapshot ? snapshot.revision : 0,
-    identity: snapshot ? snapshot.identity : "",
+    identity: snapshot
+      ? snapshot.identity
+      : canary && typeof $security !== "undefined"
+        ? $security.sha256(
+            JSON.stringify([
+              "synthetic_canary",
+              canaryDealerId,
+              realDealerId,
+              siteUrl,
+              destinationId,
+              secret,
+            ]),
+          )
+        : "",
     managed: !!snapshot && snapshot.source === "managed",
+    canary: canary,
   };
 }
 
@@ -364,6 +396,9 @@ function publicDestinationConfiguration(dealerId) {
     enabled: config.enabled,
     mode: config.mode,
     readiness: config.enabled ? "configured" : "configuration_hold",
+    ...(config.canary
+      ? { namespace: "synthetic_canary", dealerId: config.allowedDealerId }
+      : {}),
   };
 }
 
@@ -421,7 +456,15 @@ function publicationSummary(record) {
 }
 
 function publicationSummaryForPost(post, record) {
-  if (record) return publicationSummary(record);
+  if (record) {
+    const summary = publicationSummary(record);
+    const identity = publicationCanaryIdentity(post, record);
+    if (identity) {
+      summary.canaryIdentity = identity.identity;
+      summary.canaryMediaBase64Sha256 = identity.mediaBase64Sha256;
+    }
+    return summary;
+  }
   const parsed = parseWebsiteDraft(recordString(post, "website_draft"));
   if (parsed.ok && parsed.value && parsed.value.enabled) {
     return {
@@ -7127,6 +7170,50 @@ function publicWebsiteDraftForPost(post, dealerName, oemAffiliation, reviewIdent
   };
 }
 
+function assertCanaryContent(post, draft) {
+  const dealerId = recordString(post, "dealer");
+  const canaryDealerId = readEnvironment("CUSTOMER_HUB_CANARY_DEALER_ID").trim();
+  if (
+    !canaryDealerId ||
+    dealerId !== canaryDealerId ||
+    dealerId === readEnvironment("CUSTOMER_HUB_DEALER_ID")
+  )
+    return;
+  const config = destinationConfiguration(dealerId);
+  if (!config.enabled) throw new Error("destination_unavailable");
+  if (draft.kind !== "site_update" || draft.category !== "community")
+    throw new Error("website_mapping_conflict");
+  const fields = [
+    "customer_name",
+    "vin",
+    "customer_email",
+    "customer_phone",
+    "email",
+    "phone",
+  ];
+  for (let i = 0; i < fields.length; i++) {
+    if (recordString(post, fields[i]) || draft[fields[i]])
+      throw new Error("private_identifier_in_website_copy");
+  }
+  if (
+    draft.customerDisplayName ||
+    draft.vehicleDescription ||
+    recordBool(post, "release_required") ||
+    recordBool(post, "has_release")
+  )
+    throw new Error("private_identifier_in_website_copy");
+  const copy = [
+    draft.title,
+    draft.body,
+    draft.altText,
+    recordString(post, "disclosures"),
+  ];
+  for (let i = 0; i < copy.length; i++) {
+    if (containsUnexpectedCustomerIdentity(copy[i], "", []))
+      throw new Error("private_identifier_in_website_copy");
+  }
+}
+
 function buildOutboundContent(post, draft, media, dao) {
   const mapping = dao
     ? resolveWebsiteMappingForPostWithDao(dao, post)
@@ -7134,6 +7221,7 @@ function buildOutboundContent(post, draft, media, dao) {
   if (!mapping || draft.kind !== mapping.kind || draft.category !== mapping.category) {
     throw new Error("website_mapping_conflict");
   }
+  assertCanaryContent(post, draft);
   const protectedName = recordString(post, "customer_name");
   const expectedCustomerLabel = publicCustomerLabel(protectedName);
   let customerDisplayName = "";
@@ -7501,6 +7589,51 @@ function buildLogicalPayload(publication, post, media) {
     sentAt: sentAt,
     content: buildOutboundContent(post, parsedDraft.value, media),
   };
+}
+
+function publicationCanaryIdentity(post, publication) {
+  try {
+    const dealerId = recordString(post, "dealer");
+    if (
+      dealerId !== readEnvironment("CUSTOMER_HUB_CANARY_DEALER_ID").trim() ||
+      dealerId === readEnvironment("CUSTOMER_HUB_DEALER_ID")
+    )
+      return null;
+    const config = destinationConfiguration(dealerId);
+    if (
+      !config.canary ||
+      !publicationDestinationMatches(publication, config, dealerId) ||
+      recordString(publication, "post") !== post.id ||
+      recordString(publication, "status") !== "draft_ready" ||
+      !/^wp_s_[a-f0-9]{32}_[a-f0-9]{40}$/.test(recordString(publication, "event_id")) ||
+      !Number.isInteger(recordInt(publication, "source_revision")) ||
+      recordInt(publication, "source_revision") < 1
+    )
+      return null;
+    const media = readPostCreative(post);
+    const parsed = parseWebsiteDraft(recordString(post, "website_draft"));
+    if (!parsed.ok || !parsed.value) return null;
+    verifyPublicationSourceSnapshot(publication, post, parsed.value, media, $security);
+    const payload = buildLogicalPayload(publication, post, media);
+    const payloadHash = $security.sha256(JSON.stringify(payload)).toLowerCase();
+    if (
+      !/^[a-f0-9]{64}$/.test(payloadHash) ||
+      payloadHash !== recordString(publication, "payload_hash")
+    )
+      return null;
+    return {
+      identity: {
+        eventId: payload.eventId,
+        payloadHash: payloadHash,
+        sourceDealerId: payload.sourceDealerId,
+        sourcePostId: payload.sourcePostId,
+        sourceRevision: payload.sourceRevision,
+      },
+      mediaBase64Sha256: $security.sha256(media.base64).toLowerCase(),
+    };
+  } catch (_e) {
+    return null;
+  }
 }
 
 function hmacHeaders(rawBody, timestamp, nonce, secret, securityApi) {

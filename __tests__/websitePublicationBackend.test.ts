@@ -17,8 +17,20 @@ type WebsiteModule = {
     allowedDealerId: string;
     siteUrl: string;
     endpointUrl: string;
+    identity: string;
+    revision: number;
+    canary: boolean;
   };
   publicDestinationConfiguration(dealerId: string): Record<string, unknown>;
+  publicationSummaryForPost(
+    post: unknown,
+    publication: unknown,
+  ): Record<string, unknown>;
+  publicationDestinationMatches(
+    publication: unknown,
+    config: unknown,
+    dealerId: string,
+  ): boolean;
   resolveWebsiteMapping(
     scenarioId: string,
     customScenariosJson?: string,
@@ -121,6 +133,8 @@ type WebsiteModule = {
     draft: Record<string, unknown>,
     media: Record<string, string>,
     securityApi: { sha256(value: string): string },
+    dao?: unknown,
+    destinationBinding?: { identity: string; revision: number },
   ): string;
   verifyPublicationSourceSnapshot(
     publication: unknown,
@@ -151,6 +165,9 @@ function postRecord(values: Record<string, unknown>) {
     },
     getBool(field: string) {
       return Boolean(values[field]);
+    },
+    getInt(field: string) {
+      return Number(values[field]) || 0;
     },
   };
 }
@@ -302,6 +319,244 @@ describe("Customer Hub website publication contract", () => {
     expect(publicConfig).not.toHaveProperty("secret");
     delete values.CUSTOMER_HUB_DEALER_ID;
     expect(website.destinationConfiguration("dealer_joe").enabled).toBe(false);
+  });
+
+  function installCanaryEnvironment() {
+    const values: Record<string, string> = {
+      CUSTOMER_HUB_URL: "https://joegallant.example",
+      CUSTOMER_HUB_DESTINATION_ID: "joe_customer_hub",
+      CUSTOMER_HUB_DEALER_ID: "dealer_joe",
+      CUSTOMER_HUB_SECRET: "r".repeat(48),
+      CUSTOMER_HUB_CANARY_DEALER_ID: "dealer_canary",
+      CUSTOMER_HUB_CANARY_SECRET: "c".repeat(48),
+    };
+    const crypto = {
+      sha256: (value: string) => createHash("sha256").update(value).digest("hex"),
+    };
+    vi.stubGlobal("$os", {
+      getenv: (name: string) => values[name] ?? "",
+      tempDir: () => "/tmp",
+      writeFile: () => undefined,
+      truncate: () => undefined,
+      readFile: () => new Uint8Array(3),
+      remove: () => undefined,
+    });
+    vi.stubGlobal("$security", {
+      ...crypto,
+      randomStringWithAlphabet: () => "syntheticbuffer",
+    });
+    return { values, crypto };
+  }
+  const canaryDraft = {
+    schemaVersion: 1,
+    enabled: true,
+    kind: "site_update",
+    category: "community",
+    title: "Community update",
+    body: "A synthetic community update is ready for private review.",
+    altText: "Synthetic community artwork",
+  };
+  const canaryPostValues = {
+    dealer: "dealer_canary",
+    scenario_id: "community_event",
+    customer_name: "",
+    vin: "",
+    disclosures: "",
+    website_draft: JSON.stringify(canaryDraft),
+    creative_image: "synthetic.jpg",
+  };
+  const canaryMedia = {
+    mimeType: "image/jpeg",
+    filename: "website-post-post_123.jpg",
+    base64: "AQID",
+  };
+  it("selects only the reserved canary mapping, keeps safe status and changes its publication binding on rotation", () => {
+    const { values } = installCanaryEnvironment();
+    const config = website.destinationConfiguration("dealer_canary");
+    expect(config).toMatchObject({
+      enabled: true,
+      canary: true,
+      allowedDealerId: "dealer_canary",
+      secret: "c".repeat(48),
+    });
+    expect(website.destinationConfiguration("dealer_joe")).toMatchObject({
+      enabled: true,
+      canary: false,
+      secret: "r".repeat(48),
+    });
+    expect(website.destinationConfiguration("dealer_other").enabled).toBe(false);
+    const safe = website.publicDestinationConfiguration("dealer_canary");
+    expect(safe).toMatchObject({
+      namespace: "synthetic_canary",
+      dealerId: "dealer_canary",
+    });
+    expect(JSON.stringify(safe)).not.toContain("c".repeat(48));
+    const publication = postRecord({
+      dealer: "dealer_canary",
+      destination_id: "joe_customer_hub",
+      destination_identity: config.identity,
+      config_revision: 0,
+    });
+    expect(
+      website.publicationDestinationMatches(publication, config, "dealer_canary"),
+    ).toBe(true);
+    values.CUSTOMER_HUB_CANARY_SECRET = "d".repeat(48);
+    expect(
+      website.publicationDestinationMatches(
+        publication,
+        website.destinationConfiguration("dealer_canary"),
+        "dealer_canary",
+      ),
+    ).toBe(false);
+    values.CUSTOMER_HUB_CANARY_SECRET = values.CUSTOMER_HUB_SECRET;
+    expect(website.destinationConfiguration("dealer_canary").enabled).toBe(false);
+    expect(website.destinationConfiguration("dealer_joe").enabled).toBe(true);
+  });
+  it("allows only customer-free community updates for the synthetic mapping", () => {
+    installCanaryEnvironment();
+    expect(
+      website.buildOutboundContent(
+        postRecord(canaryPostValues),
+        canaryDraft,
+        canaryMedia,
+      ),
+    ).toMatchObject({ kind: "site_update", category: "community" });
+    for (const field of [
+      "customer_name",
+      "vin",
+      "customer_phone",
+      "customer_email",
+      "phone",
+      "email",
+    ]) {
+      expect(() =>
+        website.buildOutboundContent(
+          postRecord({ ...canaryPostValues, [field]: "synthetic-private-value" }),
+          canaryDraft,
+          canaryMedia,
+        ),
+      ).toThrow("private_identifier_in_website_copy");
+    }
+    for (const field of ["customerDisplayName", "vehicleDescription"]) {
+      expect(() =>
+        website.buildOutboundContent(
+          postRecord(canaryPostValues),
+          { ...canaryDraft, [field]: "synthetic" },
+          canaryMedia,
+        ),
+      ).toThrow("private_identifier_in_website_copy");
+    }
+    expect(() =>
+      website.buildOutboundContent(
+        postRecord({ ...canaryPostValues, scenario_id: "new_arrival" }),
+        { ...canaryDraft, category: "inventory" },
+        canaryMedia,
+      ),
+    ).toThrow("website_mapping_conflict");
+    expect(() =>
+      website.buildOutboundContent(
+        postRecord(canaryPostValues),
+        { ...canaryDraft, body: "Congratulations to Jane Smith on the new vehicle." },
+        canaryMedia,
+      ),
+    ).toThrow("private_identifier_in_website_copy");
+  });
+  it("exposes only a this-payload canary identity after a ready signed handoff", () => {
+    const { values, crypto } = installCanaryEnvironment();
+    let consumed = false;
+    vi.stubGlobal("$app", {
+      newFilesystem: () => ({
+        exists: () => true,
+        getFile: () => {
+          consumed = false;
+          return {
+            size: () => 3,
+            contentType: () => "image/jpeg",
+            read: (buffer: number[]) => {
+              if (consumed) return 0;
+              consumed = true;
+              [1, 2, 3].forEach((byte, i) => (buffer[i] = byte));
+              return 3;
+            },
+            close: () => undefined,
+          };
+        },
+        close: () => undefined,
+      }),
+    });
+    const post = {
+      ...postRecord(canaryPostValues),
+      baseFilesPath: () => "posts/post_123",
+    };
+    const config = website.destinationConfiguration("dealer_canary");
+    const snapshotHash = website.publicationSourceSnapshotHash(
+      post,
+      canaryDraft,
+      canaryMedia,
+      crypto,
+      undefined,
+      config,
+    );
+    const eventId = website.publicationEventIdForPostRevision(
+      post.id,
+      "2026-10-10 12:00:00.000Z",
+      snapshotHash,
+      crypto,
+    );
+    const payload = {
+      schemaVersion: 1,
+      eventId,
+      destinationId: "joe_customer_hub",
+      sourcePostId: post.id,
+      sourceDealerId: "dealer_canary",
+      sourceRevision: 1,
+      sentAt: "2026-10-10T12:00:01.000Z",
+      content: website.buildOutboundContent(post, canaryDraft, canaryMedia),
+    };
+    const stored = {
+      post: post.id,
+      dealer: "dealer_canary",
+      destination_id: "joe_customer_hub",
+      destination_identity: config.identity,
+      config_revision: 0,
+      event_id: eventId,
+      source_revision: 1,
+      payload_sent_at: payload.sentAt,
+      payload_hash: crypto.sha256(JSON.stringify(payload)),
+      status: "draft_ready",
+    };
+    const result = website.publicationSummaryForPost(post, postRecord(stored));
+    expect(result.canaryIdentity).toEqual({
+      eventId,
+      payloadHash: stored.payload_hash,
+      sourcePostId: post.id,
+      sourceDealerId: "dealer_canary",
+      sourceRevision: 1,
+    });
+    expect(result.canaryMediaBase64Sha256).toBe(crypto.sha256(canaryMedia.base64));
+    expect(JSON.stringify(result)).not.toContain(values.CUSTOMER_HUB_CANARY_SECRET);
+    expect(
+      website.publicationSummaryForPost(
+        post,
+        postRecord({ ...stored, payload_hash: "e".repeat(64) }),
+      ),
+    ).not.toHaveProperty("canaryIdentity");
+    expect(
+      website.publicationSummaryForPost(
+        post,
+        postRecord({ ...stored, status: "queued" }),
+      ),
+    ).not.toHaveProperty("canaryIdentity");
+    expect(
+      website.publicationSummaryForPost(
+        { ...post, ...postRecord({ ...canaryPostValues, dealer: "dealer_joe" }) },
+        postRecord(stored),
+      ),
+    ).not.toHaveProperty("canaryIdentity");
+    values.CUSTOMER_HUB_CANARY_SECRET = "d".repeat(48);
+    expect(
+      website.publicationSummaryForPost(post, postRecord(stored)),
+    ).not.toHaveProperty("canaryIdentity");
   });
 
   it("refreshes a waiting row's sentAt only before its first delivery attempt", () => {
