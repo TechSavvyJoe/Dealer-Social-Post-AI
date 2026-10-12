@@ -20,13 +20,26 @@ type InstallManifest = {
 };
 
 const installPngs = [
-  { src: "/dealer-social-dsp-v5-180.png", size: 180 },
-  { src: "/dealer-social-dsp-v5-192.png", size: 192 },
-  { src: "/dealer-social-dsp-v5-512.png", size: 512 },
-  { src: "/dealer-social-dsp-v5-1024.png", size: 1024 },
-  { src: "/dealer-social-dsp-v5-maskable-192.png", size: 192 },
-  { src: "/dealer-social-dsp-v5-maskable-512.png", size: 512 },
-  { src: "/dealer-social-dsp-v5-maskable-1024.png", size: 1024 },
+  { src: "/dealer-social-v6-32.png", size: 32 },
+  { src: "/dealer-social-v6-180.png", size: 180 },
+  { src: "/dealer-social-v6-192.png", size: 192 },
+  { src: "/dealer-social-v6-512.png", size: 512 },
+  { src: "/dealer-social-v6-1024.png", size: 1024 },
+  { src: "/dealer-social-v6-maskable-192.png", size: 192 },
+  { src: "/dealer-social-v6-maskable-512.png", size: 512 },
+  { src: "/dealer-social-v6-maskable-1024.png", size: 1024 },
+] as const;
+
+const installVectors = [
+  "/dealer-social-v6-symbol.svg",
+  "/dealer-social-v6-symbol-reverse.svg",
+  "/dealer-social-v6-symbol-black.svg",
+  "/dealer-social-v6-symbol-white.svg",
+  "/dealer-social-v6-app.svg",
+  "/dealer-social-v6-maskable.svg",
+  "/dealer-social-v6-horizontal.svg",
+  "/dealer-social-v6-horizontal-reverse.svg",
+  "/dealer-social-v6-horizontal-white.svg",
 ] as const;
 
 async function expectPng(
@@ -103,34 +116,61 @@ async function expectMaskableSafeZone(page: Page, sources: string[]) {
           canvas.height,
         ).data;
         const center = canvas.width / 2;
-        let maximumLightPixelDistance = 0;
+        let backgroundPixelCount = 0;
+        let cobaltPixelCount = 0;
+        let whitePixelCount = 0;
+        let safeZoneCobaltPixelCount = 0;
+        let safeZoneWhitePixelCount = 0;
+        let maximumForegroundPixelDistance = 0;
         for (let index = 0; index < pixels.length; index += 4) {
           const red = pixels[index];
           const green = pixels[index + 1];
           const blue = pixels[index + 2];
-          const isIvory = red >= 210 && green >= 210 && blue >= 205;
-          const isCoral = red >= 220 && green >= 55 && green <= 175 && blue <= 135;
-          if (!isIvory && !isCoral) continue;
+          const isBackground = red === 17 && green === 21 && blue === 23;
+          const isCobalt =
+            red >= 25 && red <= 90 && green >= 60 && green <= 145 && blue >= 170;
+          const isWhite = red >= 220 && green >= 220 && blue >= 220;
+          if (isBackground) backgroundPixelCount += 1;
+          if (isCobalt) cobaltPixelCount += 1;
+          if (isWhite) whitePixelCount += 1;
+          if (!isCobalt && !isWhite) continue;
           const pixel = index / 4;
           const x = pixel % canvas.width;
           const y = Math.floor(pixel / canvas.width);
-          maximumLightPixelDistance = Math.max(
-            maximumLightPixelDistance,
-            Math.hypot(x - center, y - center),
+          const distance = Math.hypot(x - center, y - center);
+          maximumForegroundPixelDistance = Math.max(
+            maximumForegroundPixelDistance,
+            distance,
           );
+          if (distance / canvas.width <= 0.4) {
+            if (isCobalt) safeZoneCobaltPixelCount += 1;
+            if (isWhite) safeZoneWhitePixelCount += 1;
+          }
         }
         return {
           src,
-          maximumLightPixelDistanceRatio: maximumLightPixelDistance / canvas.width,
+          backgroundPixelCount,
+          cobaltPixelCount,
+          whitePixelCount,
+          safeZoneCobaltPixelCount,
+          safeZoneWhitePixelCount,
+          maximumForegroundPixelDistanceRatio:
+            maximumForegroundPixelDistance / canvas.width,
         };
       }),
     );
   }, sources);
 
   // Adaptive launchers guarantee the central circle with radius 40%.
-  // Keep the bright car and frame inside it on the full-bleed dark tile.
+  // Verify the graphite background and both cobalt/white DS foreground paths
+  // are present, with visible foreground pixels protected inside that circle.
   for (const result of results) {
-    expect(result.maximumLightPixelDistanceRatio).toBeLessThanOrEqual(0.4);
+    expect(result.backgroundPixelCount).toBeGreaterThan(0);
+    expect(result.cobaltPixelCount).toBeGreaterThan(0);
+    expect(result.whitePixelCount).toBeGreaterThan(0);
+    expect(result.safeZoneCobaltPixelCount).toBeGreaterThan(0);
+    expect(result.safeZoneWhitePixelCount).toBeGreaterThan(0);
+    expect(result.maximumForegroundPixelDistanceRatio).toBeLessThanOrEqual(0.4);
   }
 }
 
@@ -187,11 +227,12 @@ test.describe("Home Screen PWA contracts", () => {
 
     const manifestLink = page.locator('link[rel~="manifest"]');
     const appleTouchIcon = page.locator('link[rel~="apple-touch-icon"]');
+    const vectorFavicon = page.locator('link[rel~="icon"][type="image/svg+xml"]');
+    const pngFavicon = page.locator('link[rel~="icon"][type="image/png"]');
     await expect(manifestLink).toHaveAttribute("href", "/manifest.webmanifest");
-    await expect(appleTouchIcon).toHaveAttribute(
-      "href",
-      "/dealer-social-dsp-v5-180.png",
-    );
+    await expect(appleTouchIcon).toHaveAttribute("href", "/dealer-social-v6-180.png");
+    await expect(vectorFavicon).toHaveAttribute("href", "/dealer-social-v6-app.svg");
+    await expect(pngFavicon).toHaveAttribute("href", "/dealer-social-v6-32.png");
     await expect(appleTouchIcon).toHaveAttribute("sizes", "180x180");
     await expect(
       page.locator('meta[name="apple-mobile-web-app-capable"]'),
@@ -220,37 +261,37 @@ test.describe("Home Screen PWA contracts", () => {
 
     const requiredManifestIcons: ManifestIcon[] = [
       {
-        src: "/dealer-social-dsp-v5-192.png",
+        src: "/dealer-social-v6-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-dsp-v5-512.png",
+        src: "/dealer-social-v6-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-dsp-v5-1024.png",
+        src: "/dealer-social-v6-1024.png",
         sizes: "1024x1024",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-dsp-v5-maskable-192.png",
+        src: "/dealer-social-v6-maskable-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "maskable",
       },
       {
-        src: "/dealer-social-dsp-v5-maskable-512.png",
+        src: "/dealer-social-v6-maskable-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",
       },
       {
-        src: "/dealer-social-dsp-v5-maskable-1024.png",
+        src: "/dealer-social-v6-maskable-1024.png",
         sizes: "1024x1024",
         type: "image/png",
         purpose: "maskable",
@@ -271,21 +312,27 @@ test.describe("Home Screen PWA contracts", () => {
     await Promise.all(
       installPngs.map(({ src, size }) => expectPng(request, src, size)),
     );
+    for (const path of installVectors) {
+      const response = await request.get(path);
+      expect(response.ok()).toBe(true);
+      expect(response.headers()["content-type"]).toContain("image/svg+xml");
+      expect((await response.text()).slice(0, 200)).toContain("<svg");
+    }
     await expectFullBleedArtwork(page, [
-      "/dealer-social-dsp-v5-180.png",
-      "/dealer-social-dsp-v5-maskable-192.png",
-      "/dealer-social-dsp-v5-maskable-512.png",
-      "/dealer-social-dsp-v5-maskable-1024.png",
+      "/dealer-social-v6-180.png",
+      "/dealer-social-v6-maskable-192.png",
+      "/dealer-social-v6-maskable-512.png",
+      "/dealer-social-v6-maskable-1024.png",
     ]);
     await expectMaskableSafeZone(page, [
-      "/dealer-social-dsp-v5-maskable-192.png",
-      "/dealer-social-dsp-v5-maskable-512.png",
-      "/dealer-social-dsp-v5-maskable-1024.png",
+      "/dealer-social-v6-maskable-192.png",
+      "/dealer-social-v6-maskable-512.png",
+      "/dealer-social-v6-maskable-1024.png",
     ]);
     for (const size of [192, 512, 1024]) {
       const [regular, maskable] = await Promise.all([
-        request.get(`/dealer-social-dsp-v5-${size}.png`),
-        request.get(`/dealer-social-dsp-v5-maskable-${size}.png`),
+        request.get(`/dealer-social-v6-${size}.png`),
+        request.get(`/dealer-social-v6-maskable-${size}.png`),
       ]);
       expect((await regular.body()).equals(await maskable.body())).toBe(false);
     }

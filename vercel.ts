@@ -100,7 +100,7 @@ export const config: VercelConfig = {
       },
     ]),
     continuingHeaderRoute(
-      "^/(?:dsp-brand-mark-v4(?:-app|-maskable|-micro|-monochrome)?\\.svg|dealer-social-(?:dsp|favicon)-v[45](?:-maskable)?-[0-9]+\\.png)$",
+      "^/(?:dealer-social-og-v6\\.png|dsp-brand-mark-v4(?:-app|-maskable|-micro|-monochrome)?\\.svg|dealer-social-(?:dsp|favicon)-v[45](?:-maskable)?-[0-9]+\\.png|dealer-social-v6-(?:(?:maskable-)?[0-9]+|(?:symbol|horizontal|stacked)(?:-(?:reverse|black|white))?|app|maskable)\\.(?:png|svg))$",
       [
         {
           key: "Cache-Control",

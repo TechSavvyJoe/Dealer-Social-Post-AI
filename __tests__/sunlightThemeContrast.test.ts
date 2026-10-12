@@ -244,19 +244,6 @@ const withoutPrintPalette = (file: string, code: string): string => {
 const FIXED_COLOUR_SITES: Readonly<
   Record<string, { literals: readonly string[]; reason: string }>
 > = {
-  "components/Logo.tsx": {
-    literals: [
-      "rgba(255,255,255,0.14)",
-      "rgba(255,255,255,0.22)",
-      "rgba(255,255,255,0.28)",
-      "#ffffff",
-    ],
-    reason: "the onBrand lockup is white on the brand fill in either theme",
-  },
-  "components/LoginScreen.tsx": {
-    literals: ["rgba(255,255,255,.10)", "rgba(0,0,0,.20)"],
-    reason: "aria-hidden watermark scrims on the login brand column (bg-brand-fill)",
-  },
   "components/DealerSetupWizard.tsx": {
     literals: ["#1d4ed8", "#1d4ed8", "#1d4ed8"],
     reason:

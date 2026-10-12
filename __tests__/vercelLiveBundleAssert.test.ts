@@ -13,7 +13,7 @@ import {
   parseEntryScripts,
   resolveCanonicalAlias,
   sha256,
-  V4_IDENTITY_ASSETS,
+  IDENTITY_ASSETS,
   validateAliasResolution,
   walkLiveGraph,
 } from "../scripts/vercel-live-bundle-assert.mjs";
@@ -43,7 +43,7 @@ const buildStaticFixture = (
     join(directory, "index.html"),
     `<!doctype html><html><head><script type="module" crossorigin src="/assets/${entry}"></script></head><body></body></html>`,
   );
-  for (const asset of V4_IDENTITY_ASSETS) {
+  for (const asset of IDENTITY_ASSETS) {
     const bytes =
       asset.path === "/manifest.webmanifest"
         ? Buffer.from('{"name":"Dealer Social Post AI","icons":[]}')
@@ -72,13 +72,13 @@ const serveFixture = (fixture: ReturnType<typeof buildStaticFixture>) => {
     [`/assets/${fixture.entry}`, Buffer.from(fixture.entrySource)],
     [`/assets/${fixture.gemini}`, Buffer.from(`export const caption=()=>1;`)],
   ]);
-  for (const asset of V4_IDENTITY_ASSETS) {
+  for (const asset of IDENTITY_ASSETS) {
     files.set(asset.path, readFileSync(join(fixture.directory, asset.path.slice(1))));
   }
   return async (path: string) => {
     const body = files.get(path);
     if (body === undefined) throw new Error(`${path} returned HTTP 404.`);
-    const identity = V4_IDENTITY_ASSETS.find((asset) => asset.path === path);
+    const identity = IDENTITY_ASSETS.find((asset) => asset.path === path);
     return {
       bytes: body,
       text: body.toString("utf8"),
@@ -220,7 +220,7 @@ describe("end-to-end live bundle assertion", () => {
     expect(summary.requiredChunks).toEqual([fixture.gemini]);
     expect(summary.verifiedChunks).toContain(fixture.entry);
     expect(summary.verifiedIdentityAssets).toEqual(
-      V4_IDENTITY_ASSETS.map(({ path }) => path),
+      IDENTITY_ASSETS.map(({ path }) => path),
     );
   });
 
@@ -270,8 +270,8 @@ describe("end-to-end live bundle assertion", () => {
   });
 });
 
-describe("v4 identity byte integrity", () => {
-  it("matches every live v4 identity file to the selected build", async () => {
+describe("v6 identity byte integrity", () => {
+  it("matches every live identity file to the selected build", async () => {
     const fixture = buildStaticFixture();
     const verified = await assertLiveIdentityMatchesBuild({
       staticDirectory: fixture.directory,
@@ -279,7 +279,7 @@ describe("v4 identity byte integrity", () => {
     });
 
     expect(verified.map(({ path }) => path)).toEqual(
-      V4_IDENTITY_ASSETS.map(({ path }) => path),
+      IDENTITY_ASSETS.map(({ path }) => path),
     );
     expect(verified.every(({ digest }) => /^[0-9a-f]{64}$/.test(digest))).toBe(true);
   });
@@ -294,15 +294,15 @@ describe("v4 identity byte integrity", () => {
         releaseSha: RELEASE_SHA,
         fetchPath: async (path: string) => {
           const result = await serve(path);
-          if (path !== "/dealer-social-dsp-v5-512.png") return result;
+          if (path !== "/dealer-social-v6-512.png") return result;
           const bytes = Buffer.from("stale-icon-bytes");
           return { ...result, bytes, text: bytes.toString("utf8") };
         },
       }),
-    ).rejects.toThrow(/dealer-social-dsp-v5-512\.png served stale identity bytes/);
+    ).rejects.toThrow(/dealer-social-v6-512\.png served stale identity bytes/);
   });
 
-  it("requires v4 identity content types and immutable caching", async () => {
+  it("requires current identity content types and immutable caching", async () => {
     const fixture = buildStaticFixture();
     const serve = serveFixture(fixture);
     await expect(
@@ -310,7 +310,7 @@ describe("v4 identity byte integrity", () => {
         staticDirectory: fixture.directory,
         assets: [
           {
-            path: "/dsp-brand-mark-v4.svg",
+            path: "/dealer-social-v6-symbol.svg",
             contentType: "image/svg+xml",
             immutable: true,
           },
@@ -330,7 +330,7 @@ describe("v4 identity byte integrity", () => {
         staticDirectory: fixture.directory,
         assets: [
           {
-            path: "/dealer-social-dsp-v5-192.png",
+            path: "/dealer-social-v6-192.png",
             contentType: "image/png",
             immutable: true,
           },
@@ -354,7 +354,7 @@ const passingSummary = () => ({
   entryScripts: ["/assets/index-NEW00001.js"],
   verifiedChunks: ["geminiService-NEW00001.js", "index-NEW00001.js"],
   requiredChunks: ["geminiService-NEW00001.js"],
-  verifiedIdentityAssets: V4_IDENTITY_ASSETS.map(({ path }) => path),
+  verifiedIdentityAssets: IDENTITY_ASSETS.map(({ path }) => path),
 });
 
 describe("alias propagation tolerance", () => {

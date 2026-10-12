@@ -121,7 +121,7 @@ export const Header: React.FC<HeaderProps> = ({
               />
             ) : (
               <img
-                src="/dealer-social-dsp-v5-192.png"
+                src="/dealer-social-v6-192.png"
                 alt="Dealer Social"
                 className={cn(
                   "h-10 w-10 shrink-0 rounded-md border border-hairline",

@@ -30,71 +30,90 @@ const REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_PROPAGATION_ATTEMPTS = 10;
 const DEFAULT_PROPAGATION_DELAY_MS = 10_000;
 // These root-level files are copied into both production artifacts without a
-// Vite content hash. Their v4 names are therefore the cache key: proving the
-// live bytes match the build prevents a stale alias/CDN response from silently
-// mixing a new JavaScript graph with an older installed-app identity.
-export const V4_IDENTITY_ASSETS = [
+// Vite content hash. Their versioned names are therefore the cache key:
+// proving the live bytes match the build prevents a stale alias/CDN response
+// from silently mixing a new JavaScript graph with an older installed identity.
+export const IDENTITY_ASSETS = [
+  {
+    path: "/dealer-social-og-v6.png",
+    contentType: "image/png",
+    immutable: true,
+  },
   {
     path: "/manifest.webmanifest",
     contentType: "application/manifest+json",
     immutable: false,
   },
-  { path: "/dsp-brand-mark-v4.svg", contentType: "image/svg+xml", immutable: true },
   {
-    path: "/dsp-brand-mark-v4-micro.svg",
+    path: "/dealer-social-v6-symbol.svg",
     contentType: "image/svg+xml",
     immutable: true,
   },
   {
-    path: "/dsp-brand-mark-v4-app.svg",
+    path: "/dealer-social-v6-symbol-reverse.svg",
     contentType: "image/svg+xml",
     immutable: true,
   },
   {
-    path: "/dsp-brand-mark-v4-maskable.svg",
+    path: "/dealer-social-v6-symbol-black.svg",
     contentType: "image/svg+xml",
     immutable: true,
   },
   {
-    path: "/dsp-brand-mark-v4-monochrome.svg",
+    path: "/dealer-social-v6-symbol-white.svg",
     contentType: "image/svg+xml",
     immutable: true,
   },
-  { path: "/dealer-social-dsp-v5-180.png", contentType: "image/png", immutable: true },
-  { path: "/dealer-social-dsp-v5-192.png", contentType: "image/png", immutable: true },
-  { path: "/dealer-social-dsp-v5-512.png", contentType: "image/png", immutable: true },
   {
-    path: "/dealer-social-dsp-v5-1024.png",
+    path: "/dealer-social-v6-app.svg",
+    contentType: "image/svg+xml",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-v6-maskable.svg",
+    contentType: "image/svg+xml",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-v6-horizontal.svg",
+    contentType: "image/svg+xml",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-v6-horizontal-reverse.svg",
+    contentType: "image/svg+xml",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-v6-horizontal-white.svg",
+    contentType: "image/svg+xml",
+    immutable: true,
+  },
+  { path: "/dealer-social-v6-180.png", contentType: "image/png", immutable: true },
+  { path: "/dealer-social-v6-192.png", contentType: "image/png", immutable: true },
+  { path: "/dealer-social-v6-512.png", contentType: "image/png", immutable: true },
+  {
+    path: "/dealer-social-v6-1024.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-dsp-v5-maskable-192.png",
+    path: "/dealer-social-v6-maskable-192.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-dsp-v5-maskable-512.png",
+    path: "/dealer-social-v6-maskable-512.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-dsp-v5-maskable-1024.png",
+    path: "/dealer-social-v6-maskable-1024.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-favicon-v4-16.png",
-    contentType: "image/png",
-    immutable: true,
-  },
-  {
-    path: "/dealer-social-favicon-v4-32.png",
-    contentType: "image/png",
-    immutable: true,
-  },
-  {
-    path: "/dealer-social-favicon-v4-48.png",
+    path: "/dealer-social-v6-32.png",
     contentType: "image/png",
     immutable: true,
   },
@@ -198,7 +217,7 @@ const headerValue = (headers, name) => {
 };
 
 /**
- * Byte-compares every v4 install/brand asset against the selected build.
+ * Byte-compares every current install/brand asset against the selected build.
  *
  * Unlike hashed Vite chunks these files live at root-level semantic paths, so
  * checking only that they return 200 would allow a stale Home Screen icon or
@@ -207,7 +226,7 @@ const headerValue = (headers, name) => {
 export const assertLiveIdentityMatchesBuild = async ({
   staticDirectory,
   fetchPath,
-  assets = V4_IDENTITY_ASSETS,
+  assets = IDENTITY_ASSETS,
 }) => {
   const verified = [];
   for (const asset of assets) {
