@@ -75,6 +75,7 @@ export interface MainContentProps {
   ) => Promise<LoginResult>;
   onImageSelected: (selection: ImageSelection) => void;
   onReset: () => void;
+  onCreateContent: () => void;
   onBackFromWork?: () => void;
   /** Same-photo remix — keep capture, re-open CUSTOMIZE. */
   onRemix: () => void;
@@ -217,26 +218,14 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
       break;
     case AppStep.DEALER_ADMIN:
       content = (
-        <>
-          {walkaroundEnabled && (
-            <button
-              className="mx-4 mt-4 min-h-11 self-start rounded-sm border border-strong px-4 text-sm font-semibold text-ink"
-              onClick={props.onOpenWalkaround}
-            >
-              Walkaround video studio
-            </button>
-          )}
-          <button
-            className="mx-4 mt-4 min-h-11 self-start rounded-sm border border-strong px-4 text-sm font-semibold text-ink"
-            onClick={props.onOpenSpin}
-          >
-            360° vehicle studio & reviews
-          </button>
-          <LazyDealerAdmin
-            onSettingsDirtyChange={props.onManagementDirtyChange}
-            onOpenPost={openPost}
-          />
-        </>
+        <LazyDealerAdmin
+          key={`${authEpoch}:${currentDealer?.id || "no-dealer"}`}
+          onSettingsDirtyChange={props.onManagementDirtyChange}
+          onOpenPost={openPost}
+          onCreateContent={props.onCreateContent}
+          onOpenSpins={props.onOpenSpin}
+          onOpenWalkarounds={walkaroundEnabled ? props.onOpenWalkaround : undefined}
+        />
       );
       break;
     case AppStep.VEHICLE_SPIN:
@@ -309,6 +298,9 @@ export const MainContent: React.FC<MainContentProps> = (props) => {
           headerHasNavigation
           onOpenPost={openPost}
           onReusePhoto={props.onReusePhoto || props.onImageSelected}
+          onCreateContent={props.onCreateContent}
+          onOpenSpins={props.onOpenSpin}
+          onOpenWalkarounds={walkaroundEnabled ? props.onOpenWalkaround : undefined}
         />
       );
       break;

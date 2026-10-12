@@ -1,3 +1,4 @@
+import { loadPocketBaseModule } from "../test/loadPocketBaseModule";
 /**
  * Share events (PR2-0, unit U07; amendment B1).
  *
@@ -381,6 +382,8 @@ const shareHarness = (): ShareHarness => {
         handler = callback;
       },
       require: (path: string) => {
+        if (path.endsWith("/postWorkspace.js"))
+          return { assertActive: () => {}, respond: () => false };
         if (path.endsWith("/revisionCompatibility.js"))
           return { recordLegacy: observeLegacy };
         if (path.endsWith("/helpers.js")) return helpers;
@@ -1162,9 +1165,10 @@ describe("GET /api/app/posts share_summary", () => {
     const website = {
       ...realWebsite,
       publicationSummariesForDealer: () => ({}),
+      publicationSummariesForPosts: () => ({}),
     };
     let handler: ((c: unknown) => RouteResult) | undefined;
-    runInNewContext(source, {
+    const sandbox: AnyRecord = {
       __hooks: "/hooks",
       routerAdd: (_method: string, _path: string, callback: typeof handler) => {
         handler = callback;
@@ -1173,12 +1177,14 @@ describe("GET /api/app/posts share_summary", () => {
         if (path.endsWith("/helpers.js")) return helpers;
         if (path.endsWith("/requestPolicies.js")) return realPolicies;
         if (path.endsWith("/websitePublications.js")) return website;
+        if (path.endsWith("/postWorkspace.js") || path.endsWith("/postProjection.js"))
+          return loadPocketBaseModule(path.split("/").pop()!, sandbox);
         throw new Error("unexpected require " + path);
       },
       $apis: { requestInfo: () => ({ query: { limit: "50" } }) },
       $app: {
         dao: () => ({
-          findRecordsByFilter: () => posts,
+          findRecordsByFilter: (table: string) => (table === "posts" ? posts : []),
           db: () => ({
             newQuery: (sql: string) => ({
               bind: (params: AnyRecord) => ({
@@ -1205,7 +1211,8 @@ describe("GET /api/app/posts share_summary", () => {
         return shape;
       },
       console: { error: errors, log: vi.fn() },
-    });
+    };
+    runInNewContext(source, sandbox);
     expect(handler).toBeTypeOf("function");
     const result = handler!({
       response: () => ({ header: () => ({ set: vi.fn() }) }),
@@ -1224,10 +1231,10 @@ describe("GET /api/app/posts share_summary", () => {
         created: "2026-09-20 09:00:00.000Z",
       },
     ]);
-    expect((result.payload.items as AnyRecord[])[0].share_summary).toMatchObject({
-      count: 1,
-      sheet_count: 1,
-    });
+    const post = (result.payload.items as AnyRecord[]).find(
+      (item) => item.id === "post-1",
+    )!;
+    expect(post.share_summary).toMatchObject({ count: 1, sheet_count: 1 });
   });
 
   it("projects a derived summary per post, newest first, and null for an unshared post", () => {
@@ -1265,14 +1272,16 @@ describe("GET /api/app/posts share_summary", () => {
 
     expect(result.status).toBe(200);
     const items = result.payload.items as AnyRecord[];
-    expect(items.map((item) => item.id)).toEqual(["post-1", "post-2"]);
+    expect(items.map((item) => item.id)).toEqual(["post-2", "post-1"]);
+    const sharedPost = items.find((item) => item.id === "post-1")!;
+    const unsharedPost = items.find((item) => item.id === "post-2")!;
     // A post reopened from My work must carry its compare-and-set revision,
     // or its next draft save and share receipt cannot be sent at all.
     expect(items.map((item) => item.updated)).toEqual([
       "2026-09-20 10:00:00.000Z",
       "2026-09-20 10:00:00.000Z",
     ]);
-    expect(items[0].share_summary).toEqual({
+    expect(sharedPost.share_summary).toEqual({
       // Metadata timestamps never hide valid receipts for this creative.
       count: 3,
       last_shared_at: "2026-09-22 09:00:00.000Z",
@@ -1283,7 +1292,7 @@ describe("GET /api/app/posts share_summary", () => {
       last_sheet_channel: "facebook_feed",
       last_sheet_at: "2026-09-22 09:00:00.000Z",
     });
-    expect(items[1].share_summary).toBeNull();
+    expect(unsharedPost.share_summary).toBeNull();
 
     // One placeholder per id (dbx rejects a JS array in IN()), dealer-scoped.
     expect(queries).toHaveLength(1);
@@ -1324,8 +1333,11 @@ describe("GET /api/app/posts share_summary", () => {
       },
     ]);
     const items = result.payload.items as AnyRecord[];
+    expect(items.map((item) => item.id)).toEqual(["post-2", "post-1"]);
+    const copiedPost = items.find((item) => item.id === "post-1")!;
+    const downloadedPost = items.find((item) => item.id === "post-2")!;
     // A later copy must not hide the earlier completed share sheet...
-    expect(items[0].share_summary).toMatchObject({
+    expect(copiedPost.share_summary).toMatchObject({
       count: 2,
       last_via: "copy",
       last_channel: "facebook_feed",
@@ -1334,7 +1346,7 @@ describe("GET /api/app/posts share_summary", () => {
       last_sheet_at: "2026-09-21 09:00:00.000Z",
     });
     // ...and a download alone is never a share.
-    expect(items[1].share_summary).toMatchObject({
+    expect(downloadedPost.share_summary).toMatchObject({
       count: 1,
       last_via: "download",
       sheet_count: 0,

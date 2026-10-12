@@ -30,6 +30,7 @@ vi.mock("../services/dealershipInvitations", () => ({
 vi.mock("../services/salespeople", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../services/salespeople")>()),
   listSalespeople: vi.fn().mockResolvedValue([]),
+  listAllPeople: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("../services/posts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../services/posts")>()),
@@ -39,9 +40,9 @@ vi.mock("../components/Leaderboard", () => ({ Leaderboard: () => null }));
 vi.mock("../components/ApprovalQueue", () => ({ ApprovalQueue: () => null }));
 // The history list has its own suite; this stand-in reopens one post through
 // whatever the dashboard hands it.
-vi.mock("../components/PostHistory", () => ({
-  PostHistory: ({ onPostReady }: { onPostReady?: (post: unknown) => void }) => (
-    <button type="button" onClick={() => onPostReady?.({ postId: "post-9" })}>
+vi.mock("../components/workspace/ContentWorkspace", () => ({
+  ContentWorkspace: ({ onOpenPost }: { onOpenPost?: (post: unknown) => void }) => (
+    <button type="button" onClick={() => onOpenPost?.({ postId: "post-9" })}>
       Open saved post
     </button>
   ),
@@ -161,9 +162,9 @@ describe("manager dashboard shell", { timeout: 90_000 }, () => {
     renderDashboard();
     const tab = (name: string) => screen.getByRole("tab", { name });
     fireEvent.keyDown(tab("Overview"), { key: "ArrowRight" });
-    expect(tab("Settings")).toHaveAttribute("aria-selected", "true");
-    expect(tab("Settings")).toHaveAttribute("aria-controls", "manager-panel-settings");
-    fireEvent.keyDown(tab("Settings"), { key: "ArrowLeft" });
+    expect(tab("Content")).toHaveAttribute("aria-selected", "true");
+    expect(tab("Content")).toHaveAttribute("aria-controls", "manager-panel-content");
+    fireEvent.keyDown(tab("Content"), { key: "ArrowLeft" });
     expect(tab("Overview")).toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(tab("Overview"), { key: "End" });
     expect(tab("Team")).toHaveAttribute("aria-selected", "true");
@@ -171,8 +172,9 @@ describe("manager dashboard shell", { timeout: 90_000 }, () => {
     expect(tab("Overview")).toHaveAttribute("aria-selected", "true");
   });
 
-  it("opens a saved post from the Overview through the app's guarded path", () => {
+  it("opens a saved post from Content through the app's guarded path", () => {
     const { onOpenPost } = renderDashboard();
+    fireEvent.click(screen.getByRole("button", { name: "Manage content" }));
     fireEvent.click(screen.getByRole("button", { name: "Open saved post" }));
     expect(onOpenPost).toHaveBeenCalledTimes(1);
     expect(onOpenPost).toHaveBeenCalledWith({ postId: "post-9" });

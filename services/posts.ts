@@ -25,6 +25,7 @@ import {
   replaceFullCustomerName,
   type WebsiteDraft,
   type WebsitePublication,
+  type WebsitePublicationState,
 } from "./websitePublishing";
 import {
   normalizeCustomerIdentity,
@@ -97,6 +98,14 @@ export interface PostRecord {
   salesperson_id?: string;
   /** True only for server-derived ownership; legacy display attribution is untrusted. */
   attribution_authoritative?: boolean;
+  owner_person_id?: string;
+  /** Server-only filing metadata; absent from older backends. */
+  archived?: boolean;
+  workspace_revision?: number;
+  archived_at?: string;
+  archived_by?: string;
+  /** A generated flag is not proof of retained playable bytes. */
+  video_availability?: "not_generated" | "unavailable";
   generated_at: string;
   style?: string;
   tone?: string;
@@ -944,6 +953,7 @@ export const setApprovalStatus = async (
    * be something to request. Ignored on approval.
    */
   rejectionReason?: string,
+  expectedPostRevision?: string,
 ): Promise<void> => {
   await jsonRequest(`/api/app/posts/${encodeURIComponent(postId)}`, {
     method: "PATCH",
@@ -951,6 +961,9 @@ export const setApprovalStatus = async (
       approval_status: status,
       approved_by: approvedBy || "",
       rejection_reason: rejectionReason || "",
+      ...(expectedPostRevision !== undefined
+        ? { expected_post_revision: expectedPostRevision }
+        : {}),
     }),
   });
 };
@@ -970,36 +983,151 @@ export const listPendingPosts = async (
   return (res.items || []).map((item) => projectPostRecordForUi(item, grounding));
 };
 
+export type PostArchiveFilter = "active" | "archived" | "all";
+export type PostMediaFilter = "any" | "image" | "video_generated";
+export type PostListSort = "newest_created" | "newest_updated" | "oldest_created";
+export interface PostListOptions {
+  limit?: number;
+  approvalStatus?: ApprovalStatus | "all";
+  cursor?: string;
+  q?: string;
+  since?: string;
+  until?: string;
+  ownerPersonId?: string;
+  archived?: PostArchiveFilter;
+  media?: PostMediaFilter;
+  websiteStatus?: WebsitePublicationState;
+  sort?: PostListSort;
+  grounding?: DealerIdentityGrounding;
+}
 export interface PostListPage {
   items: PostRecord[];
   nextCursor?: string;
+  /** Every selected filter, including approval; excludes pagination cursor. */
+  total?: number;
+  /** Counts for the same matching population, not status facets. */
+  counts?: Record<ApprovalStatus, number>;
 }
-
 export const listPostsPage = async (
-  options: {
-    limit?: number;
-    approvalStatus?: ApprovalStatus | "all";
-    cursor?: string;
-    grounding?: DealerIdentityGrounding;
-  } = {},
+  options: PostListOptions = {},
 ): Promise<PostListPage> => {
-  const qs = new URLSearchParams({
-    limit: String(options.limit ?? 200),
-  });
-  if (options.approvalStatus && options.approvalStatus !== "all") {
+  const qs = new URLSearchParams({ limit: String(options.limit ?? 200) });
+  if (options.approvalStatus && options.approvalStatus !== "all")
     qs.set("approval_status", options.approvalStatus);
-  }
-  if (options.cursor) {
-    qs.set("cursor", options.cursor);
-  }
+  const filters = {
+    cursor: options.cursor,
+    q: options.q,
+    since: options.since,
+    until: options.until,
+    owner_person_id: options.ownerPersonId,
+    archived: options.archived,
+    media: options.media,
+    website_status: options.websiteStatus,
+    sort: options.sort,
+  };
+  for (const [key, value] of Object.entries(filters)) if (value) qs.set(key, value);
   const res = await jsonRequest<PostListPage>(`/api/app/posts?${qs.toString()}`);
   return {
     items: (res.items || []).map((item) =>
       projectPostRecordForUi(item, options.grounding),
     ),
     nextCursor: res.nextCursor || undefined,
+    ...(typeof res.total === "number" &&
+    Number.isSafeInteger(res.total) &&
+    res.total >= 0
+      ? { total: res.total }
+      : {}),
+    ...(res.counts &&
+    (["n_a", "pending", "approved", "rejected"] as const).every(
+      (status) =>
+        Number.isSafeInteger(res.counts?.[status]) && res.counts![status] >= 0,
+    )
+      ? { counts: res.counts }
+      : {}),
   };
 };
+export const getPostDetail = async (
+  postId: string,
+  grounding?: DealerIdentityGrounding,
+): Promise<PostRecord> =>
+  projectPostRecordForUi(
+    await jsonRequest<PostRecord>(`/api/app/posts/${encodeURIComponent(postId)}`),
+    grounding,
+  );
+export interface PostWorkspaceRevision {
+  expectedPostRevision: string;
+  expectedWorkspaceRevision: number;
+}
+export interface PostWorkspaceRequest extends PostWorkspaceRevision {
+  id: string;
+}
+export interface PostWorkspaceReceipt {
+  id: string;
+  post_revision: string;
+  workspace_revision: number;
+  archived: boolean;
+  archived_at: string;
+  archived_by: string;
+}
+export type PostWorkspaceItemResult =
+  | { id: string; ok: true; receipt: PostWorkspaceReceipt }
+  | { id: string; ok: false; status: number; code: string; message: string };
+export interface PostWorkspaceBatchResult {
+  results: PostWorkspaceItemResult[];
+}
+const workspaceBody = (request: PostWorkspaceRevision) => {
+  if (
+    !request.expectedPostRevision.trim() ||
+    !Number.isSafeInteger(request.expectedWorkspaceRevision) ||
+    request.expectedWorkspaceRevision < 0
+  ) {
+    throw new Error("Current creative and workspace revisions are required.");
+  }
+  return {
+    expected_post_revision: request.expectedPostRevision,
+    expected_workspace_revision: request.expectedWorkspaceRevision,
+  };
+};
+const changePostWorkspace = (
+  postId: string,
+  request: PostWorkspaceRevision,
+  action: "archive" | "restore",
+): Promise<PostWorkspaceReceipt> =>
+  jsonRequest(`/api/app/posts/${encodeURIComponent(postId)}/${action}`, {
+    method: "POST",
+    body: JSON.stringify(workspaceBody(request)),
+  });
+export const archivePost = (
+  postId: string,
+  request: PostWorkspaceRevision,
+): Promise<PostWorkspaceReceipt> => changePostWorkspace(postId, request, "archive");
+export const restorePost = (
+  postId: string,
+  request: PostWorkspaceRevision,
+): Promise<PostWorkspaceReceipt> => changePostWorkspace(postId, request, "restore");
+const changePostsWorkspace = (
+  items: PostWorkspaceRequest[],
+  action: "archive" | "restore",
+): Promise<PostWorkspaceBatchResult> => {
+  if (
+    !items.length ||
+    items.length > 50 ||
+    new Set(items.map((item) => item.id)).size !== items.length
+  )
+    throw new Error("Select between 1 and 50 unique posts.");
+  return jsonRequest(`/api/app/posts/workspace/${action}`, {
+    method: "POST",
+    body: JSON.stringify({
+      items: items.map((item) => ({ id: item.id, ...workspaceBody(item) })),
+    }),
+  });
+};
+export const bulkArchivePosts = (
+  items: PostWorkspaceRequest[],
+): Promise<PostWorkspaceBatchResult> => changePostsWorkspace(items, "archive");
+export const bulkRestorePosts = (
+  items: PostWorkspaceRequest[],
+): Promise<PostWorkspaceBatchResult> => changePostsWorkspace(items, "restore");
 
 export const listPosts = async (
   options: {

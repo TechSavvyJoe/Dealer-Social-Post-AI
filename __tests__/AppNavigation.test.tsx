@@ -208,6 +208,9 @@ const FakeMain = (props: MainContentProps) => {
     case AppStep.WORK:
       return (
         <section aria-label="My work screen">
+          <button type="button" onClick={props.onCreateContent}>
+            Create content
+          </button>
           <button type="button" onClick={() => props.onOpenPost?.(workPost)}>
             Open saved post
           </button>
@@ -219,7 +222,14 @@ const FakeMain = (props: MainContentProps) => {
     case AppStep.POST:
       return props.generatedPost ? <PostProbe onDone={props.onReset} /> : null;
     case AppStep.DEALER_ADMIN:
-      return <DashboardHistory />;
+      return (
+        <>
+          <button type="button" onClick={props.onCreateContent}>
+            Create content
+          </button>
+          <DashboardHistory />
+        </>
+      );
     default:
       return null;
   }
@@ -281,6 +291,34 @@ describe("App navigation", () => {
       isRestoringSession: false,
       restoreSession: async () => undefined,
     });
+  });
+
+  it.each([AppStep.DEALER_ADMIN, AppStep.WORK])(
+    "manager create from %s enters Home and clears stale content",
+    (step) => {
+      useAppStore.setState({
+        role: "dealer_admin",
+        step,
+        generatedPost: workPost,
+        selectedImage: workPost.image,
+      });
+      render(<App />);
+      click("Create content");
+      expect(state().step).toBe(AppStep.HOME);
+      expect(state().generatedPost).toBeNull();
+      expect(state().selectedImage).toBeNull();
+      expect(mocks.supersedeGeneration).toHaveBeenCalled();
+    },
+  );
+
+  it("starting content from My work asks before discarding an unfinished signed draft", () => {
+    startSignedDetails();
+    useAppStore.setState({ step: AppStep.WORK, role: "dealer_admin" });
+    render(<App />);
+    click("Create content");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(state().pendingRelease).toEqual(release);
+    expect(state().step).toBe(AppStep.WORK);
   });
 
   it("refuses every exit from the Post screen while a render or the website handoff runs (A4)", () => {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Download, Loader2, Play, Trash2 } from "lucide-react";
 import type { ImageSelection } from "../../types";
 import type {
@@ -64,23 +64,72 @@ type BusyAction = "save" | "reuse" | "delete";
 interface DeviceRecoveryGridProps {
   dealerId: string;
   onReusePhoto: (selection: ImageSelection) => void;
+  /** An explicit collection view can show emptiness after its local read settles. */
+  emptyContent?: React.ReactNode;
 }
 
 export const DeviceRecoveryGrid: React.FC<DeviceRecoveryGridProps> = ({
   dealerId,
   onReusePhoto,
+  emptyContent,
 }) => {
   const toast = useToast();
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [busy, setBusy] = useState<{ id: string; action: BusyAction } | null>(null);
-  const { records, previews, remove, save, toDataUrl } = useDeviceMedia({
+  const { records, previews, remove, save, toDataUrl, reload } = useDeviceMedia({
     dealerId,
     kinds: MEDIA_KINDS,
     limit: MEDIA_LIMIT,
   });
+  const explicitEmptyState = emptyContent !== undefined;
+  const [checking, setChecking] = useState(explicitEmptyState);
+  const [loadError, setLoadError] = useState(false);
+  const mounted = useRef(true);
+  const checkLocalCopies = useCallback(async () => {
+    setChecking(true);
+    setLoadError(false);
+    try {
+      await reload();
+    } catch {
+      if (mounted.current) setLoadError(true);
+    } finally {
+      if (mounted.current) setChecking(false);
+    }
+  }, [reload]);
+  useEffect(() => {
+    mounted.current = true;
+    if (explicitEmptyState) void checkLocalCopies();
+    return () => {
+      mounted.current = false;
+    };
+  }, [dealerId, explicitEmptyState, checkLocalCopies]);
 
-  if (!records.length) return null;
+  if (!records.length) {
+    if (!explicitEmptyState) return null;
+    if (checking)
+      return (
+        <p role="status" className="mt-6 text-sm text-ink-2">
+          Checking recovery copies on this device…
+        </p>
+      );
+    if (loadError)
+      return (
+        <div className="mt-6">
+          <p role="alert" className="text-sm text-error-ink">
+            Could not read recovery copies on this device.
+          </p>
+          <Button
+            className="mt-3"
+            variant="secondary"
+            onClick={() => void checkLocalCopies()}
+          >
+            Try again
+          </Button>
+        </div>
+      );
+    return <>{emptyContent}</>;
+  }
   const pending = records.find((record) => record.id === deleteId);
   const playing = previews.find(({ record }) => record.id === playingId);
   const isBusy = (id: string, action: BusyAction) =>

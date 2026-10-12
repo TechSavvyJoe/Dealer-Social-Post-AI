@@ -74,7 +74,9 @@ describe("a rejection has to say what to change", () => {
   it("persists and returns it", () => {
     expect(hook).toContain("rejection_reason = {:rejectionReason}");
     expect(hook).toContain('rejection_reason: record.getString("rejection_reason")');
-    expect(hook).toContain('rejection_reason: r.getString("rejection_reason")');
+    expect(read("pb_hooks/postProjection.js")).toContain(
+      'rejection_reason: r.getString("rejection_reason")',
+    );
   });
 
   it("caps it at the column width so a long note cannot be silently truncated", () => {
@@ -99,6 +101,12 @@ const BANNER_COPY = "Your manager asked for a change: ${input.rejectionReason}";
 
 const bannerLeadsWithReason = (locks: string): boolean => locks.includes(BANNER_COPY);
 
+const myWorkRowSource = () => {
+  // MyWork delegates both row rendering and reopening to the shared workspace.
+  expect(read("components/MyWork.tsx")).toContain('<ContentWorkspace mode="personal"');
+  return read("components/workspace/ContentWorkspace.tsx");
+};
+
 /**
  * My work's row hands the whole saved record (rejection_reason included) to
  * postStatusCopy on the "work" surface, which is the only surface that adds
@@ -114,6 +122,7 @@ const myWorkRowShowsReason = (myWork: string): boolean => {
     /postStatusCopy\(\s*(?:blocked\s*\?\s*\{\s*\.\.\.post\b[^}]*\}\s*:\s*)?post\s*,/.test(
       call,
     ) &&
+    /status\.status === "changes" &&\s*status\.detail/.test(code) &&
     /\{status\.detail\}/.test(code)
   );
 };
@@ -152,7 +161,7 @@ describe("the reason reaches the salesperson", () => {
         { surface: "work" },
       ),
     ).toMatchObject({ label: "Changes requested", detail: "Remove the price." });
-    expect(myWorkRowShowsReason(read("components/MyWork.tsx"))).toBe(true);
+    expect(myWorkRowShowsReason(myWorkRowSource())).toBe(true);
   });
 
   it.each([
@@ -163,8 +172,8 @@ describe("the reason reaches the salesperson", () => {
     },
     {
       regression: "asks for the Home surface, which has no reason line",
-      from: '{ surface: "work", now }',
-      to: '{ surface: "home", now }',
+      from: '{ surface: "work" }',
+      to: '{ surface: "home" }',
     },
     {
       regression: "passes a record without the reason",
@@ -174,8 +183,8 @@ describe("the reason reaches the salesperson", () => {
   ])(
     "the My work guard fails when the row $regression (planted mutant)",
     ({ from, to }) => {
-      const myWork = read("components/MyWork.tsx");
-      expect(myWork, `MyWork.tsx no longer contains ${from}`).toContain(from);
+      const myWork = myWorkRowSource();
+      expect(myWork, `ContentWorkspace.tsx no longer contains ${from}`).toContain(from);
       const mutated = myWork.split(from).join(to);
       expect(mutated).not.toBe(myWork);
       expect(myWorkRowShowsReason(mutated)).toBe(false);
@@ -201,7 +210,10 @@ describe("the reason reaches the salesperson", () => {
     );
     expect(mapping).toContain("approvalStatus: approval");
     expect(mapping).toContain("rejectionReason: post.rejection_reason || undefined");
-    expect(read("components/MyWork.tsx")).toContain("toGeneratedPostFromRecord");
+    expect(myWorkRowSource()).toContain("usePostHistoryList({ onPostReady: onOpenPost");
+    expect(read("hooks/usePostHistoryList.ts")).toContain(
+      "toGeneratedPostFromRecord(post",
+    );
   });
 
   it("gives the manager quick picks for the common cases", () => {

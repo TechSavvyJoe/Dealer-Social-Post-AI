@@ -875,6 +875,14 @@
         display: none;
       }
     }
+
+    /* Update banners reduce the usable pane on short portrait phones. Keep
+       every key inside that pane while retaining generous 56px touch targets. */
+    @container login-access (max-height: 480px) {
+      .login-key {
+        min-height: 3.5rem !important;
+      }
+    }
   }
 
   @media (max-width: 1023px) and (orientation: landscape) and (max-height: 500px) {
@@ -884,6 +892,14 @@
 
     .login-form {
       max-width: none;
+      padding-block: 0;
+    }
+
+    /* The access pane loses height to in-flow update/offline banners. Four
+       48px rows leave room for those banners and the code status at 390px,
+       while preserving every key above the 44px touch floor. */
+    .login-key {
+      min-height: 3rem !important;
     }
 
     .login-brand-row {

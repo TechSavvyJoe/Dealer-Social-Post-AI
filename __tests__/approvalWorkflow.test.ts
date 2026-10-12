@@ -99,7 +99,9 @@ describe("approval submission client", () => {
 
 describe("approval backend invariants", () => {
   it("binds status and creative reads to the dealer and submitting session", () => {
-    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const hook =
+      readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8") +
+      readFileSync(resolve(process.cwd(), "pb_hooks/postProjection.js"), "utf8");
 
     expect(hook).toContain('"/api/app/posts/:id/status"');
     expect(hook).toContain('"/api/app/posts/:id/creative-image"');
@@ -115,7 +117,7 @@ describe("approval backend invariants", () => {
     // rewrite the post or move its revision; see postRevisionReceipts.test.ts).
     expect(hook).toContain('"UPDATE posts SET has_video = 1 "');
     expect(hook).toContain(
-      '"WHERE id = {:post} AND dealer = {:dealer} AND COALESCE(has_video, 0) = 0"',
+      '"WHERE id = {:post} AND dealer = {:dealer} AND COALESCE(has_video, 0) = 0 "',
     );
     expect(hook).not.toContain('record.set("has_video", true)');
     expect(hook).toContain("has_video: false");
@@ -139,7 +141,9 @@ describe("approval backend invariants", () => {
   });
 
   it("prevents blind manager approval and exposes review copy only to managers", () => {
-    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const hook =
+      readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8") +
+      readFileSync(resolve(process.cwd(), "pb_hooks/postProjection.js"), "utf8");
     const queue = readFileSync(
       resolve(process.cwd(), "components/ApprovalQueue.tsx"),
       "utf8",

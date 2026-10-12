@@ -29,6 +29,11 @@ describe("release artifact binding", () => {
   it("stages and promotes only a clean, current, evidence-bound Vercel artifact", () => {
     const scriptPath = resolve(process.cwd(), "scripts/vercel-staged-release.sh");
     const script = read("scripts/vercel-staged-release.sh");
+    const stagedDeploymentPath = resolve(
+      process.cwd(),
+      "scripts/stagedVercelDeployment.mjs",
+    );
+    const stagedDeployment = read("scripts/stagedVercelDeployment.mjs");
     const qaScript = read("scripts/vercel-staged-qa.mjs");
     const websiteCanary = read("scripts/production-website-handoff-canary.mjs");
     const runbook = read("docs/production-backups-and-release.md");
@@ -36,6 +41,15 @@ describe("release artifact binding", () => {
     const vercelCliVersion = "58.4.4";
 
     execFileSync("bash", ["-n", scriptPath]);
+    execFileSync("node", ["--check", stagedDeploymentPath]);
+    const inspectionNodeClose = script.indexOf(
+      "process.stdout.write(deployment.id);\nNODE\n}",
+      script.indexOf("inspect_deployment_id() {"),
+    );
+    expect(inspectionNodeClose).toBeGreaterThan(-1);
+    expect(script.indexOf("wait_for_staged_deployment_id() {")).toBeGreaterThan(
+      inspectionNodeClose,
+    );
     expect(script).toContain(`readonly VERCEL_CLI_VERSION="${vercelCliVersion}"`);
     expect(qaScript).toContain(`const VERCEL_CLI_VERSION = "${vercelCliVersion}"`);
     expect(script).not.toMatch(/58[.]1[.]0/);
@@ -61,7 +75,13 @@ describe("release artifact binding", () => {
     expect(script).toContain("deploy \\");
     expect(script).toContain("--prebuilt --prod --skip-domain --yes");
     expect(script).toContain("--yes --json");
+    expect(script).toContain("--json --no-wait");
+    expect(script).toContain("wait_for_staged_deployment_id");
+    expect(script).toContain("attempt <= 60");
+    expect(script).toContain("sleep 5");
+    expect(stagedDeployment).toContain("validateStagedDeploymentInspection");
     expect(script).toContain("deployment_url_from_json");
+    expect(script).toContain("deployment_id_from_json");
     expect(script).not.toContain("tail -n 1");
     expect(script).toContain('promote "$deployment_url" --yes');
     expect(script.match(/assert_release_health/g)?.length).toBeGreaterThanOrEqual(6);

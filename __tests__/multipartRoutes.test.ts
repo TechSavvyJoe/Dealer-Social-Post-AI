@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { runInNewContext } from "node:vm";
+import { loadPocketBaseModule } from "../test/loadPocketBaseModule";
 
 const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
 const helpers = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
@@ -39,15 +41,119 @@ describe("PocketBase 0.22 multipart routes", () => {
     expect(hook).toContain('post.getString("dealer") !== dealer.id');
     expect(hook).toContain("Cross-dealer release link blocked");
     expect(hook).toContain('currentOwnerHash !== post.getString("owner_session_hash")');
-    expect(hook).toContain('error: "Photo release is already linked to another post"');
+    expect(hook).toContain('"PHOTO_RELEASE_ALREADY_LINKED"');
+    expect(hook).toContain('"Photo release is already linked to another post"');
     expect(hook).toContain("AND (post_id = '' OR post_id IS NULL)");
     expect(hook).toContain("result.rowsAffected() !== 1");
     expect(hook).toContain('post.set("has_release", true)');
-    expect(hook).toContain("$app.dao().saveRecord(post)");
+    expect(hook).toContain("tx.saveRecord(post)");
     expect(hook.indexOf("SET post_id = {:postId}")).toBeLessThan(
       hook.indexOf('post.set("has_release", true)'),
     );
   });
+
+  it.each([false, true])(
+    "returns a 409 without post changes when consent is already linked (concurrent=%s)",
+    (concurrent) => {
+      const record = (id: string, values: Record<string, unknown>) => ({
+        id,
+        getString: (key: string) => String(values[key] ?? ""),
+        getBool: (key: string) => Boolean(values[key]),
+        set: vi.fn(),
+      });
+      const releaseValues = {
+        dealer: "dealer-1",
+        owner_session_hash: "owner",
+        signature_png: "signature.png",
+        customer_name: "Lisa",
+        vin: "VIN",
+        expires_at: "2099-01-01 00:00:00.000Z",
+      };
+      const release = record("release-1", {
+        ...releaseValues,
+        post_id: concurrent ? "" : "another-post",
+      });
+      const changedRelease = record("release-1", {
+        ...releaseValues,
+        post_id: "another-post",
+      });
+      const post = record("post-1", {
+        dealer: "dealer-1",
+        owner_session_hash: "owner",
+        customer_name: "Lisa",
+        vin: "VIN",
+      });
+      const saved = vi.fn();
+      let releaseReads = 0;
+      const tx = {
+        findRecordById: (table: string) =>
+          table === "posts" ? post : releaseReads++ === 0 ? release : changedRelease,
+        saveRecord: saved,
+        db: () => ({
+          newQuery: () => ({
+            bind: () => ({
+              execute: () => ({ rowsAffected: () => 0 }),
+            }),
+          }),
+        }),
+      };
+      const workspace = loadPocketBaseModule<Record<string, any>>(
+        "postWorkspace.js",
+        {},
+      );
+      let handler: ((context: unknown) => unknown) | undefined;
+      let result: { status: number; payload: Record<string, unknown> } | undefined;
+      const start = hook.indexOf(
+        'routerAdd("POST", "/api/app/photo_releases/:id/link-post"',
+      );
+      runInNewContext(hook.slice(start, hook.indexOf("routerAdd(", start + 20)), {
+        __hooks: "/hooks",
+        cronAdd: () => {},
+        routerAdd: (_method: string, _path: string, callback: typeof handler) => {
+          handler = callback;
+        },
+        require: (path: string) => {
+          if (path.endsWith("/postWorkspace.js"))
+            return { ...workspace, assertActive: () => {} };
+          if (path.endsWith("/websitePublications.js"))
+            return { acquirePostWriteFence: () => {} };
+          return {
+            sessionContext: () => ({ dealer: { id: "dealer-1" } }),
+            assertString: (value: string) => value,
+            readSessionToken: () => "token",
+            hashSessionToken: () => "owner",
+            databaseTimestamp: (value: string) => value.replace("T", " "),
+            normalizeReleaseIdentity: (value: string) => value,
+            normalizeReleaseVin: (value: string) => value,
+          };
+        },
+        $app: {
+          dao: () => ({
+            ...tx,
+            runInTransaction: (callback: (dao: unknown) => void) => callback(tx),
+          }),
+        },
+        $apis: { requestInfo: () => ({ data: { post_id: "post-1" } }) },
+        console: { error: vi.fn() },
+      });
+      handler!({
+        pathParam: () => "release-1",
+        json: (status: number, payload: Record<string, unknown>) => {
+          result = { status, payload };
+          return result;
+        },
+      });
+      expect(result).toEqual({
+        status: 409,
+        payload: {
+          error: "Photo release is already linked to another post",
+          code: "PHOTO_RELEASE_ALREADY_LINKED",
+        },
+      });
+      expect(post.set).not.toHaveBeenCalled();
+      expect(saved).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps dealer credentials out of CRUD and manages personal codes through audited actions", () => {
     expect(

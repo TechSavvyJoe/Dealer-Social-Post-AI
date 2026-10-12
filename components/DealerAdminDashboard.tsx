@@ -7,8 +7,8 @@ import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { Leaderboard } from "./Leaderboard";
-import { ApprovalQueue } from "./ApprovalQueue";
-import { PostHistory } from "./PostHistory";
+import { ContentWorkspace } from "./workspace/ContentWorkspace";
+import { listAllPeople } from "../services/salespeople";
 import { DealerSetupWizard } from "./DealerSetupWizard";
 import { useAppStore } from "../stores/appStore";
 import * as db from "../services/database";
@@ -63,10 +63,11 @@ export { SIGNATURE_LOOK_OPTIONS } from "./dealer-settings/settingsModel";
  * Distinct from the super-admin AdminDashboard which manages MANY dealers
  * across the platform.
  */
-type Tab = "overview" | "settings" | "team";
+type Tab = "overview" | "content" | "settings" | "team";
 
 const TABS: ReadonlyArray<{ key: Tab; label: string; title: string }> = [
   { key: "overview", label: "Overview", title: "Manager dashboard" },
+  { key: "content", label: "Content", title: "Content" },
   { key: "settings", label: "Settings", title: "Dealership settings" },
   { key: "team", label: "Team", title: "Your team" },
 ];
@@ -74,16 +75,22 @@ const TABS: ReadonlyArray<{ key: Tab; label: string; title: string }> = [
 export interface DealerAdminDashboardProps {
   onSettingsDirtyChange?: (dirty: boolean) => void;
   /**
-   * Opens a saved post from the Overview's history through the app's own
+   * Opens a saved post from the content workspace through the app's own
    * guarded path (the "Discard the post in progress?" prompt and the rest of
    * its reopen handling). Without it the history opens the post directly.
    */
   onOpenPost?: (post: GeneratedPost) => void;
+  onCreateContent?: () => void;
+  onOpenSpins?: () => void;
+  onOpenWalkarounds?: () => void;
 }
 
 export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
   onSettingsDirtyChange,
   onOpenPost,
+  onCreateContent,
+  onOpenSpins,
+  onOpenWalkarounds,
 }) => {
   const dealer = useAppStore((s) => s.currentDealer);
   // The system admin's setup board can open this dashboard on one settings
@@ -119,6 +126,7 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
   const [pendingTab, setPendingTab] = useState<Tab | null>(null);
   const tabRefs = React.useRef<Record<Tab, HTMLButtonElement | null>>({
     overview: null,
+    content: null,
     settings: null,
     team: null,
   });
@@ -212,7 +220,7 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
     setTab(nextTab);
   };
 
-  const tabOrder: Tab[] = ["overview", "settings", "team"];
+  const tabOrder: Tab[] = ["overview", "content", "settings", "team"];
   const handleTabKeyDown = (
     event: React.KeyboardEvent<HTMLButtonElement>,
     currentTab: Tab,
@@ -265,7 +273,7 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
         </div>
       )}
 
-      {/* The page title and the three text tabs share one row over one
+      {/* The page title and the section tabs share one row over one
           hairline. On phones the app header already names the dealership, so
           the title is visually hidden (it stays the page's h1) and the tab row
           sticks to the top so managers can switch without scrolling up. */}
@@ -277,7 +285,7 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
           <div
             role="tablist"
             aria-label="Manager dashboard"
-            className="flex gap-6 sm:gap-7"
+            className="flex gap-5 sm:gap-7"
           >
             {TABS.map((t) => {
               const selected = tab === t.key;
@@ -321,8 +329,39 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
           className="max-w-5xl space-y-6 pt-6 lg:pt-9"
         >
           <Leaderboard />
-          <ApprovalQueue />
-          <PostHistory onPostReady={onOpenPost} />
+          <section
+            className="flex flex-wrap items-center justify-between gap-4 border-y border-hairline py-5"
+            aria-labelledby="manager-content-entry"
+          >
+            <div>
+              <h2 id="manager-content-entry" className="text-lg font-semibold">
+                Your dealership’s content
+              </h2>
+              <p className="mt-1 text-sm text-ink-2">
+                Review posts, find saved photos, and organize the team’s library.
+              </p>
+            </div>
+            <Button variant="primary" onClick={() => requestTab("content")}>
+              Manage content
+            </Button>
+          </section>
+        </div>
+      )}
+
+      {tab === "content" && (
+        <div
+          id="manager-panel-content"
+          role="tabpanel"
+          aria-labelledby="manager-tab-content"
+          className="pt-5"
+        >
+          <ManagerContentPanel
+            key={dealer.id}
+            onOpenPost={onOpenPost}
+            onCreateContent={onCreateContent}
+            onOpenSpins={onOpenSpins}
+            onOpenWalkarounds={onOpenWalkarounds}
+          />
         </div>
       )}
 
@@ -366,6 +405,75 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
         }}
       />
     </div>
+  );
+};
+
+/** Roster names are scoped and discarded whenever the authenticated store changes. */
+const ManagerContentPanel: React.FC<
+  Omit<DealerAdminDashboardProps, "onSettingsDirtyChange">
+> = (props) => {
+  const dealerId = useAppStore((s) => s.currentDealer?.id);
+  const authEpoch = useAppStore((s) => s.authEpoch);
+  const [owners, setOwners] = useState<{ id: string; name: string }[]>([]);
+  const [rosterError, setRosterError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setOwners([]);
+    setRosterError(false);
+    if (!dealerId) return;
+    void listAllPeople({ dealerId, includeInactive: true })
+      .then((people) => {
+        if (
+          !live ||
+          useAppStore.getState().authEpoch !== authEpoch ||
+          useAppStore.getState().currentDealer?.id !== dealerId
+        )
+          return;
+        setOwners(
+          people
+            .filter((person) => person.dealer === dealerId)
+            .map((person) => ({
+              id: person.id,
+              name: `${person.name}${person.active ? "" : " (inactive)"}`,
+            })),
+        );
+      })
+      .catch(() => {
+        if (
+          live &&
+          useAppStore.getState().authEpoch === authEpoch &&
+          useAppStore.getState().currentDealer?.id === dealerId
+        )
+          setRosterError(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [dealerId, authEpoch, attempt]);
+  return (
+    <>
+      {rosterError && (
+        <div
+          role="status"
+          className="mb-4 flex flex-wrap items-center gap-3 rounded-sm border border-hairline p-3 text-sm text-ink-2"
+        >
+          Creator filters could not load. You can still browse and review posts.
+          <Button variant="secondary" onClick={() => setAttempt((value) => value + 1)}>
+            Retry team list
+          </Button>
+        </div>
+      )}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-ink-2">
+          Review and organize your dealership’s saved posts.
+        </p>
+        {props.onCreateContent && (
+          <Button onClick={props.onCreateContent}>Create content</Button>
+        )}
+      </div>
+      <ContentWorkspace {...props} mode="manager" hideHeading ownerOptions={owners} />
+    </>
   );
 };
 
