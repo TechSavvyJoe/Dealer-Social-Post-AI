@@ -9,7 +9,7 @@ const requiredPatterns = [
   /["']https:\/\/dealer-social-post-ai-production\.fly\.dev\/api\/\$1["']/,
   /apiProxyRoute/,
   /continuingHeaderRoute\(["']\^\/assets\/\(\.\*\)\$["']/,
-  /dsp-brand-mark-v4/,
+  /dealer-social-v6-/,
   /continuingHeaderRoute\(["']\^\/sw\\\\\.js\$["']/,
   /continuingHeaderRoute\(["']\^\/\(\.\*\)\$["'],\s*securityHeaders\)/,
 ];
@@ -75,11 +75,51 @@ if (assetHeaders.get("cache-control") !== "public, max-age=31536000, immutable")
 }
 
 const identityRoute = config.routes.find((route) =>
-  String(route?.src || "").includes("dsp-brand-mark-v4"),
+  String(route?.src || "").includes("dealer-social-v6-"),
 );
 const identityHeaders = headerMap(identityRoute);
 if (identityHeaders.get("cache-control") !== "public, max-age=31536000, immutable") {
-  throw new Error("Versioned v4 identity assets must receive immutable caching.");
+  throw new Error("Versioned v6 identity assets must receive immutable caching.");
+}
+const identityPathPattern = new RegExp(identityRoute.src);
+for (const path of [
+  "/dealer-social-og-v6.png",
+  "/dealer-social-v6-32.png",
+  "/dealer-social-v6-180.png",
+  "/dealer-social-v6-192.png",
+  "/dealer-social-v6-512.png",
+  "/dealer-social-v6-1024.png",
+  "/dealer-social-v6-maskable-192.png",
+  "/dealer-social-v6-maskable-512.png",
+  "/dealer-social-v6-maskable-1024.png",
+  "/dealer-social-v6-symbol.svg",
+  "/dealer-social-v6-symbol-reverse.svg",
+  "/dealer-social-v6-symbol-black.svg",
+  "/dealer-social-v6-symbol-white.svg",
+  "/dealer-social-v6-app.svg",
+  "/dealer-social-v6-maskable.svg",
+  "/dealer-social-v6-horizontal.svg",
+  "/dealer-social-v6-horizontal-reverse.svg",
+  "/dealer-social-v6-horizontal-white.svg",
+  "/dsp-brand-mark-v4.svg",
+  "/dsp-brand-mark-v4-app.svg",
+  "/dsp-brand-mark-v4-micro.svg",
+  "/dsp-brand-mark-v4-maskable.svg",
+  "/dsp-brand-mark-v4-monochrome.svg",
+  "/dealer-social-dsp-v5-180.png",
+  "/dealer-social-dsp-v5-192.png",
+  "/dealer-social-dsp-v5-512.png",
+  "/dealer-social-dsp-v5-1024.png",
+  "/dealer-social-dsp-v5-maskable-192.png",
+  "/dealer-social-dsp-v5-maskable-512.png",
+  "/dealer-social-dsp-v5-maskable-1024.png",
+  "/dealer-social-favicon-v4-16.png",
+  "/dealer-social-favicon-v4-32.png",
+  "/dealer-social-favicon-v4-48.png",
+]) {
+  if (!identityPathPattern.test(path)) {
+    throw new Error(`Immutable identity route does not cover ${path}.`);
+  }
 }
 
 const workerRoute = headerRule("^/sw\\.js$");

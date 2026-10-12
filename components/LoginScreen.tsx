@@ -21,6 +21,31 @@ const PERSON_CODE_LENGTH = 4;
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 128;
 
+// Versioned artwork keeps installed clients from reusing a cached old icon.
+const MOBILE_LOGIN_BRAND_IMAGE = "/dealer-social-v6-192.png";
+
+const MobileLoginBrand = () => (
+  <span
+    className="login-mobile-logo inline-flex shrink-0 items-center gap-3 lg:hidden"
+    role="img"
+    aria-label="Dealer Social Post AI"
+  >
+    <img
+      src={MOBILE_LOGIN_BRAND_IMAGE}
+      alt=""
+      width={44}
+      height={44}
+      className="login-brand-image rounded-[10px]"
+    />
+    <span
+      className="login-wordmark font-display font-semibold text-ink"
+      aria-hidden="true"
+    >
+      Dealer Social
+    </span>
+  </span>
+);
+
 interface LoginScreenProps {
   onLogin: (
     credentials: SessionLoginRequest,
@@ -487,27 +512,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         <aside className="login-card-brand relative hidden overflow-hidden bg-brand-fill p-10 text-brand-foreground lg:flex lg:flex-col lg:justify-between">
           {/* Theme-independent white/black scrims on the brand fill: the only
               literal colours in this file, and correct under any dealer hue. */}
-          <svg
+          <img
+            src="/dealer-social-v6-symbol-white.svg"
+            alt=""
             aria-hidden="true"
-            viewBox="31 25 63 70"
-            width="486"
-            height="540"
-            className="pointer-events-none absolute -bottom-24 -right-[150px]"
-          >
-            <rect
-              x="47"
-              y="40"
-              width="32"
-              height="40"
-              rx="4"
-              fill="rgba(255,255,255,.10)"
-            />
-            <path
-              fill="rgba(0,0,0,.20)"
-              fillRule="evenodd"
-              d="M37 25H59A35 35 0 0 1 94 60A35 35 0 0 1 59 95H37A6 6 0 0 1 31 89V31A6 6 0 0 1 37 25ZM51 40H75A4 4 0 0 1 79 44V76A4 4 0 0 1 75 80H51A4 4 0 0 1 47 76V44A4 4 0 0 1 51 40Z"
-            />
-          </svg>
+            className="pointer-events-none absolute -bottom-10 -right-24 w-[34rem] max-w-none opacity-[0.12]"
+          />
 
           <Logo
             tone="onBrand"
@@ -520,7 +530,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               Dealership photos, ready to post.
             </p>
             <p className="mt-3.5 text-base leading-6 text-brand-foreground opacity-80">
-              Take the photo, pick the post, and share it to every channel in a minute.
+              Create photos, videos, and posts. Review every detail, then choose where
+              to share.
             </p>
           </div>
         </aside>
@@ -532,10 +543,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           className="login-access-pane flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain px-6 pb-6 pt-6 lg:min-h-0 lg:flex-none lg:items-center lg:justify-center lg:px-14 lg:py-12"
           aria-busy={isLoading}
         >
-          <Logo
-            size={36}
-            className="login-mobile-logo mb-7 inline-flex shrink-0 items-center gap-2.5 self-start lg:hidden"
-          />
+          {isSuccess || isLoading ? <MobileLoginBrand /> : null}
 
           {isSuccess ? (
             <div
@@ -566,14 +574,35 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             // Exactly three children, in this order: the short-landscape layout
             // in styles/globals.css places them by :nth-child.
             <div className="login-form grid min-h-0 w-full flex-1 grid-rows-[auto_auto_minmax(min-content,1fr)] gap-5 lg:w-[22rem] lg:flex-none lg:grid-rows-[auto_auto_auto] lg:gap-6">
-              <div className="flex shrink-0 flex-col gap-1.5">
-                <h1
-                  id="login-heading"
-                  className="font-display text-[28px] font-semibold leading-8 tracking-[-0.01em] text-ink lg:text-[32px] lg:leading-9"
+              <div
+                className={cn(
+                  "login-intro flex shrink-0 flex-col gap-1.5",
+                  entryMode === "personal" && invitedDealer && !pendingAttempt
+                    ? "login-invited-intro"
+                    : undefined,
+                )}
+              >
+                <div className="login-brand-row">
+                  <MobileLoginBrand />
+                  <h1
+                    id="login-heading"
+                    aria-describedby="login-instruction"
+                    className="font-display text-[28px] font-semibold leading-8 tracking-[-0.01em] text-ink lg:text-[32px] lg:leading-9"
+                  >
+                    Sign in
+                  </h1>
+                </div>
+                <p
+                  id="login-instruction"
+                  className={cn(
+                    "text-[15px] leading-[22px] text-ink-2",
+                    entryMode === "personal" && !pendingAttempt && !invitedDealer
+                      ? "login-personal-instruction"
+                      : "login-mode-instruction",
+                  )}
                 >
-                  Sign in
-                </h1>
-                <p className="text-[15px] leading-[22px] text-ink-2">{instruction}</p>
+                  {instruction}
+                </p>
                 {entryMode === "personal" && (
                   <div className="login-invitation-note">
                     {!invitedDealer && (
@@ -651,8 +680,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   onBack={returnToCodeEntry}
                 />
               ) : entryMode === "personal" ? (
-                <div className="login-mode-panel flex min-h-0 flex-col gap-5 lg:gap-6">
-                  <div className="flex shrink-0 flex-col gap-2">
+                <div className="login-mode-panel login-personal-panel flex min-h-0 flex-col gap-5 lg:gap-6">
+                  <div className="login-code-entry flex shrink-0 flex-col gap-2">
                     <p className="login-code-label text-[13px] font-medium leading-4 text-ink-2">
                       4-digit code
                     </p>
@@ -661,7 +690,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         keypad fills, and the next well to take a digit carries
                         the brand edge. */}
                     <div
-                      className="relative grid grid-cols-4 gap-3"
+                      className="login-pin-status relative grid grid-cols-4 gap-3"
                       role="status"
                       aria-label={digitsEntered}
                     >

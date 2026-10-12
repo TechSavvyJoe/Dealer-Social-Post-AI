@@ -1,0 +1,207 @@
+{
+  "renderer": "sharp 0.33.5",
+  "maskableForegroundBoundingBoxCornerRadius": 345.3176554999758,
+  "maskableSafeRadius": 409.6,
+  "assets": [
+    {
+      "file": "public/dealer-social-v6-1024.png",
+      "sha256": "0dfc8fd95abee488aeb1f2fc6d355f48d3e1f346e6b9f02cbc46ed7b0fcad2d2",
+      "width": 1024,
+      "height": 1024,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-16.png",
+      "sha256": "7e2f4c796b9738a814faadf5b50f7b67572d0e5204c7fa945e121ad8ab5ba9e3",
+      "width": 16,
+      "height": 16,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-180.png",
+      "sha256": "fa85275e31cc2eb80b3a3cc855d5c9b90bc86698de77a26ca615e6d04d26c493",
+      "width": 180,
+      "height": 180,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-192.png",
+      "sha256": "ed6ae2615bea5e55bbaff7e2293b3b5d2d6414fc6529c2c6419000b9a4d5745c",
+      "width": 192,
+      "height": 192,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-24.png",
+      "sha256": "849343a7e2ac14db373682a83e330261a11dff6cd584a7941d1b74995cb51d59",
+      "width": 24,
+      "height": 24,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-32.png",
+      "sha256": "4a82ab0d9f942a16688d6dd00339c39b2a5d3b1459ff898c4e7669794519874b",
+      "width": 32,
+      "height": 32,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-48.png",
+      "sha256": "59b44826f523705a83681480e69562e5aa4247f23eaca525f00fee7c126bbf4f",
+      "width": 48,
+      "height": 48,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-512.png",
+      "sha256": "4d13ef5cd6fdfa843d961c1565ac1bd974d891fa14c5b06dbc9ca102e16c0459",
+      "width": 512,
+      "height": 512,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-app.svg",
+      "sha256": "05249ca127409d87ed168e519b3949cd84d916a83e08da61e4f2f4d363a9299c"
+    },
+    {
+      "file": "public/dealer-social-v6-horizontal-black.svg",
+      "sha256": "cca4a6210878959eeb42ffa6d1a823e1c5688703bbe705856f3f0464cd810404"
+    },
+    {
+      "file": "public/dealer-social-v6-horizontal-reverse.svg",
+      "sha256": "5d3cf562d7fdc987da844bff4d6c11879d4bc380a203297b3c001c175785b60e"
+    },
+    {
+      "file": "public/dealer-social-v6-horizontal-white.svg",
+      "sha256": "2ad6a96d49cf250272ee5f65898e48f53227e838de09c3708f5c99710e53c405"
+    },
+    {
+      "file": "public/dealer-social-v6-horizontal.svg",
+      "sha256": "a9cb2f919aafa078eed7fe1b2be88a9612604eeb15e9850e7be587f8da14d349"
+    },
+    {
+      "file": "public/dealer-social-v6-maskable-1024.png",
+      "sha256": "2cfbf96d4732f0834ea23c64f4fa853fe307470682a0f97919e76e6de7b10fed",
+      "width": 1024,
+      "height": 1024,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-maskable-192.png",
+      "sha256": "4169cc4842d9e7db64cefe15a8121d809ffe87df1b008e2db2e80dd2d0b2c5dd",
+      "width": 192,
+      "height": 192,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-maskable-512.png",
+      "sha256": "869fcd529c82a42e9a5da48a2dc7f3f39297bcfd08a0003e79955af3e276a51c",
+      "width": 512,
+      "height": 512,
+      "hasAlpha": false
+    },
+    {
+      "file": "public/dealer-social-v6-maskable.svg",
+      "sha256": "e02ac1f256fd3aee161c09ac252d713dc56db932d44fb2a9d01737b93b2ac3cb"
+    },
+    {
+      "file": "public/dealer-social-v6-stacked-black.svg",
+      "sha256": "865da34567598fb27aa1d64fcbfa8c1da049eab21b321453ac7105daa0a9d76b"
+    },
+    {
+      "file": "public/dealer-social-v6-stacked-reverse.svg",
+      "sha256": "7268c25a98d2f1fc102850a3fb8b6d8d5b0b5321b76e3ae9913f85518b9ef6b8"
+    },
+    {
+      "file": "public/dealer-social-v6-stacked-white.svg",
+      "sha256": "d631fd7dba2e0e6bb61e45f719c055765ee2d114600d340a56392632c201a148"
+    },
+    {
+      "file": "public/dealer-social-v6-stacked.svg",
+      "sha256": "12911de1667e02665d77779b0328cd432b1a62ef408e715bc1dbab5c67fb4305"
+    },
+    {
+      "file": "public/dealer-social-v6-symbol-black.svg",
+      "sha256": "908aff93d3baab4d75f74d0fd081f0bd948282b789a8bf5f52f9b020e6c84622"
+    },
+    {
+      "file": "public/dealer-social-v6-symbol-reverse.svg",
+      "sha256": "52757b44f40d8a3c22ea8e3af8c9114d74358e2700a1905da24d3c40319608d7"
+    },
+    {
+      "file": "public/dealer-social-v6-symbol-white.svg",
+      "sha256": "8c2045f545044782eec478777e80f3892ae6e52bb0c13a211284a7ed72050257"
+    },
+    {
+      "file": "public/dealer-social-v6-symbol.svg",
+      "sha256": "e65364f7cfee4af810207c024143ff35d67671111ce053111d2bb4a9ea591941"
+    },
+    {
+      "file": "public/dealer-social-og-v6.png",
+      "sha256": "f83f87b98a639b934eaa4a8f47c1fecd38a55879806130481ca9d0cd60e82f55",
+      "width": 1200,
+      "height": 630,
+      "hasAlpha": false
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/horizontal-2240-transparent.png",
+      "width": 2240,
+      "height": 448,
+      "hasAlpha": true
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/horizontal-black-2240-transparent.png",
+      "width": 2240,
+      "height": 448,
+      "hasAlpha": true
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/horizontal-reverse-2240-transparent.png",
+      "width": 2240,
+      "height": 448,
+      "hasAlpha": true
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/horizontal-white-2240-transparent.png",
+      "width": 2240,
+      "height": 448,
+      "hasAlpha": true
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/stacked-1536-transparent.png",
+      "width": 1536,
+      "height": 864,
+      "hasAlpha": true
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/stacked-reverse-1536-transparent.png",
+      "width": 1536,
+      "height": 864,
+      "hasAlpha": true
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/symbol-1536-transparent.png",
+      "width": 1536,
+      "height": 987,
+      "hasAlpha": true
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/symbol-black-1536-transparent.png",
+      "width": 1536,
+      "height": 987,
+      "hasAlpha": true
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/symbol-reverse-1536-transparent.png",
+      "width": 1536,
+      "height": 987,
+      "hasAlpha": true
+    },
+    {
+      "file": "docs/brand/dealer-social-v6/exports/symbol-white-1536-transparent.png",
+      "width": 1536,
+      "height": 987,
+      "hasAlpha": true
+    }
+  ]
+}

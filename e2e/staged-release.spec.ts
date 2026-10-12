@@ -175,6 +175,12 @@ test.describe("Hosted staged release", () => {
       expect(html).toContain('name="viewport"');
       expect(html).toContain("viewport-fit=cover");
       expect(html).toContain('rel="manifest"');
+      expect(html).toContain('href="/dealer-social-v6-app.svg"');
+      expect(html).toContain('href="/dealer-social-v6-32.png"');
+      expect(html).toContain('href="/dealer-social-v6-180.png"');
+      expect(html).toContain(
+        'content="https://dealer-social-post-ai.vercel.app/dealer-social-og-v6.png"',
+      );
 
       const scriptSources = Array.from(
         html.matchAll(/<script[^>]+src="([^"]+\.js)"/g),
@@ -220,25 +226,43 @@ test.describe("Hosted staged release", () => {
       expect(manifest.icons).toEqual(
         expect.arrayContaining([
           {
-            src: "/dealer-social-dsp-v5-192.png",
+            src: "/dealer-social-v6-192.png",
             sizes: "192x192",
             type: "image/png",
             purpose: "any",
           },
           {
-            src: "/dealer-social-dsp-v5-512.png",
+            src: "/dealer-social-v6-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "any",
           },
           {
-            src: "/dealer-social-dsp-v5-maskable-512.png",
+            src: "/dealer-social-v6-1024.png",
+            sizes: "1024x1024",
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "/dealer-social-v6-maskable-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "maskable",
+          },
+          {
+            src: "/dealer-social-v6-maskable-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",
           },
           {
-            src: "/dsp-brand-mark-v4-monochrome.svg",
+            src: "/dealer-social-v6-maskable-1024.png",
+            sizes: "1024x1024",
+            type: "image/png",
+            purpose: "maskable",
+          },
+          {
+            src: "/dealer-social-v6-symbol-white.svg",
             sizes: "any",
             type: "image/svg+xml",
             purpose: "monochrome",
@@ -246,18 +270,24 @@ test.describe("Hosted staged release", () => {
         ]),
       );
       for (const asset of [
-        "/dealer-social-dsp-v5-180.png",
-        "/dealer-social-dsp-v5-192.png",
-        "/dealer-social-dsp-v5-512.png",
-        "/dealer-social-dsp-v5-1024.png",
-        "/dealer-social-dsp-v5-maskable-192.png",
-        "/dealer-social-dsp-v5-maskable-512.png",
-        "/dealer-social-dsp-v5-maskable-1024.png",
-        "/dealer-social-favicon-v4-32.png",
-        "/dsp-brand-mark-v4.svg",
-        "/dsp-brand-mark-v4-micro.svg",
-        "/dsp-brand-mark-v4-maskable.svg",
-        "/dsp-brand-mark-v4-monochrome.svg",
+        "/dealer-social-og-v6.png",
+        "/dealer-social-v6-180.png",
+        "/dealer-social-v6-192.png",
+        "/dealer-social-v6-512.png",
+        "/dealer-social-v6-1024.png",
+        "/dealer-social-v6-maskable-192.png",
+        "/dealer-social-v6-maskable-512.png",
+        "/dealer-social-v6-maskable-1024.png",
+        "/dealer-social-v6-32.png",
+        "/dealer-social-v6-symbol.svg",
+        "/dealer-social-v6-symbol-reverse.svg",
+        "/dealer-social-v6-symbol-black.svg",
+        "/dealer-social-v6-symbol-white.svg",
+        "/dealer-social-v6-app.svg",
+        "/dealer-social-v6-maskable.svg",
+        "/dealer-social-v6-horizontal.svg",
+        "/dealer-social-v6-horizontal-reverse.svg",
+        "/dealer-social-v6-horizontal-white.svg",
       ]) {
         const response = await getSameOrigin(asset);
         expect(response.ok()).toBe(true);

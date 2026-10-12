@@ -79,6 +79,52 @@ async function expectNoHorizontalOverflow(page: import("@playwright/test").Page)
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
 }
 
+/**
+ * Fixture-only approximation of PwaUpdatePrompt's rendered in-flow card.
+ * Production can render this before #main-content when a worker is waiting;
+ * Vite development disables the service-worker prompt, so local geometry tests
+ * otherwise miss the shorter login stage. This inserts no production behavior.
+ */
+async function insertPendingUpdatePromptFixture(page: Page) {
+  await expect(
+    page.getByRole("group", { name: "Four digit access code keypad" }),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    const main = document.getElementById("main-content");
+    const shell = main?.parentElement;
+    if (!main || !shell) throw new Error("Login shell main element was not found");
+
+    const fixture = document.createElement("section");
+    fixture.dataset.testid = "pwa-update-prompt-fixture";
+    fixture.setAttribute("role", "region");
+    fixture.setAttribute("aria-labelledby", "pwa-update-prompt-fixture-title");
+    fixture.className =
+      "pwa-update-prompt z-[110] flex max-w-[30rem] flex-wrap items-center gap-3 rounded-2xl border border-primary-300/30 bg-surface-900/95 p-3 text-surface-50 shadow-elevation-4 backdrop-blur-xl";
+    fixture.innerHTML = `
+      <span class="sr-only" role="status" aria-live="polite">A new application version is ready.</span>
+      <span class="h-5 w-5 shrink-0" aria-hidden="true"></span>
+      <div class="min-w-32 flex-1">
+        <p id="pwa-update-prompt-fixture-title" class="text-sm font-semibold">A new version is ready</p>
+        <p class="hidden text-xs text-surface-300 sm:block">Update now, or finish your current work and update later.</p>
+      </div>
+      <div class="ml-auto flex shrink-0 items-center gap-1">
+        <button type="button" class="min-h-11 rounded-xl bg-primary-500 px-3 py-2 text-sm font-semibold text-white">Update</button>
+        <button type="button" aria-label="Update later" class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-surface-300">
+          <span class="h-5 w-5" aria-hidden="true"></span>
+        </button>
+      </div>`;
+    shell.insertBefore(fixture, main);
+  });
+
+  const fixture = page.getByTestId("pwa-update-prompt-fixture");
+  await expect(fixture).toBeVisible();
+  await expect(fixture.locator("xpath=following-sibling::*[1]")).toHaveAttribute(
+    "id",
+    "main-content",
+  );
+  await expect(fixture).toHaveCSS("position", "relative");
+}
+
 async function expectControlsInsideViewport(page: Page, controls: Locator) {
   const geometry = await controls.evaluateAll((elements) =>
     elements.map((element) => {
@@ -417,101 +463,131 @@ test.describe("Dealer Social Post AI Flow", () => {
     { project: "phone-fold-280", width: 280, height: 653 },
     { project: "phone-320", width: 320, height: 568 },
     { project: "phone-landscape-844", width: 844, height: 390 },
+    { project: "desktop-1440", width: 820, height: 1180 },
+    { project: "desktop-1440", width: 1024, height: 500 },
   ]) {
     for (const invited of [false, true]) {
-      test(`keeps the personal keypad and invitation action visible at ${viewport.width}px (${invited ? "invited" : "uninvited"})`, async ({
-        page,
-      }, testInfo) => {
-        test.skip(
-          !testInfo.project.name.endsWith(viewport.project),
-          `Geometry regression runs in the ${viewport.project} projects`,
-        );
-        await page.setViewportSize({ width: viewport.width, height: viewport.height });
-        await page.route("**/api/app/session", (route) =>
-          route.fulfill({
-            status: 401,
-            body: JSON.stringify({ error: "No active session" }),
-          }),
-        );
-        await page.route("**/api/app/dealership-invitation", (route) =>
-          invited
-            ? route.fulfill({
-                status: 200,
-                contentType: "application/json",
-                body: JSON.stringify({
-                  id: "qa-dealer",
-                  name: "Bob Maxey Ford of Howell",
-                }),
-              })
-            : route.fulfill({
-                status: 404,
-                body: JSON.stringify({ error: "No invitation" }),
-              }),
-        );
-
-        await page.goto("/");
-        const keypad = page.getByRole("group", {
-          name: "Four digit access code keypad",
-        });
-        const invitationAction = page.getByRole("button", {
-          name: invited ? "Change dealership" : "Use a private invitation",
-        });
-        await expect(keypad).toBeVisible();
-        await expect(invitationAction).toBeVisible();
-        if (invited) {
-          const invitedDealerIdentity = page.locator("#login-heading + p");
-          await expect(invitedDealerIdentity).toBeVisible();
-          await expect(invitedDealerIdentity).toHaveText("Bob Maxey Ford of Howell");
-        }
-
-        const geometry = await page.evaluate(() => {
-          const keypadButtons = Array.from(
-            document.querySelectorAll<HTMLElement>(
-              '[aria-label="Four digit access code keypad"] button',
-            ),
+      const updatePromptModes = viewport.width < 400 ? [false, true] : [false];
+      for (const withPendingUpdatePrompt of updatePromptModes) {
+        test(`keeps the personal keypad and invitation action visible at ${viewport.width}px (${invited ? "invited" : "uninvited"}${withPendingUpdatePrompt ? ", pending update prompt" : ""})`, async ({
+          page,
+        }, testInfo) => {
+          test.skip(
+            !testInfo.project.name.endsWith(viewport.project),
+            `Geometry regression runs in the ${viewport.project} projects`,
           );
-          const invitation = Array.from(
-            document.querySelectorAll<HTMLElement>("button"),
-          ).find((button) =>
-            ["Use a private invitation", "Change dealership"].includes(
-              button.textContent?.trim() || "",
-            ),
-          );
-          const bounds = (element: HTMLElement) => {
-            const rect = element.getBoundingClientRect();
-            return {
-              top: rect.top,
-              bottom: rect.bottom,
-              height: rect.height,
-              minHeight: Number.parseFloat(getComputedStyle(element).minHeight),
-            };
-          };
-          return {
-            viewportHeight: window.innerHeight,
-            keypad: keypadButtons.map(bounds),
-            invitation: invitation ? bounds(invitation) : null,
-          };
-        });
-        expect(geometry.keypad.length).toBe(11);
-        expect(geometry.keypad.every((item) => item.minHeight >= 64)).toBe(true);
-        expect(geometry.keypad.every((item) => item.height >= 63.5)).toBe(true);
-        expect(
-          geometry.keypad.every(
-            (item) => item.top >= -1 && item.bottom <= geometry.viewportHeight + 1,
-          ),
-        ).toBe(true);
-        expect(geometry.invitation?.minHeight).toBeGreaterThanOrEqual(44);
-        expect(geometry.invitation?.height).toBeGreaterThanOrEqual(43.5);
-        expect(geometry.invitation?.top).toBeGreaterThanOrEqual(-1);
-        expect(geometry.invitation?.bottom).toBeLessThanOrEqual(
-          geometry.viewportHeight + 1,
-        );
-        if (invited) {
-          await page.screenshot({
-            path: testInfo.outputPath(`login-${viewport.project}-invited.png`),
+          await page.setViewportSize({
+            width: viewport.width,
+            height: viewport.height,
           });
-        }
-      });
+          await page.route("**/api/app/session", (route) =>
+            route.fulfill({
+              status: 401,
+              body: JSON.stringify({ error: "No active session" }),
+            }),
+          );
+          await page.route("**/api/app/dealership-invitation", (route) =>
+            invited
+              ? route.fulfill({
+                  status: 200,
+                  contentType: "application/json",
+                  body: JSON.stringify({
+                    id: "qa-dealer",
+                    name: "Bob Maxey Ford of Howell",
+                  }),
+                })
+              : route.fulfill({
+                  status: 404,
+                  body: JSON.stringify({ error: "No invitation" }),
+                }),
+          );
+
+          await page.emulateMedia({ reducedMotion: "reduce" });
+          await page.goto("/");
+          if (withPendingUpdatePrompt) {
+            await insertPendingUpdatePromptFixture(page);
+          }
+          const keypad = page.getByRole("group", {
+            name: "Four digit access code keypad",
+          });
+          const invitationAction = page.getByRole("button", {
+            name: invited ? "Change dealership" : "Use a private invitation",
+          });
+          await expect(keypad).toBeVisible();
+          await expect(invitationAction).toBeVisible();
+          if (invited) {
+            const invitedDealerIdentity = page.locator("#login-instruction");
+            await expect(invitedDealerIdentity).toBeVisible();
+            await expect(invitedDealerIdentity).toHaveText("Bob Maxey Ford of Howell");
+          }
+
+          const geometry = await page.evaluate(() => {
+            const keypadButtons = Array.from(
+              document.querySelectorAll<HTMLElement>(
+                '[aria-label="Four digit access code keypad"] button',
+              ),
+            );
+            const invitation = Array.from(
+              document.querySelectorAll<HTMLElement>("button"),
+            ).find((button) =>
+              ["Use a private invitation", "Change dealership"].includes(
+                button.textContent?.trim() || "",
+              ),
+            );
+            const bounds = (element: HTMLElement) => {
+              const rect = element.getBoundingClientRect();
+              return {
+                top: rect.top,
+                bottom: rect.bottom,
+                height: rect.height,
+                minHeight: Number.parseFloat(getComputedStyle(element).minHeight),
+              };
+            };
+            return {
+              viewportHeight: window.innerHeight,
+              keypad: keypadButtons.map(bounds),
+              invitation: invitation ? bounds(invitation) : null,
+            };
+          });
+          await testInfo.attach("login-geometry", {
+            body: JSON.stringify(geometry),
+            contentType: "application/json",
+          });
+          expect(geometry.keypad.length).toBe(11);
+          expect(geometry.keypad.every((item) => item.minHeight >= 64)).toBe(true);
+          expect(geometry.keypad.every((item) => item.height >= 63.5)).toBe(true);
+          if (viewport.width === 1024) {
+            // Short desktop windows keep the normal single-column form and
+            // scroll it, instead of squeezing a phone's two-column layout.
+            for (const key of await keypad.getByRole("button").all()) {
+              await key.scrollIntoViewIfNeeded();
+              const box = await key.boundingBox();
+              expect(box?.y).toBeGreaterThanOrEqual(-1);
+              expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height + 1);
+            }
+          } else {
+            expect(
+              geometry.keypad.every(
+                (item) => item.top >= -1 && item.bottom <= geometry.viewportHeight + 1,
+              ),
+              JSON.stringify(geometry),
+            ).toBe(true);
+          }
+          expect(geometry.invitation?.minHeight).toBeGreaterThanOrEqual(44);
+          expect(geometry.invitation?.height).toBeGreaterThanOrEqual(43.5);
+          expect(geometry.invitation?.top).toBeGreaterThanOrEqual(-1);
+          expect(geometry.invitation?.bottom).toBeLessThanOrEqual(
+            geometry.viewportHeight + 1,
+          );
+          if (invited) {
+            await page.screenshot({
+              path: testInfo.outputPath(
+                `login-${viewport.project}-invited${withPendingUpdatePrompt ? "-with-update-prompt" : ""}.png`,
+              ),
+            });
+          }
+        });
+      }
     }
   }
 
