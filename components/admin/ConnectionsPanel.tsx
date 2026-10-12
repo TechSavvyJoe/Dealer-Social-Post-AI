@@ -253,10 +253,25 @@ function ServiceCard({
     setCredentials((previous) => ({ ...previous, [key]: value }));
   const ready = connection?.state === "ready";
   const currentState = connection?.state ?? "needs_setup";
-  const cardStatus =
-    service.id === "gemini" && ready
-      ? "Caption access verified"
-      : statusLabel[currentState];
+  const openAiCredentialsVerified = Boolean(
+    service.id === "openai" &&
+    currentState === "needs_test" &&
+    connection?.enabled &&
+    connection.configured &&
+    connection.capabilities.some(
+      (capability) => capability.id === "text" && capability.state === "verified",
+    ),
+  );
+  const credentialCheckLabel = openAiCredentialsVerified
+    ? "Recheck credentials"
+    : "Check credentials";
+  const cardStatus = openAiCredentialsVerified
+    ? "Credentials verified"
+    : service.id === "openai" && currentState === "needs_test"
+      ? "Credential check needed"
+      : service.id === "gemini" && ready
+        ? "Caption access verified"
+        : statusLabel[currentState];
   const optionalOff = Boolean(service.optional && connection?.state === "off");
   const ServiceIcon = serviceIcons[service.id];
   const needsSetup = !connection?.configured || optionalOff;
@@ -286,7 +301,11 @@ function ServiceCard({
       });
       if (useAppStore.getState().authEpoch !== requestAuthEpoch) return;
       forgetCredentials();
-      setNotice("Saved. Run a test before relying on this connection.");
+      setNotice(
+        service.id === "openai"
+          ? "Saved. Check credentials next. Image generation remains unverified."
+          : "Saved. Run a test before relying on this connection.",
+      );
       await onRefresh();
     } catch (cause) {
       if (useAppStore.getState().authEpoch !== requestAuthEpoch) return;
@@ -340,7 +359,14 @@ function ServiceCard({
       }
       if (useAppStore.getState().authEpoch !== requestAuthEpoch) return;
       setNotice(
-        "Test submitted. The status will show Ready only after verification completes.",
+        service.id === "openai"
+          ? result.capabilities.some(
+              (capability) =>
+                capability.id === "text" && capability.state === "verified",
+            )
+            ? "Credentials verified. Image generation remains unverified; rechecking credentials does not test images."
+            : "Credential check submitted. This check does not verify image generation."
+          : "Test submitted. The status will show Ready only after verification completes.",
       );
       await onRefresh();
     } catch (cause) {
@@ -424,28 +450,36 @@ function ServiceCard({
                 className="flex flex-wrap gap-1.5"
                 aria-label={`${service.title} capability verification`}
               >
-                {connection.capabilities.map((capability) => (
-                  <li
-                    key={capability.id}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[11px] leading-4",
-                      capability.state === "verified"
-                        ? "border-success-ink/25 bg-success-fill text-success-ink"
-                        : "border-hairline text-ink-2",
-                    )}
-                    aria-label={`${capability.label}: ${capability.state === "verified" ? "Verified" : "Not tested"}`}
-                    title={`${capability.label}: ${capability.state === "verified" ? "Verified" : "Not tested"}`}
-                  >
-                    {capability.state === "verified" ? (
-                      <Check className="h-3 w-3" aria-hidden="true" />
-                    ) : (
-                      <Circle className="h-2.5 w-2.5" aria-hidden="true" />
-                    )}
-                    {capability.state === "verified"
-                      ? `${capability.label}: Verified`
-                      : capabilityLabel(capability.id, capability.label)}
-                  </li>
-                ))}
+                {connection.capabilities.map((capability) => {
+                  const label =
+                    service.id === "openai" && capability.id === "text"
+                      ? "Credential access"
+                      : capability.label;
+                  return (
+                    <li
+                      key={capability.id}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[11px] leading-4",
+                        capability.state === "verified"
+                          ? "border-success-ink/25 bg-success-fill text-success-ink"
+                          : "border-hairline text-ink-2",
+                      )}
+                      aria-label={`${label}: ${capability.state === "verified" ? "Verified" : "Not tested"}`}
+                      title={`${label}: ${capability.state === "verified" ? "Verified" : "Not tested"}`}
+                    >
+                      {capability.state === "verified" ? (
+                        <Check className="h-3 w-3" aria-hidden="true" />
+                      ) : (
+                        <Circle className="h-2.5 w-2.5" aria-hidden="true" />
+                      )}
+                      {capability.state === "verified"
+                        ? `${label}: Verified`
+                        : service.id === "openai" && capability.id === "text"
+                          ? label
+                          : capabilityLabel(capability.id, label)}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <span className="text-xs text-ink-2">
@@ -465,7 +499,7 @@ function ServiceCard({
                 <Circle className="h-2.5 w-2.5" aria-hidden="true" /> Not tested
               </p>
             ) : null}
-            {connection?.lastVerifiedAt && ready ? (
+            {connection?.lastVerifiedAt && (ready || openAiCredentialsVerified) ? (
               <p className="mt-1.5 text-[11px] text-ink-2">
                 Verified {new Date(connection.lastVerifiedAt).toLocaleString()}
               </p>
@@ -484,16 +518,22 @@ function ServiceCard({
                 setOpen((value) => !value);
               }}
             >
-              {ready ? "Manage" : "Set up"}
+              {ready || openAiCredentialsVerified ? "Manage" : "Set up"}
             </Button>
             <Button
-              variant={setupIsPrimary || ready ? "ghost" : "primary"}
+              variant={
+                setupIsPrimary || ready || openAiCredentialsVerified
+                  ? "ghost"
+                  : "primary"
+              }
               size="sm"
               className="min-h-11 px-3 sm:min-h-9"
               leftIcon={<TestTube2 />}
               disabled={
                 !connection ||
                 busy !== null ||
+                (service.id === "openai" &&
+                  (!connection.enabled || !connection.configured)) ||
                 ((service.scope === "dealer" || service.id === "walkaround") &&
                   !dealerId) ||
                 Boolean(service.proofLabel && !proofId.trim())
@@ -501,10 +541,16 @@ function ServiceCard({
               loading={busy === "test"}
               onClick={() => void runTest()}
             >
-              Test
+              {service.id === "openai" ? credentialCheckLabel : "Test"}
             </Button>
           </div>
         </div>
+        {openAiCredentialsVerified ? (
+          <p className="mt-3 text-xs text-ink-2">
+            Image generation is not tested. Image verification is not available on this
+            screen; repeating the credential check will not verify images.
+          </p>
+        ) : null}
         {service.id === "website" &&
         connection?.errorCode === "CONNECTION_DRAFT_PENDING" ? (
           <p className="mt-3 text-xs text-ink-2" role="status">
@@ -734,6 +780,12 @@ function ServiceCard({
               remain unverified until their own tests pass.
             </p>
           ) : null}
+          {service.id === "openai" ? (
+            <p className="mb-4 max-w-xl text-xs text-ink-2">
+              This check verifies credential access using text only. It does not test
+              image generation. This optional connection can stay off.
+            </p>
+          ) : null}
 
           <p className="mb-3 max-w-2xl text-xs text-ink-2">
             Saving changes requires a new test. Pending deliveries pause if the
@@ -769,6 +821,8 @@ function ServiceCard({
               disabled={
                 !connection ||
                 busy !== null ||
+                (service.id === "openai" &&
+                  (!connection.enabled || !connection.configured)) ||
                 ((service.scope === "dealer" || service.id === "walkaround") &&
                   !dealerId) ||
                 Boolean(service.proofLabel && !proofId.trim())
@@ -777,7 +831,7 @@ function ServiceCard({
               leftIcon={<TestTube2 />}
               onClick={() => void runTest()}
             >
-              Test connection
+              {service.id === "openai" ? credentialCheckLabel : "Test connection"}
             </Button>
             {service.scope === "dealer" && onManageDealer ? (
               <Button

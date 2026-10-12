@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { enqueueTask } from "../services/requestQueue";
+import { VIDEO_TASK_TIMEOUT_MS } from "../services/generationTimeouts";
 import { logEvent, logError } from "../utils/telemetry";
 
 // Since the Gemini API key is now handled by the server-side proxy,
@@ -41,7 +42,13 @@ export const useGemini = () => {
         // Model failover requires a known outcome. A queue-level retry
         // here re-ran that entire stack, multiplying one user action into up to
         // ~27 upstream requests during an outage (self-inflicted DDoS + cost).
-        const result = await enqueueTask(task, { maxRetries: 0, signal });
+        const result = await enqueueTask(task, {
+          maxRetries: 0,
+          signal,
+          // Video is a start, a six-minute poll window, then a download.
+          // The ordinary five-minute task deadline must not cut that short.
+          timeoutMs: name === "ai.generate.video" ? VIDEO_TASK_TIMEOUT_MS : undefined,
+        });
         logEvent(`${name}.success`, metadata);
         return result;
       } catch (error) {

@@ -313,6 +313,13 @@ test.describe("Dealer Social Post AI Flow", () => {
     // Login was simplified for mobile: primary heading is "Sign in".
     await expect(page.getByRole("heading", { name: /^sign in$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /my code/i })).toBeVisible();
+    await expect(page).toHaveURL(/#\/login$/);
+    const loginUrl = page.url();
+    const skipLink = page.getByRole("link", { name: /skip to main content/i });
+    await skipLink.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#main-content")).toBeFocused();
+    await expect(page).toHaveURL(loginUrl);
     await expectNoCriticalAccessibilityIssues(page);
     await expectNoSeriousAxeViolations(page);
     await expectNoHorizontalOverflow(page);
@@ -405,6 +412,108 @@ test.describe("Dealer Social Post AI Flow", () => {
     expect(workerSource).toContain('url.pathname.startsWith("/api/")');
     await expectNoHorizontalOverflow(page);
   });
+
+  for (const viewport of [
+    { project: "phone-fold-280", width: 280, height: 653 },
+    { project: "phone-320", width: 320, height: 568 },
+    { project: "phone-landscape-844", width: 844, height: 390 },
+  ]) {
+    for (const invited of [false, true]) {
+      test(`keeps the personal keypad and invitation action visible at ${viewport.width}px (${invited ? "invited" : "uninvited"})`, async ({
+        page,
+      }, testInfo) => {
+        test.skip(
+          !testInfo.project.name.endsWith(viewport.project),
+          `Geometry regression runs in the ${viewport.project} projects`,
+        );
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await page.route("**/api/app/session", (route) =>
+          route.fulfill({
+            status: 401,
+            body: JSON.stringify({ error: "No active session" }),
+          }),
+        );
+        await page.route("**/api/app/dealership-invitation", (route) =>
+          invited
+            ? route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                  id: "qa-dealer",
+                  name: "Bob Maxey Ford of Howell",
+                }),
+              })
+            : route.fulfill({
+                status: 404,
+                body: JSON.stringify({ error: "No invitation" }),
+              }),
+        );
+
+        await page.goto("/");
+        const keypad = page.getByRole("group", {
+          name: "Four digit access code keypad",
+        });
+        const invitationAction = page.getByRole("button", {
+          name: invited ? "Change dealership" : "Use a private invitation",
+        });
+        await expect(keypad).toBeVisible();
+        await expect(invitationAction).toBeVisible();
+        if (invited) {
+          const invitedDealerIdentity = page.locator("#login-heading + p");
+          await expect(invitedDealerIdentity).toBeVisible();
+          await expect(invitedDealerIdentity).toHaveText("Bob Maxey Ford of Howell");
+        }
+
+        const geometry = await page.evaluate(() => {
+          const keypadButtons = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              '[aria-label="Four digit access code keypad"] button',
+            ),
+          );
+          const invitation = Array.from(
+            document.querySelectorAll<HTMLElement>("button"),
+          ).find((button) =>
+            ["Use a private invitation", "Change dealership"].includes(
+              button.textContent?.trim() || "",
+            ),
+          );
+          const bounds = (element: HTMLElement) => {
+            const rect = element.getBoundingClientRect();
+            return {
+              top: rect.top,
+              bottom: rect.bottom,
+              height: rect.height,
+              minHeight: Number.parseFloat(getComputedStyle(element).minHeight),
+            };
+          };
+          return {
+            viewportHeight: window.innerHeight,
+            keypad: keypadButtons.map(bounds),
+            invitation: invitation ? bounds(invitation) : null,
+          };
+        });
+        expect(geometry.keypad.length).toBe(11);
+        expect(geometry.keypad.every((item) => item.minHeight >= 64)).toBe(true);
+        expect(geometry.keypad.every((item) => item.height >= 63.5)).toBe(true);
+        expect(
+          geometry.keypad.every(
+            (item) => item.top >= -1 && item.bottom <= geometry.viewportHeight + 1,
+          ),
+        ).toBe(true);
+        expect(geometry.invitation?.minHeight).toBeGreaterThanOrEqual(44);
+        expect(geometry.invitation?.height).toBeGreaterThanOrEqual(43.5);
+        expect(geometry.invitation?.top).toBeGreaterThanOrEqual(-1);
+        expect(geometry.invitation?.bottom).toBeLessThanOrEqual(
+          geometry.viewportHeight + 1,
+        );
+        if (invited) {
+          await page.screenshot({
+            path: testInfo.outputPath(`login-${viewport.project}-invited.png`),
+          });
+        }
+      });
+    }
+  }
 
   test("keeps manager sign-in reachable and isolated from background PIN keys", async ({
     page,

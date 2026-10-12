@@ -83,7 +83,8 @@ function dto(row) {
     capabilities: relevant.map(function (id) {
       return {
         id: id,
-        label: labels[id],
+        label:
+          row.service === "openai" && id === "text" ? "Credential access" : labels[id],
         state: row.capabilities && row.capabilities[id] ? "verified" : "not_tested",
       };
     }),
@@ -96,7 +97,11 @@ function dto(row) {
           ? "Set up"
           : row.state === "ready"
             ? "Manage"
-            : "Test",
+            : row.service === "openai" && row.state === "needs_test"
+              ? row.capabilities && row.capabilities.text
+                ? "Image access still needs verification. This screen only checks credentials; repeating that check does not verify images."
+                : "Check credentials. Image verification is not available in Connections."
+              : "Test",
   };
 }
 function failure(c, error) {

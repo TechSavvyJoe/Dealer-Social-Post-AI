@@ -306,11 +306,13 @@ test.describe("Hosted staged release", () => {
       );
 
       const skipLink = page.getByRole("link", { name: /skip to main content/i });
+      await expect(page).toHaveURL(/#\/login$/);
+      const loginUrl = page.url();
       await skipLink.focus();
       await expect(skipLink).toBeFocused();
       await page.keyboard.press("Enter");
-      await expect(page).toHaveURL(/#main-content$/);
-      await page.evaluate(() => history.replaceState(null, "", "/"));
+      await expect(page.locator("#main-content")).toBeFocused();
+      await expect(page).toHaveURL(loginUrl);
 
       const myCodeButton = page.getByRole("button", { name: /my code/i });
       await myCodeButton.focus();

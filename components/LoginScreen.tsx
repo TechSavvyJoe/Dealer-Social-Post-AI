@@ -447,7 +447,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const digitsEntered = `${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`;
   const instruction = pendingAttempt
     ? "Complete the security check to continue."
-    : MODE_INSTRUCTIONS[entryMode];
+    : entryMode === "personal" && invitedDealer?.name
+      ? invitedDealer.name
+      : MODE_INSTRUCTIONS[entryMode];
 
   return (
     // The one moment on this screen (spec §4.4): the mark and the access panel
@@ -573,12 +575,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 </h1>
                 <p className="text-[15px] leading-[22px] text-ink-2">{instruction}</p>
                 {entryMode === "personal" && (
-                  <div>
-                    <p className="mt-2 text-sm text-ink-2">
-                      {invitedDealer?.name
-                        ? `This device is set up for ${invitedDealer.name}.`
-                        : "New to the team? Open your manager’s private dealership invitation first."}
-                    </p>
+                  <div className="login-invitation-note">
+                    {!invitedDealer && (
+                      <p className="mt-2 text-sm text-ink-2">
+                        New to the team? Open your manager’s private dealership
+                        invitation first.
+                      </p>
+                    )}
                     <PrivateInvitationEntry configured={!!invitedDealer} />
                   </div>
                 )}

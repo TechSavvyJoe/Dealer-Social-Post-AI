@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { useGemini } from "../hooks/useGemini";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -2609,6 +2611,87 @@ describe("GeminiService model routing", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("keeps the original accepted video beyond five minutes without another paid start", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST" && url.includes(":predictLongRunning")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ name: "operations/slow-clip" }),
+        };
+      }
+      if (url.includes("/operations/slow-clip")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            name: "operations/slow-clip",
+            done: Date.now() - startedAt >= 330_000,
+            ...(Date.now() - startedAt >= 330_000
+              ? {
+                  response: {
+                    generateVideoResponse: {
+                      generatedSamples: [
+                        {
+                          video: {
+                            uri: "https://generativelanguage.googleapis.com/v1beta/files/slow-clip:download",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                }
+              : {}),
+          }),
+        };
+      }
+      if (url.includes("/files/slow-clip:download")) {
+        return {
+          ok: true,
+          status: 200,
+          blob: async () =>
+            new Blob([makeMp4Bytes().buffer as ArrayBuffer], { type: "video/mp4" }),
+        };
+      }
+      throw new Error(`Unexpected request in video test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(global.URL, "createObjectURL").mockReturnValue("blob:slow-clip");
+    stubLoadedVideoImage();
+    const hook = renderHook(() => useGemini());
+    const generation = hook.result.current.runGeminiTask(
+      "ai.generate.video",
+      (signal) =>
+        generatePostVideo(
+          "data:image/jpeg;base64,fake",
+          VideoStyle.GoldenRadiance,
+          {
+            durationSeconds: 8,
+            aspectPreference: "auto",
+            resolution: "720p",
+            soundtrack: "none",
+            pacing: "snappy",
+          },
+          signal,
+        ),
+    );
+    const result = expect(generation).resolves.toBe("blob:slow-clip");
+    try {
+      await vi.advanceTimersByTimeAsync(355_000);
+      await result;
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) =>
+            url.includes(":predictLongRunning") && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      hook.unmount();
+    }
+  });
 
   it("retries polling for the accepted operation without restarting Veo", async () => {
     vi.useFakeTimers();

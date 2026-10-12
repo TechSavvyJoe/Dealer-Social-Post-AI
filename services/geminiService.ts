@@ -24,6 +24,7 @@ import {
   generateVideoPrompt,
 } from "./promptConfig";
 import { generateVideoNegativePrompt } from "./promptsV2";
+import { VIDEO_OPERATION_TIMEOUT_MS } from "./generationTimeouts";
 import { classifyCreativeBrief } from "./creativeSkills";
 import {
   logoCornerCheck,
@@ -3129,7 +3130,12 @@ export const generatePostVideo = async (
     if (operationName) {
       console.log("[VideoGen] Async operation started; polling.");
       return finishVideo(
-        await pollGeminiVideoOperation(operationName, 360000, signal, requestAuthEpoch),
+        await pollGeminiVideoOperation(
+          operationName,
+          VIDEO_OPERATION_TIMEOUT_MS,
+          signal,
+          requestAuthEpoch,
+        ),
       ); // Bounded recovery window for the accepted video job.
     }
 
@@ -3166,7 +3172,7 @@ export const generatePostVideo = async (
  */
 const pollGeminiVideoOperation = async (
   operationName: string,
-  timeoutMs: number = 300000,
+  timeoutMs: number = VIDEO_OPERATION_TIMEOUT_MS,
   signal?: AbortSignal,
   requestAuthEpoch: number = captureAuthEpoch(),
 ): Promise<string> => {

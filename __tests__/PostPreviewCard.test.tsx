@@ -46,6 +46,50 @@ const previewText = () =>
     .join("\n\n");
 
 describe("PostPreviewCard", () => {
+  it("recovers a failed preview by reloading the same clip without regenerating it", () => {
+    const load = vi
+      .spyOn(HTMLMediaElement.prototype, "load")
+      .mockImplementation(() => {});
+    const onSelectMedia = vi.fn();
+    const view = renderCard({ videoUrl: "blob:existing-clip", onSelectMedia });
+    try {
+      const video = screen.getByLabelText("Post video");
+      expect(screen.getByRole("status")).toHaveTextContent("Loading video");
+      fireEvent.canPlay(video);
+      expect(screen.queryByRole("status")).toBeNull();
+      fireEvent.waiting(video);
+      expect(screen.getByRole("status")).toHaveTextContent("Buffering video");
+      fireEvent.error(video);
+      expect(screen.getByRole("alert")).toHaveTextContent("This video couldn’t play");
+      fireEvent.click(screen.getByRole("button", { name: "Retry preview" }));
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(video).toHaveAttribute("src", "blob:existing-clip");
+      expect(onSelectMedia).not.toHaveBeenCalled();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByRole("status")).toHaveTextContent("Loading video");
+      fireEvent.loadedMetadata(video);
+      expect(screen.queryByRole("status")).toBeNull();
+    } finally {
+      view.unmount();
+      load.mockRestore();
+    }
+  });
+
+  it("clears a previous playback error when a different clip is selected", () => {
+    const view = renderCard({ videoUrl: "blob:first-clip" });
+    fireEvent.error(screen.getByLabelText("Post video"));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    view.rerender(<PostPreviewCard {...baseProps} videoUrl="blob:second-clip" />);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByLabelText("Post video")).toHaveAttribute(
+      "src",
+      "blob:second-clip",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Loading video");
+    fireEvent.canPlay(screen.getByLabelText("Post video"));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("keeps a pending swipe through a height-only resize and realigns after a width change", () => {
     vi.useFakeTimers();
     let notifyResize = () => {};

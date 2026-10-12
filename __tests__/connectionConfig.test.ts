@@ -728,6 +728,18 @@ describe("durable connection proof ledger", () => {
     expect(result.verification.state).toBe("verified");
     expect(result.capabilities).toMatchObject({ text: true, images: false });
   });
+  it("rejects OpenAI image readiness from its credential-only verification", () => {
+    const h = harness();
+    const ticket = h.reserve("openai");
+    expect(() =>
+      h.api.finalizeVerification(ticket, {
+        ok: true,
+        capabilities: ["text", "images"],
+      }),
+    ).toThrow("CONNECTION_PROOF_INVALID");
+    expect(h.api.getPublicConfig("openai").capabilities.images).toBe(false);
+    expect(h.api.getPublicConfig("openai").state).not.toBe("ready");
+  });
   it("rejects unearned capabilities and raw provider errors", () => {
     const h = harness();
     const ticket = h.reserve();

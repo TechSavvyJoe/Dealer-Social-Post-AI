@@ -219,6 +219,72 @@ describe("guided system connections", () => {
     expect(within(gemini).getByText("Caption access: Verified")).toBeVisible();
   });
 
+  it("shows verified OpenAI credentials without promising image readiness or another test", async () => {
+    const fixture = makeFixture();
+    const verified = connection("openai", "needs_test", {
+      capabilities: [
+        { id: "text", label: "Caption access", state: "verified" },
+        { id: "images", label: "Image generation", state: "not_tested" },
+      ],
+      lastVerifiedAt: "2026-10-09T12:00:00Z",
+    });
+    let checked = false;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      if (String(input) === "/api/app/connections/openai/test") {
+        checked = true;
+        return jsonResponse(verified);
+      }
+      const current = structuredClone(fixture);
+      if (checked) current.services[2] = verified;
+      return jsonResponse(current);
+    });
+    mount();
+    fireEvent.click(await screen.findByText("Optional AI backups"));
+    const openai = await screen.findByRole("article", { name: /OpenAI fallback/ });
+    fireEvent.click(within(openai).getByRole("button", { name: "Check credentials" }));
+    expect(await within(openai).findByText("Credentials verified")).toBeVisible();
+    expect(within(openai).getByLabelText("Credential access: Verified")).toBeVisible();
+    expect(within(openai).getByLabelText("Image generation: Not tested")).toBeVisible();
+    expect(
+      within(openai).getByRole("button", { name: "Recheck credentials" }),
+    ).toBeVisible();
+    expect(
+      within(openai).getByText(/repeating the credential check will not verify images/),
+    ).toBeVisible();
+    expect(
+      within(openai).getByText(/rechecking credentials does not test images/),
+    ).toBeVisible();
+    expect(within(openai).queryByText("Ready")).not.toBeInTheDocument();
+    expect(within(openai).queryByText("Test required")).not.toBeInTheDocument();
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.filter(
+          ([url]) => String(url) === "/api/app/connections/openai/test",
+        ),
+    ).toHaveLength(1);
+  });
+
+  it("keeps optional OpenAI off neutral even when historical credential proof exists", async () => {
+    const fixture = makeFixture();
+    fixture.services[2] = connection("openai", "off", {
+      capabilities: [
+        { id: "text", label: "Caption access", state: "verified" },
+        { id: "images", label: "Image generation", state: "not_tested" },
+      ],
+    });
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(fixture));
+    mount();
+    fireEvent.click(await screen.findByText("Optional AI backups"));
+    const openai = await screen.findByRole("article", { name: /OpenAI fallback/ });
+    expect(within(openai).getByText("Off")).toBeVisible();
+    expect(within(openai).getByText("Optional")).toBeVisible();
+    expect(within(openai).queryByText("Credentials verified")).not.toBeInTheDocument();
+    expect(
+      within(openai).getByRole("button", { name: "Check credentials" }),
+    ).toBeDisabled();
+  });
+
   it("loads named website proofs and only enables tests after a proof is selected", async () => {
     const user = userEvent.setup();
     const fixture = makeFixture();

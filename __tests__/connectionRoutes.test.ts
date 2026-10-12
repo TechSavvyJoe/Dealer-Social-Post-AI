@@ -112,6 +112,33 @@ describe("guided connection route boundaries", () => {
       expect(h.send).not.toHaveBeenCalled();
     }
   });
+  it("distinguishes verified OpenAI credentials from unverified images without another provider call", () => {
+    const h = harness("super_admin");
+    const original = h.cfg.getPublicConfig.getMockImplementation()!;
+    h.cfg.getPublicConfig.mockImplementation((service, dealerId) => ({
+      ...original(service, dealerId),
+      ...(service === "openai"
+        ? {
+            capabilities: { text: true, images: false },
+            verification: { state: "verified" },
+          }
+        : {}),
+    }));
+    const result = h.api.inventory(h.c);
+    const openai = result.payload.services.find(
+      (row: { service: string }) => row.service === "openai",
+    );
+    expect(openai).toMatchObject({
+      state: "needs_test",
+      capabilities: [
+        { id: "text", label: "Credential access", state: "verified" },
+        { id: "images", label: "Image generation", state: "not_tested" },
+      ],
+    });
+    expect(openai.nextAction).toContain("repeating that check does not verify images");
+    expect(JSON.stringify(result.payload)).not.toContain(h.sensitive);
+    expect(h.send).not.toHaveBeenCalled();
+  });
   it("redacts central infrastructure settings in the dealership status view", () => {
     const h = harness("dealer_admin");
     const result = h.api.dealerStatus(h.c);

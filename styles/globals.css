@@ -620,40 +620,22 @@
     }
   }
 
-  /* Short PORTRAIT phones. The sign-in stack — lockup, heading, switch, a
-     labelled 56px field and four 64px key rows over a closing note — needs
-     roughly 686px, which an iPhone SE (667), a 360x640 Android or a 320x568
-     phone does not have. The pane scrolls at every breakpoint now, but the
-     keypad should not need scrolling to be used, so short portrait sheds the
-     same chrome short landscape does, in two steps. The keys never shrink.
+  /* Short PORTRAIT phones. Keep the full keypad and invitation action in view
+     by removing repeated explanatory copy and the mobile lockup before
+     shrinking any useful controls. The pane remains scrollable for modes with
+     longer forms. The keys never shrink.
      `!important` throughout for the same reason as the landscape block: these
      rules sit in @layer components, under the elements' own utilities. */
   @media (orientation: portrait) and (max-height: 720px) {
-    .login-code-label {
-      display: none !important;
+    .login-access-pane {
+      padding: 0.75rem 1rem !important;
     }
 
-    .login-code-slot {
-      height: 3rem !important;
-    }
-
-    .login-form {
-      row-gap: 1.25rem !important;
-    }
-
-    .login-mode-panel {
-      gap: 1rem !important;
-    }
-
-    /* 44 + 286 of keys is the screen's whole job; the closing hint stands down
-       first, exactly as it does in landscape. */
-    .login-footer-note {
-      display: none !important;
-    }
-  }
-
-  @media (orientation: portrait) and (max-height: 620px) {
     .login-mobile-logo {
+      display: none !important;
+    }
+
+    .login-code-label {
       display: none !important;
     }
 
@@ -662,7 +644,21 @@
     }
 
     .login-form {
-      row-gap: 1rem !important;
+      row-gap: 0.5rem !important;
+    }
+
+    .login-mode-panel {
+      gap: 0.5rem !important;
+    }
+
+    /* Keep the selected dealer in the instruction line above; avoid repeating
+       its name beside the action where it would push the full keypad below. */
+    .login-invitation-note > p {
+      display: none !important;
+    }
+
+    .login-footer-note {
+      display: none !important;
     }
   }
 
