@@ -380,7 +380,7 @@ const { response: rootResponse, text: html } = await fetchText("/");
 const csp = rootResponse.headers.get("content-security-policy") || "";
 const requiredCspDirectives = [
   "default-src 'self'",
-  "script-src 'self' https://challenges.cloudflare.com",
+  "script-src 'self' 'sha256-o+4kI1r0Dv6RDMKm3/VtsLMcE6aR+PGeatWcEpd9/uw=' 'wasm-unsafe-eval' https://challenges.cloudflare.com",
   "frame-src https://challenges.cloudflare.com",
   "object-src 'none'",
   "base-uri 'self'",
@@ -880,6 +880,10 @@ promote_release() {
     "$deployment_id" \
     "$attempt_id"
   npx --yes "vercel@${VERCEL_CLI_VERSION}" promote "$deployment_url" --yes
+  # Automatic custom-domain assignment is disabled for this project. Bind the
+  # canonical host explicitly, then prove its deployment ID and served bytes.
+  npx --yes "vercel@${VERCEL_CLI_VERSION}" alias set \
+    "$deployment_url" "${PRODUCTION_VERCEL_ORIGIN#https://}" --scope "$EXPECTED_VERCEL_ORG_ID"
   assert_promoted_deployment "$deployment_id"
   assert_release_health "$PRODUCTION_VERCEL_ORIGIN" "$release_sha" "vercel-production"
   assert_trusted_proxy_route "$PRODUCTION_VERCEL_ORIGIN" "vercel-production"

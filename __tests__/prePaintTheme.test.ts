@@ -8,7 +8,7 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8"
 /**
  * The pre-paint theme snippet is the only inline script the CSP allows, via a
  * sha256 source in vercel.ts. These assertions keep the three copies of that
- * contract (index.html, vercel.ts, the staged-release e2e pin) in lockstep:
+ * contract (index.html, vercel.ts, and both staged-release gates) in lockstep:
  * editing the snippet without re-hashing fails here instead of shipping a
  * frontend whose theme script is silently blocked in production.
  */
@@ -25,6 +25,7 @@ describe("pre-paint theme script contract", () => {
     const source = `'sha256-${digest}'`;
     expect(read("vercel.ts")).toContain(`script-src 'self' ${source}`);
     expect(read("e2e/staged-release.spec.ts")).toContain(source);
+    expect(read("scripts/vercel-staged-release.sh")).toContain(source);
   });
 
   it("reads the persisted session and only ever adds the light class", () => {
