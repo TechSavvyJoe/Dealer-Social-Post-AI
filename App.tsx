@@ -446,6 +446,7 @@ const AppContent: React.FC = () => {
       )}
       <main
         id="main-content"
+        tabIndex={-1}
         ref={mainRef}
         className={
           step === AppStep.LOGIN

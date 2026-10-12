@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Edit3, Film, Image as ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "../ui/Button";
 import { captionIncludesEmployeeDisclosure } from "../../utils/complianceDisclosures";
@@ -109,6 +109,13 @@ export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
   const scrollSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clipUrl = availableVideoUrl || videoUrl;
   const selectedMedia = videoUrl ? "video" : "image";
+  const [playback, setPlayback] = useState<{
+    url: string | null | undefined;
+    state: "loading" | "ready" | "buffering" | "error";
+  }>({ url: clipUrl, state: "loading" });
+  const playbackState = playback.url === clipUrl ? playback.state : "loading";
+  const updatePlayback = (state: typeof playback.state) =>
+    setPlayback({ url: clipUrl, state });
   useEffect(() => {
     const rail = mediaRailRef.current;
     if (scrollSettleRef.current) clearTimeout(scrollSettleRef.current);
@@ -214,6 +221,7 @@ export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
                 aria-hidden={selectedMedia !== "video"}
               >
                 <video
+                  key={clipUrl}
                   ref={playerRef}
                   src={clipUrl}
                   poster={image}
@@ -224,7 +232,43 @@ export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
                   tabIndex={selectedMedia === "video" ? 0 : -1}
                   className={mediaPreviewClass}
                   aria-label="Post video"
+                  onLoadStart={() => updatePlayback("loading")}
+                  onLoadedMetadata={() => updatePlayback("ready")}
+                  onLoadedData={() => updatePlayback("ready")}
+                  onCanPlay={() => updatePlayback("ready")}
+                  onPlaying={() => updatePlayback("ready")}
+                  onWaiting={() => updatePlayback("buffering")}
+                  onError={() => updatePlayback("error")}
                 />
+                {selectedMedia === "video" && playbackState === "error" ? (
+                  <div className="border-t border-hairline px-4 py-3">
+                    <p role="alert" className="text-sm text-ink">
+                      This video couldn’t play. Retry the preview without creating
+                      another video.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="mt-2"
+                      onClick={() => {
+                        updatePlayback("loading");
+                        playerRef.current?.load();
+                      }}
+                    >
+                      Retry preview
+                    </Button>
+                  </div>
+                ) : selectedMedia === "video" && playbackState !== "ready" ? (
+                  <p
+                    role="status"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-ink-2"
+                  >
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    {playbackState === "buffering"
+                      ? "Buffering video…"
+                      : "Loading video…"}
+                  </p>
+                ) : null}
               </div>
               <div
                 className="w-full shrink-0 snap-center"
