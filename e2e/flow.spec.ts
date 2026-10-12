@@ -559,7 +559,13 @@ test.describe("Dealer Social Post AI Flow", () => {
           });
           expect(geometry.keypad.length).toBe(11);
           const expectedKeyHeight =
-            viewport.width < 1024 && viewport.height < 500 ? 48 : 64;
+            viewport.width < 1024 && viewport.height < 500
+              ? 48
+              : viewport.width < 768 &&
+                  viewport.height > viewport.width &&
+                  geometry.accessPane.height < 480
+                ? 56
+                : 64;
           expect(
             geometry.keypad.every((item) => item.minHeight >= expectedKeyHeight),
           ).toBe(true);
@@ -1039,7 +1045,9 @@ test.describe("Dealer Social Post AI Flow", () => {
     const isDesktop = testInfo.project.name.endsWith("desktop-1440");
     const postPreview = page.getByRole("region", { name: "Post preview" });
     const postActions = page.getByRole("region", { name: "Post actions" });
-    await expect(postPreview).toBeVisible();
+    // A cold Vite worker can still be compiling the lazy result workspace after
+    // session restoration. Use the workspace-load budget before checking layout.
+    await expect(postPreview).toBeVisible({ timeout: 15_000 });
     await expect(postActions).toBeVisible();
     const viewportWidth = page.viewportSize()?.width ?? 1440;
     if (viewportWidth >= 1024) {

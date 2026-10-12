@@ -839,8 +839,9 @@ const WorkspaceBody: React.FC<ContentWorkspaceProps> = ({
                 <Button
                   variant="secondary"
                   onClick={() => {
+                    const retryCursor = !actionError && error ? nextCursor : null;
                     setActionError(null);
-                    void load();
+                    void load(retryCursor || undefined);
                     setDetailVersion((value) => value + 1);
                   }}
                 >

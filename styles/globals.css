@@ -875,6 +875,14 @@
         display: none;
       }
     }
+
+    /* Update banners reduce the usable pane on short portrait phones. Keep
+       every key inside that pane while retaining generous 56px touch targets. */
+    @container login-access (max-height: 480px) {
+      .login-key {
+        min-height: 3.5rem !important;
+      }
+    }
   }
 
   @media (max-width: 1023px) and (orientation: landscape) and (max-height: 500px) {
