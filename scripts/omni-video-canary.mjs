@@ -1,7 +1,7 @@
 // Fresh PocketBase 0.22.55 + loopback provider only. Never opens existing pb_data.
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtemp, mkdir, cp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, cp, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,7 @@ assert.match(
 );
 const root = fileURLToPath(new URL("..", import.meta.url));
 const scratch = await mkdtemp(join(tmpdir(), "dsp-omni-video-"));
+const rollbackMigration = "1791660000_omni_interactions.js";
 const probeSecret = randomBytes(24).toString("hex");
 const password = randomBytes(24).toString("hex");
 const checks = [];
@@ -326,6 +327,18 @@ routerAdd("POST", "/__omni/probe", (c) => {
     "two synthetic dealerships and personal identities provisioned through normal app APIs",
   );
   db = new DatabaseSync(join(scratch, "data/data.db"));
+  const runtimeMigrationFiles = (await readdir(join(scratch, "migrations")))
+    .filter((file) => file.endsWith(".js"))
+    .sort();
+  assert.deepEqual(
+    db
+      .prepare("SELECT file FROM _migrations ORDER BY file")
+      .all()
+      .map((row) => row.file)
+      .filter((file) => file.endsWith(".js")),
+    runtimeMigrationFiles,
+    "Runtime canary must apply every current app migration, including later migrations",
+  );
   const image = (await readFile(join(root, "e2e/fixtures/spin-angle.jpg"))).toString(
     "base64",
   );
@@ -605,19 +618,12 @@ routerAdd("POST", "/__omni/probe", (c) => {
         r.path === "/v1beta/operations/legacy-veo-canary",
     ),
   );
-  // Offline rollback test uses the same disposable database after stopping its
-  // sole server. Refusing a nonempty queue must preserve schema/history/data.
+  // Keep runtime coverage on the complete current schema. Test this historical
+  // migration's down/up boundary on a separate fresh database, never by rolling
+  // back unrelated later migrations or rewriting the runtime migration ledger.
   const stop = once(child, "exit");
   child.kill("SIGTERM");
   await stop;
-  const lastMigration = db
-    .prepare("SELECT file FROM _migrations ORDER BY file DESC LIMIT 1")
-    .get().file;
-  assert.equal(
-    lastMigration,
-    "1791660000_omni_interactions.js",
-    "Only the new last migration may be rolled back by this canary",
-  );
   const rowsBeforeDown = db
     .prepare("SELECT * FROM omni_interactions ORDER BY id")
     .all();
@@ -625,14 +631,78 @@ routerAdd("POST", "/__omni/probe", (c) => {
     rowsBeforeDown.length > 0,
     "Malformed accepted generation should still have durable recovery",
   );
-  const migrationArgs = [
-    "migrate",
-    "down",
-    "1",
-    `--dir=${join(scratch, "data")}`,
+  db.close();
+  db = undefined;
+  const rollbackRoot = await mkdtemp(join(scratch, "rollback-"));
+  const rollbackMigrations = join(rollbackRoot, "migrations");
+  const rollbackData = join(rollbackRoot, "data");
+  await mkdir(rollbackMigrations);
+  const migrationPrefix = (await readdir(join(scratch, "migrations")))
+    .filter((file) => file.endsWith(".js") && file <= rollbackMigration)
+    .sort();
+  assert.equal(migrationPrefix.at(-1), rollbackMigration);
+  for (const file of migrationPrefix)
+    await cp(join(scratch, "migrations", file), join(rollbackMigrations, file));
+  const migrationPaths = [
+    `--dir=${rollbackData}`,
     `--hooksDir=${join(scratch, "hooks")}`,
-    `--migrationsDir=${join(scratch, "migrations")}`,
+    `--migrationsDir=${rollbackMigrations}`,
   ];
+  const up = () =>
+    spawnSync(binary, ["migrate", "up", ...migrationPaths], {
+      encoding: "utf8",
+      timeout: 30000,
+      env: { PATH: process.env.PATH },
+    });
+  const bootstrapped = up();
+  assert.equal(
+    bootstrapped.status,
+    0,
+    "Fresh rollback migration prefix must apply: " +
+      (bootstrapped.stderr || bootstrapped.stdout),
+  );
+  db = new DatabaseSync(join(rollbackData, "data.db"));
+  const migrationLedger = db
+    .prepare("SELECT file FROM _migrations ORDER BY file")
+    .all()
+    .map((row) => row.file);
+  // PocketBase also records its built-in Go migrations. Verify every app
+  // migration exactly, then preserve the complete ledger throughout down/up.
+  assert.deepEqual(
+    migrationLedger.filter((file) => file.endsWith(".js")),
+    migrationPrefix,
+    "Rollback database must contain exactly the migration prefix through Omni",
+  );
+  const lastMigration = db
+    .prepare("SELECT file FROM _migrations ORDER BY file DESC LIMIT 1")
+    .get().file;
+  assert.equal(
+    lastMigration,
+    rollbackMigration,
+    "Only the target migration may be rolled back in the isolated prefix database",
+  );
+  const columns = Object.keys(rowsBeforeDown[0]);
+  const insertRecovery = db.prepare(
+    `INSERT INTO omni_interactions (${columns.map((column) => '"' + column.replaceAll('"', '""') + '"').join(",")}) VALUES (${columns.map(() => "?").join(",")})`,
+  );
+  for (const row of rowsBeforeDown)
+    insertRecovery.run(...columns.map((column) => row[column]));
+  const durableMigrationState = () => ({
+    schema: db.prepare("SELECT * FROM sqlite_master ORDER BY type, name").all(),
+    collections: db.prepare("SELECT * FROM _collections ORDER BY id").all(),
+    history: db.prepare("SELECT * FROM _migrations ORDER BY file").all(),
+    recovery: db.prepare("SELECT * FROM omni_interactions ORDER BY id").all(),
+  });
+  const beforeRefusal = durableMigrationState();
+  const recoveryColumns = db.prepare("PRAGMA table_info(omni_interactions)").all();
+  const recoveryIndexes = () =>
+    db
+      .prepare(
+        "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'omni_interactions' ORDER BY name",
+      )
+      .all();
+  const indexesBeforeDown = recoveryIndexes();
+  const migrationArgs = ["migrate", "down", "1", ...migrationPaths];
   // PB 0.22's survey prompt requires a terminal and cursor-position replies;
   // a piped "y" silently cancels. The stdlib PTY helper answers only this
   // disposable command's migration prompt, then propagates its exit status.
@@ -686,10 +756,7 @@ sys.exit(os.waitstatus_to_exitcode(status))
     (refused.stdout || "") + (refused.stderr || ""),
     /pending video recovery/i,
   );
-  assert.deepEqual(
-    db.prepare("SELECT * FROM omni_interactions ORDER BY id").all(),
-    rowsBeforeDown,
-  );
+  assert.deepEqual(durableMigrationState(), beforeRefusal);
   assert.equal(
     db
       .prepare("SELECT COUNT(*) AS count FROM _migrations WHERE file = ?")
@@ -718,8 +785,67 @@ sys.exit(os.waitstatus_to_exitcode(status))
       .get(lastMigration).count,
     0,
   );
+  assert.deepEqual(db.prepare("PRAGMA table_info(omni_interactions)").all(), []);
+  assert.deepEqual(recoveryIndexes(), []);
+  assert.deepEqual(
+    db
+      .prepare("SELECT file FROM _migrations ORDER BY file")
+      .all()
+      .map((row) => row.file),
+    migrationLedger.filter((file) => file !== rollbackMigration),
+    "Rollback must remove only the target migration ledger entry",
+  );
+  const reapplied = up();
+  assert.equal(
+    reapplied.status,
+    0,
+    "Empty recovery queue migration must reapply: " +
+      (reapplied.stderr || reapplied.stdout),
+  );
+  assert.deepEqual(
+    db.prepare("PRAGMA table_info(omni_interactions)").all(),
+    recoveryColumns,
+  );
+  assert.deepEqual(recoveryIndexes(), indexesBeforeDown);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM omni_interactions").get().count,
+    0,
+  );
+  assert.deepEqual(
+    db
+      .prepare("SELECT file FROM _migrations ORDER BY file")
+      .all()
+      .map((row) => row.file),
+    migrationLedger,
+  );
+  assert.deepEqual(
+    {
+      ...db
+        .prepare(
+          "SELECT listRule, viewRule, createRule, updateRule, deleteRule FROM _collections WHERE name = 'omni_interactions'",
+        )
+        .get(),
+    },
+    {
+      listRule: null,
+      viewRule: null,
+      createRule: null,
+      updateRule: null,
+      deleteRule: null,
+    },
+  );
+  report.rollback = {
+    environment:
+      "separate fresh disposable database; exact migration prefix through Omni",
+    target: rollbackMigration,
+    migrations: migrationPrefix.length,
+    runtimeMigrations: runtimeMigrationFiles.length,
+    laterRuntimeMigrations: runtimeMigrationFiles.filter(
+      (file) => file > rollbackMigration,
+    ),
+  };
   checks.push(
-    "real PocketBase down migration refuses nonempty queue without data/schema/history loss; empty queue rollback succeeds",
+    "real PocketBase isolated-prefix down migration refuses nonempty queue without data/schema/history loss; empty queue down/up physically removes/restores private recovery schema",
   );
   report.status = "passed";
   report.completedAt = new Date().toISOString();

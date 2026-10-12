@@ -661,6 +661,7 @@ const WorkspaceBody: React.FC<ContentWorkspaceProps> = ({
                   type="search"
                   aria-label="Search saved posts"
                   placeholder="Search saved content…"
+                  maxLength={120}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
@@ -1075,7 +1076,7 @@ const WorkspaceBody: React.FC<ContentWorkspaceProps> = ({
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Add a specific instruction for the creator…"
-            maxLength={2000}
+            maxLength={280}
             rows={4}
             autoFocus
           />
