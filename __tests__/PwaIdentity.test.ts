@@ -179,7 +179,8 @@ describe("installable product identity", () => {
     expect(logo).toContain('aria-hidden="true"');
     expect(logo).toMatch(/>\s*Dealer Social\s*<\/span>/);
     expect(logo).toContain("M0 0H100C124 0 145 8 162 31");
-    expect(logo).toContain('"#315CE6"');
+    expect(logo).toContain("rgb(var(--product-mark-accent))");
+    expect(symbol).toContain('fill="#315CE6"');
     expect(logo).toContain("Dealer Social Post AI");
     expect(symbol).toContain(">Dealer Social</title>");
     expect(symbol).toContain("official product name Dealer Social Post AI");

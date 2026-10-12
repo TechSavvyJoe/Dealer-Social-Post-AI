@@ -50,6 +50,12 @@
     --info-ink: var(--ink-2);
     --info-fill: var(--fill-subtle);
 
+    /* Product artwork stays consistent with the immutable app-icon palette.
+       These are identity colors, independent of a dealership's UI accent. */
+    --product-mark-background: 17 21 23;
+    --product-mark-foreground: 244 245 245;
+    --product-mark-accent: 49 92 230;
+
     /* --- Brand accent. The product's own colour is a deep navy, used
        wherever no dealership is signed in (login, system admin) and for a
        store that has not set a brand colour. hooks/useDealerTheme.ts
