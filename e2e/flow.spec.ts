@@ -467,7 +467,8 @@ test.describe("Dealer Social Post AI Flow", () => {
     { project: "desktop-1440", width: 1024, height: 500 },
   ]) {
     for (const invited of [false, true]) {
-      const updatePromptModes = viewport.width < 400 ? [false, true] : [false];
+      const updatePromptModes =
+        viewport.width < 400 || viewport.height < 500 ? [false, true] : [false];
       for (const withPendingUpdatePrompt of updatePromptModes) {
         test(`keeps the personal keypad and invitation action visible at ${viewport.width}px (${invited ? "invited" : "uninvited"}${withPendingUpdatePrompt ? ", pending update prompt" : ""})`, async ({
           page,
@@ -545,6 +546,9 @@ test.describe("Dealer Social Post AI Flow", () => {
             };
             return {
               viewportHeight: window.innerHeight,
+              accessPane: bounds(
+                document.querySelector<HTMLElement>(".login-access-pane")!,
+              ),
               keypad: keypadButtons.map(bounds),
               invitation: invitation ? bounds(invitation) : null,
             };
@@ -554,8 +558,14 @@ test.describe("Dealer Social Post AI Flow", () => {
             contentType: "application/json",
           });
           expect(geometry.keypad.length).toBe(11);
-          expect(geometry.keypad.every((item) => item.minHeight >= 64)).toBe(true);
-          expect(geometry.keypad.every((item) => item.height >= 63.5)).toBe(true);
+          const expectedKeyHeight =
+            viewport.width < 1024 && viewport.height < 500 ? 48 : 64;
+          expect(
+            geometry.keypad.every((item) => item.minHeight >= expectedKeyHeight),
+          ).toBe(true);
+          expect(
+            geometry.keypad.every((item) => item.height >= expectedKeyHeight - 0.5),
+          ).toBe(true);
           if (viewport.width === 1024) {
             // Short desktop windows keep the normal single-column form and
             // scroll it, instead of squeezing a phone's two-column layout.
@@ -568,7 +578,13 @@ test.describe("Dealer Social Post AI Flow", () => {
           } else {
             expect(
               geometry.keypad.every(
-                (item) => item.top >= -1 && item.bottom <= geometry.viewportHeight + 1,
+                (item) =>
+                  item.top >= Math.max(-1, geometry.accessPane.top - 1) &&
+                  item.bottom <=
+                    Math.min(
+                      geometry.viewportHeight + 1,
+                      geometry.accessPane.bottom + 1,
+                    ),
               ),
               JSON.stringify(geometry),
             ).toBe(true);

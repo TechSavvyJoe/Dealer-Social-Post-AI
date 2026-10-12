@@ -533,6 +533,46 @@ function publicationSummariesForDealer(dealerId) {
   return result;
 }
 
+// Strict, per-batch summaries: unlike the legacy dealership aggregate, this
+// cannot omit older published posts after a 2,000-row ceiling.
+function publicationSummariesForPosts(dao, dealerId, postIds) {
+  const result = {};
+  for (let offset = 0; offset < postIds.length; offset += 200) {
+    const params = { dealer: dealerId };
+    const placeholders = postIds.slice(offset, offset + 200).map(function (id, i) {
+      params["post" + i] = id;
+      return "{:post" + i + "}";
+    });
+    const rows = arrayOf(
+      new DynamicModel({
+        post: "",
+        status: "",
+        attempts: 0,
+        review_url: "",
+        last_error: "",
+        updated: "",
+      }),
+    );
+    dao
+      .db()
+      .newQuery(
+        "SELECT p.post, p.status, p.attempts, p.review_url, p.last_error, p.updated " +
+          "FROM website_publications p WHERE p.dealer = {:dealer} AND p.post IN (" +
+          placeholders.join(",") +
+          ") " +
+          "AND p.id = (SELECT latest.id FROM website_publications latest " +
+          "WHERE latest.post = p.post AND latest.dealer = {:dealer} " +
+          "ORDER BY latest.source_revision DESC, latest.created DESC, latest.id DESC LIMIT 1)",
+      )
+      .bind(params)
+      .all(rows);
+    rows.forEach(function (row) {
+      result[row.post] = publicationSummary(row);
+    });
+  }
+  return result;
+}
+
 function hasValidLinkedReleaseWithDao(dao, post) {
   if (!recordBool(post, "release_required")) return true;
   if (
@@ -660,10 +700,10 @@ function postReadiness(post) {
   return postReadinessWithDao($app.dao(), post);
 }
 
-function savePublicationState(record, values) {
+function savePublicationState(record, values, dao) {
   const keys = Object.keys(values || {});
   for (let i = 0; i < keys.length; i++) record.set(keys[i], values[keys[i]]);
-  $app.dao().saveRecord(record);
+  (dao || $app.dao()).saveRecord(record);
   return record;
 }
 
@@ -811,6 +851,7 @@ function claimPublicationForPost(
   $app.dao().runInTransaction(function (txDao) {
     acquirePostWriteFence(txDao, postId);
     const post = txDao.findRecordById("posts", postId);
+    require(__hooks + "/postWorkspace.js").assertActive(txDao, post.id);
     const dealerId = recordString(post, "dealer");
     if (expectedDealerId && dealerId !== expectedDealerId) {
       throw new Error("website_dealer_conflict");
@@ -8277,17 +8318,21 @@ function processDuePublications(limit) {
   return { processed: processed };
 }
 
-function retryPublication(post) {
-  const publication = findPublicationForPost(post.id, "");
+function retryPublicationWithDao(post, dao) {
+  const publication = findPublicationForPostWithDaoStrict(dao, post.id, "");
   // Retry is never an alternate enqueue path. A first handoff must carry the
   // exact post revision through claimPublicationForPost.
   if (!publication) throw new Error("website_request_not_sent");
   const currentStatus = recordString(publication, "status");
   if (currentStatus === "draft_ready") {
     if (recordString(publication, "last_error")) {
-      return savePublicationState(publication, {
-        next_attempt_at: new Date().toISOString(),
-      });
+      return savePublicationState(
+        publication,
+        {
+          next_attempt_at: new Date().toISOString(),
+        },
+        dao,
+      );
     }
     throw new Error("website_draft_already_ready");
   }
@@ -8297,7 +8342,7 @@ function retryPublication(post) {
   if (currentStatus === "withdrawn") {
     throw new Error("website_request_withdrawn");
   }
-  const readiness = postReadiness(post);
+  const readiness = postReadinessWithDao(dao, post);
   if (readiness.terminal) throw new Error(readiness.code);
   const now = new Date().toISOString();
   const values = {
@@ -8313,7 +8358,18 @@ function retryPublication(post) {
   if (readiness.ready) {
     values.payload_sent_at = payloadSentAtForFirstQueue(publication, now);
   }
-  return savePublicationState(publication, values);
+  return savePublicationState(publication, values, dao);
+}
+
+function retryPublication(post) {
+  let result;
+  $app.dao().runInTransaction(function (tx) {
+    acquirePostWriteFence(tx, post.id);
+    require(__hooks + "/postWorkspace.js").assertActive(tx, post.id);
+    const current = tx.findRecordById("posts", post.id);
+    result = retryPublicationWithDao(current, tx);
+  });
+  return result;
 }
 
 // Called only after the admin route validates its selected dealership. Test
@@ -8381,12 +8437,14 @@ module.exports = {
   publicationSummary,
   publicationSummaryForPost,
   publicationSummariesForDealer,
+  publicationSummariesForPosts,
   findPublicationForPost,
   findPublicationForPostWithDao,
   findPublicationForPostWithDaoStrict,
   postReadiness,
   hasValidLinkedRelease,
   claimPublicationForPost,
+  acquirePostWriteFence,
   publicationEventIdForPostRevision,
   publicationEventRevisionMatches,
   publicationSourceSnapshotHash,

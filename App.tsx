@@ -323,6 +323,14 @@ const AppContent: React.FC = () => {
       app.setStep(AppStep.HOME);
       useAppStore.getState().setPendingPhoto(selection);
     });
+  const createContent = () =>
+    requestLeave(() =>
+      replaceWorkspace(() => {
+        app.supersedeGeneration();
+        app.reset();
+        app.setStep(AppStep.HOME);
+      }),
+    );
   const requestLogout = () => {
     if (step === AppStep.DETAILS && useAppStore.getState().pendingRelease) {
       confirmLeave("draft", () => {
@@ -475,6 +483,7 @@ const AppContent: React.FC = () => {
           onOpenPost={openPost}
           onReusePhoto={reusePhoto}
           onReset={() => requestLeave(app.reset)}
+          onCreateContent={createContent}
           onBackFromWork={goBack}
           onManagementDirtyChange={setManagementDirty}
           onSpinDirtyChange={setSpinDirty}

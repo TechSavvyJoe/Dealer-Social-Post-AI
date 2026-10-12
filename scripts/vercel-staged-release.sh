@@ -157,6 +157,20 @@ process.stdout.write(normalized);
 NODE
 }
 
+deployment_id_from_json() {
+  local deploy_output_file="$1"
+
+  node - "$deploy_output_file" <<'NODE'
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const candidate = [payload?.id, payload?.deployment?.id].find(
+  (value) => typeof value === "string" && /^dpl_[A-Za-z0-9]+$/.test(value),
+);
+if (!candidate) process.exit(1);
+process.stdout.write(candidate);
+NODE
+}
+
 validate_deployment_id() {
   [[ "$1" =~ ^dpl_[A-Za-z0-9]+$ ]]
 }
@@ -206,8 +220,39 @@ if (
 ) {
   process.exit(1);
 }
+
 process.stdout.write(deployment.id);
 NODE
+}
+
+wait_for_staged_deployment_id() {
+  local deployment_url="$1"
+  local expected_deployment_id="$2"
+  local result state deployment_id attempt elapsed remaining
+  local started_at="$SECONDS"
+
+  for ((attempt = 1; attempt <= 60; attempt++)); do
+    elapsed=$((SECONDS - started_at))
+    remaining=$((300 - elapsed))
+    ((remaining > 0)) ||
+      fail "the staged Vercel deployment did not become ready within five minutes."
+    result="$(node scripts/stagedVercelDeployment.mjs --inspect \
+      "$deployment_url" \
+      "$VERCEL_CLI_VERSION" \
+      "$expected_deployment_id" \
+      "$EXPECTED_VERCEL_PROJECT_ID" \
+      "$EXPECTED_VERCEL_PROJECT_NAME" \
+      "$((remaining * 1000))")" ||
+      fail "Vercel inspection timed out, returned invalid deployment identity, or reached a terminal state."
+    read -r state deployment_id <<< "$result"
+    if [[ "$state" = "READY" ]]; then
+      printf '%s' "$deployment_id"
+      return 0
+    fi
+    ((attempt < 60)) && sleep 5
+  done
+
+  fail "the staged Vercel deployment did not become ready within five minutes."
 }
 
 inspect_alias_deployment_id() {
@@ -793,7 +838,7 @@ assert_current_promoted_deployment() {
 
 stage_release() {
   local release_sha="${2:-${RELEASE_SHA:-}}"
-  local attempt_id deployment_url deployment_id
+  local attempt_id deployment_url deployment_id submitted_deployment_id
   local deploy_output_file="$work_dir/vercel-deploy.json"
   local env_inventory_file="$work_dir/vercel-production-env.json"
 
@@ -824,12 +869,14 @@ stage_release() {
     fail "the prebuilt frontend does not contain its selected release SHA."
 
   npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy \
-    --prebuilt --prod --skip-domain --yes --json > "$deploy_output_file"
+    --prebuilt --prod --skip-domain --yes --json --no-wait > "$deploy_output_file"
   deployment_url="$(deployment_url_from_json "$deploy_output_file")" ||
     fail "Vercel returned invalid staged deployment JSON."
+  submitted_deployment_id="$(deployment_id_from_json "$deploy_output_file")" ||
+    fail "Vercel did not return an immutable staged deployment ID."
   validate_deployment_url "$deployment_url" ||
     fail "Vercel did not return a canonical staged deployment URL."
-  deployment_id="$(inspect_deployment_id "$deployment_url")" ||
+  deployment_id="$(wait_for_staged_deployment_id "$deployment_url" "$submitted_deployment_id")" ||
     fail "Vercel did not return a ready immutable deployment ID."
   validate_deployment_id "$deployment_id" ||
     fail "Vercel returned an invalid immutable deployment ID."

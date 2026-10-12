@@ -158,7 +158,7 @@ describe("PocketBase post compliance policy", () => {
     const secondValidation = hook.lastIndexOf("policies.validatePostComplianceSet(");
     const postSubmit = hook.indexOf("form.submit();", firstValidation);
     const conditionalApproval = hook.indexOf(
-      "\"AND approval_status = 'pending'\"",
+      "\"AND approval_status = 'pending' \"",
       secondValidation,
     );
 

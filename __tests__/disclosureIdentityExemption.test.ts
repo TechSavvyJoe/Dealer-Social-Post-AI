@@ -1,3 +1,4 @@
+import { loadPocketBaseModule } from "../test/loadPocketBaseModule";
 /**
  * Canonical disclosure text never reaches the customer-name guard.
  *
@@ -416,11 +417,13 @@ describe("server review with canonical disclosures excluded", () => {
         hookSource.slice(routeStart, hookSource.indexOf(", (c)", routeStart)),
       );
     }
+    expect(
+      readFileSync(resolve(process.cwd(), "pb_hooks/postProjection.js"), "utf8"),
+    ).toContain("policies.reviewCustomerIdentityExcludingDisclosures(");
     expect(routes).toEqual([
       'routerAdd("POST", "/api/app/posts"',
       'routerAdd("PATCH", "/api/app/posts/:id/draft"',
       'routerAdd("POST", "/api/app/posts/:id/shared"',
-      'routerAdd("GET", "/api/app/posts"',
       'routerAdd("PATCH", "/api/app/posts/:id"',
     ]);
   });
@@ -553,7 +556,17 @@ const routeContext = (
   websiteOverrides: AnyRecord = {},
 ) => {
   let handler: ((c: unknown) => RouteResult) | undefined;
-  const moduleFor = (path: string) => {
+  const moduleFor = (path: string): unknown => {
+    if (path.endsWith("/postWorkspace.js") || path.endsWith("/postProjection.js")) {
+      const module = loadPocketBaseModule(path.split("/").pop()!, {
+        ...globals,
+        __hooks: "/hooks",
+        require: moduleFor,
+      });
+      return path.endsWith("/postWorkspace.js")
+        ? { ...module, assertActive: () => {}, respond: () => false }
+        : module;
+    }
     if (path.endsWith("/revisionCompatibility.js")) return globals.revisionObservation;
     if (path.endsWith("/helpers.js")) return globals.helpers;
     if (path.endsWith("/requestPolicies.js")) return policies;
@@ -1214,7 +1227,7 @@ const runList = (postOverrides: AnyRecord[]) => {
       $apis: { requestInfo: () => ({ query: { limit: "50" } }) },
       $app: {
         dao: () => ({
-          findRecordsByFilter: () => posts,
+          findRecordsByFilter: (table: string) => (table === "posts" ? posts : []),
           db: () => ({
             newQuery: () => ({ bind: () => ({ all: () => undefined }) }),
           }),
@@ -1225,7 +1238,10 @@ const runList = (postOverrides: AnyRecord[]) => {
         return shape;
       },
     },
-    { publicationSummariesForDealer: () => ({}) },
+    {
+      publicationSummariesForDealer: () => ({}),
+      publicationSummariesForPosts: () => ({}),
+    },
   );
   const result = handler(routeRequest());
   expect(result.status).toBe(200);
@@ -1251,8 +1267,15 @@ describe("GET /api/app/posts History projection and the client reopen", () => {
           platform_captions: JSON.stringify({ facebook_feed: anonymous }),
         },
       ]);
-      for (const [index, item] of items.entries()) {
-        const expectedCaption = index === 0 ? caption : anonymous;
+      // Equal timestamps use descending IDs; inspect each source post by ID,
+      // rather than assuming the DAO stub's insertion order survives paging.
+      expect(items.map((item) => item.id)).toEqual(["post-2", "post-1"]);
+      const expectedCaptions: Record<string, string> = {
+        "post-1": caption,
+        "post-2": anonymous,
+      };
+      for (const item of items) {
+        const expectedCaption = expectedCaptions[String(item.id)];
         expect(item.identity_review_required).toBeUndefined();
         expect(item.caption).toBe(expectedCaption);
         expect(item.disclosures).toBe(serverDisclosures([expectedCaption]));
@@ -1280,7 +1303,7 @@ describe("GET /api/app/posts History projection and the client reopen", () => {
   it("still holds a planted disclosure name and an unapproved caption name", () => {
     const caption = "Congrats Michelle! Lease yours for $299/mo.";
     const named = "Congrats Jessica! Lease yours for $299/mo.";
-    const [planted, wrongName] = runList([
+    const items = runList([
       { caption, disclosures: plantedBlock("Congrats Jessica!") },
       {
         caption: named,
@@ -1288,6 +1311,9 @@ describe("GET /api/app/posts History projection and the client reopen", () => {
         platform_captions: JSON.stringify({ facebook_feed: named }),
       },
     ]);
+    expect(items.map((item) => item.id)).toEqual(["post-2", "post-1"]);
+    const planted = items.find((item) => item.id === "post-1")!;
+    const wrongName = items.find((item) => item.id === "post-2")!;
     expect(planted.identity_review_required).toBe(true);
     expect(planted.disclosures).toBe("Disclosure held for customer-name review.");
     expect(planted.caption).toBe(caption);

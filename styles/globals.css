@@ -884,6 +884,14 @@
 
     .login-form {
       max-width: none;
+      padding-block: 0;
+    }
+
+    /* The access pane loses height to in-flow update/offline banners. Four
+       48px rows leave room for those banners and the code status at 390px,
+       while preserving every key above the 44px touch floor. */
+    .login-key {
+      min-height: 3rem !important;
     }
 
     .login-brand-row {

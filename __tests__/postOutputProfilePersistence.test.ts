@@ -171,7 +171,9 @@ describe("post output-profile persistence", () => {
       'routerAdd("PATCH", "/api/app/posts/:id"',
       listStart,
     );
-    const listRoute = hook.slice(listStart, approvalStart);
+    const listRoute =
+      hook.slice(listStart, approvalStart) +
+      readFileSync(resolve(process.cwd(), "pb_hooks/postProjection.js"), "utf8");
     const approvalEnd = hook.indexOf(
       'routerAdd("GET", "/api/app/salespeople"',
       approvalStart,
@@ -236,7 +238,9 @@ describe("post output-profile persistence", () => {
     const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
     const listStart = hook.indexOf('routerAdd("GET", "/api/app/posts"');
     const listEnd = hook.indexOf('routerAdd("PATCH", "/api/app/posts/:id"', listStart);
-    const listRoute = hook.slice(listStart, listEnd);
+    const listRoute =
+      hook.slice(listStart, listEnd) +
+      readFileSync(resolve(process.cwd(), "pb_hooks/postProjection.js"), "utf8");
 
     for (const [format, ratio] of [
       ["feed_portrait", "4:5"],

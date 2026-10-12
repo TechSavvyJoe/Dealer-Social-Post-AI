@@ -151,7 +151,22 @@ function loadWebsiteModule(): WebsiteModule {
     "utf8",
   );
   const module = { exports: {} as WebsiteModule };
-  new Function("module", "exports", source)(module, module.exports);
+  const stateModule = { exports: {} as Record<string, unknown> };
+  new Function(
+    "module",
+    "exports",
+    readFileSync(resolve(process.cwd(), "pb_hooks/postWorkspace.js"), "utf8"),
+  )(stateModule, stateModule.exports);
+  new Function("module", "exports", "require", "__hooks", source)(
+    module,
+    module.exports,
+    (path: string) => {
+      if (path.endsWith("/postWorkspace.js")) return stateModule.exports;
+      if (path.endsWith("/connectionConfig.js")) return { runtimeSnapshot: () => null };
+      throw new Error("Unexpected module " + path);
+    },
+    "/hooks",
+  );
   return module.exports;
 }
 
@@ -1527,7 +1542,9 @@ describe("Customer Hub website publication contract", () => {
   });
 
   it("persists an immutable outbox lease, retry, and crash-recovery contract", () => {
-    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const hook =
+      readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8") +
+      readFileSync(resolve(process.cwd(), "pb_hooks/postProjection.js"), "utf8");
     const worker = readFileSync(
       resolve(process.cwd(), "pb_hooks/websitePublications.js"),
       "utf8",

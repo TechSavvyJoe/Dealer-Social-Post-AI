@@ -1792,7 +1792,9 @@ describe("PocketBase authentication and people migration wiring", () => {
     expect(hook).not.toContain("body.salesperson_name");
     expect(hook).toContain("attribution_authoritative: !!context.person");
     expect(hook).toContain("isAuthoritativePostPerson(context, record)");
-    expect(hook).toContain("filterParts.push(`attribution_authoritative = true`)");
+    expect(
+      readFileSync(resolve(process.cwd(), "pb_hooks/postWorkspace.js"), "utf8"),
+    ).toContain('"attribution_authoritative = true"');
     expect(hook).toContain("pin_needs_distribution = true");
     expect(hook).toContain("payload.nextCursor");
     expect(hook).toContain("dealerName");

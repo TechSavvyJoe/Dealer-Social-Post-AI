@@ -51,6 +51,8 @@ const runRoute = (
       handler = callback;
     },
     require: (path: string) => {
+      if (path.endsWith("/postWorkspace.js"))
+        return { assertActive: () => {}, respond: () => false };
       if (path.endsWith("/helpers.js")) {
         return {
           sessionContext: () => ({

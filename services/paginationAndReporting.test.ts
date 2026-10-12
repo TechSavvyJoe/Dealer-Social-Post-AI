@@ -105,7 +105,11 @@ describe("complete roster and reporting reads", () => {
     expect(route).toContain("COUNT(*) AS count");
     expect(route).toContain("GROUP BY p.attribution_authoritative");
     expect(route).toContain("COALESCE(p.owner_person_id, '')");
-    expect(route).toContain("limit + 1");
-    expect(route).toContain("payload.nextCursor");
+    const workspace = readFileSync(
+      resolve(process.cwd(), "pb_hooks/postWorkspace.js"),
+      "utf8",
+    );
+    expect(workspace).toContain("options.limit + 1");
+    expect(workspace).toContain("payload.nextCursor");
   });
 });
