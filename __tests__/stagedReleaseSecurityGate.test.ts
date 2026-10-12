@@ -42,29 +42,31 @@ describe("staged release security and canonical promotion", () => {
     }
   });
 
-  it.each([false, true])(
-    "binds the canonical alias and fails closed on alias error=%s",
-    (aliasFails) => {
-      const promote = shell.match(/^promote_release\(\) \{[\s\S]*?^\}/m)![0];
-      const noopNames = [
-        "validate_sha",
-        "validate_deployment_url",
-        "validate_deployment_id",
-        "assert_provider_canary_evidence",
-        "assert_website_handoff_canary_evidence",
-        "assert_qa_evidence",
-        "assert_clean_current_release",
-        "assert_expected_vercel_link",
-        "assert_release_health",
-        "assert_trusted_proxy_route",
-        "assert_frontend_artifact",
-      ];
-      const script = `set -euo pipefail
+  it.each([
+    { aliasFails: false, superseded: false },
+    { aliasFails: true, superseded: false },
+    { aliasFails: false, superseded: true },
+  ])("binds the canonical alias safely: %j", ({ aliasFails, superseded }) => {
+    const promote = shell.match(/^promote_release\(\) \{[\s\S]*?^\}/m)![0];
+    const noopNames = [
+      "validate_sha",
+      "validate_deployment_url",
+      "validate_deployment_id",
+      "assert_provider_canary_evidence",
+      "assert_website_handoff_canary_evidence",
+      "assert_qa_evidence",
+      "assert_expected_vercel_link",
+      "assert_release_health",
+      "assert_trusted_proxy_route",
+      "assert_frontend_artifact",
+    ];
+    const script = `set -euo pipefail
 VERCEL_RELEASE_QA_CONFIRM=staged-browser-qa-passed
 VERCEL_CLI_VERSION=58.4.4
 PRODUCTION_VERCEL_ORIGIN=https://dealer-social-post-ai.vercel.app
 EXPECTED_VERCEL_ORG_ID=team_expected
 FLY_ORIGIN=https://backend.example
+promotion_done=false
 read_stage_evidence() { printf '%s\\n' '${"a".repeat(40)}' 'https://immutable.vercel.app' 'dpl_Exact' '2026-10-12T12:00:00Z' '${"b".repeat(32)}' 'staged'; }
 inspect_deployment_id() { printf '%s' dpl_Exact; }
 ${noopNames.map((name) => `${name}() { :; }`).join("\n")}
@@ -72,30 +74,36 @@ fail() { exit 1; }
 update_promotion_state() { printf 'state:%s\\n' "$1"; }
 assert_promoted_deployment() { echo verify-alias; }
 assert_current_promoted_deployment() { echo verify-final-alias; }
-npx() { printf 'cli:%s\\n' "$*"; if [[ "$*" == *'alias set'* && '${aliasFails}' == true ]]; then return 42; fi; }
+assert_clean_current_release() { if [[ "$promotion_done" == true && '${superseded}' == true ]]; then return 33; fi; }
+npx() { printf 'cli:%s\\n' "$*"; if [[ "$*" == *' promote '* ]]; then promotion_done=true; fi; if [[ "$*" == *'alias set'* && '${aliasFails}' == true ]]; then return 42; fi; }
 ${promote}
 promote_release
 `;
-      const result = spawnSync("bash", ["-c", script], { encoding: "utf8" });
-      expect(result.stdout).toContain(
-        "alias set https://immutable.vercel.app dealer-social-post-ai.vercel.app --scope team_expected",
+    const result = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+    if (superseded) {
+      expect(result.status).toBe(33);
+      expect(result.stdout).not.toContain("alias set");
+      expect(result.stdout).not.toContain("state:promoted");
+      return;
+    }
+    expect(result.stdout).toContain(
+      "alias set https://immutable.vercel.app dealer-social-post-ai.vercel.app --scope team_expected",
+    );
+    if (aliasFails) {
+      expect(result.status).toBe(42);
+      expect(result.stdout).not.toContain("verify-alias");
+      expect(result.stdout).not.toContain("state:promoted");
+    } else {
+      expect(result.status).toBe(0);
+      expect(
+        result.stdout.indexOf("promote https://immutable.vercel.app"),
+      ).toBeLessThan(result.stdout.indexOf("alias set"));
+      expect(result.stdout.indexOf("alias set")).toBeLessThan(
+        result.stdout.indexOf("verify-alias"),
       );
-      if (aliasFails) {
-        expect(result.status).toBe(42);
-        expect(result.stdout).not.toContain("verify-alias");
-        expect(result.stdout).not.toContain("state:promoted");
-      } else {
-        expect(result.status).toBe(0);
-        expect(
-          result.stdout.indexOf("promote https://immutable.vercel.app"),
-        ).toBeLessThan(result.stdout.indexOf("alias set"));
-        expect(result.stdout.indexOf("alias set")).toBeLessThan(
-          result.stdout.indexOf("verify-alias"),
-        );
-        expect(result.stdout.indexOf("verify-final-alias")).toBeLessThan(
-          result.stdout.indexOf("state:promoted"),
-        );
-      }
-    },
-  );
+      expect(result.stdout.indexOf("verify-final-alias")).toBeLessThan(
+        result.stdout.indexOf("state:promoted"),
+      );
+    }
+  });
 });

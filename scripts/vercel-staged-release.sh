@@ -882,6 +882,7 @@ promote_release() {
   npx --yes "vercel@${VERCEL_CLI_VERSION}" promote "$deployment_url" --yes
   # Automatic custom-domain assignment is disabled for this project. Bind the
   # canonical host explicitly, then prove its deployment ID and served bytes.
+  assert_clean_current_release "$release_sha"
   npx --yes "vercel@${VERCEL_CLI_VERSION}" alias set \
     "$deployment_url" "${PRODUCTION_VERCEL_ORIGIN#https://}" --scope "$EXPECTED_VERCEL_ORG_ID"
   assert_promoted_deployment "$deployment_id"
