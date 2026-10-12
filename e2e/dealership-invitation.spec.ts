@@ -49,9 +49,8 @@ test("an installed app can enter its invitation without a browser address bar", 
   await expect(page.getByRole("heading", { name: "Northline Motors" })).toBeVisible();
   await expect(page).toHaveURL(/\/join$/);
   await page.getByRole("button", { name: "Continue to sign in" }).click();
-  await expect(
-    page.getByText("This device is set up for Northline Motors."),
-  ).toBeVisible();
+  await expect(page.locator("#login-heading + p")).toHaveText("Northline Motors");
+  await expect(page.locator("#login-heading + p")).toBeVisible();
   await expect(page.getByRole("button", { name: "Change dealership" })).toBeVisible();
 });
 
@@ -91,9 +90,8 @@ test("private invitation is explicit, accessible, and removed from the address a
     await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
   ).toBe(true);
   await page.getByRole("button", { name: "Continue to sign in" }).click();
-  await expect(
-    page.getByText("This device is set up for Northline Motors."),
-  ).toBeVisible();
+  await expect(page.locator("#login-heading + p")).toHaveText("Northline Motors");
+  await expect(page.locator("#login-heading + p")).toBeVisible();
 });
 
 test("an expired invitation gives a recoverable error without opening a workspace", async ({
