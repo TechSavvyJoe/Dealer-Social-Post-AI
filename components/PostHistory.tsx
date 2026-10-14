@@ -498,7 +498,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                           <Button
                             type="button"
                             size="sm"
-                            variant={canOpen ? "outline-solid" : "ghost"}
+                            variant={canOpen ? "outline" : "ghost"}
                             disabled={!canOpen || isOpening}
                             leftIcon={
                               isOpening ? (
@@ -679,7 +679,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                             <Button
                               type="button"
                               size="sm"
-                              variant={canOpen ? "outline-solid" : "ghost"}
+                              variant={canOpen ? "outline" : "ghost"}
                               disabled={!canOpen || isOpening}
                               leftIcon={
                                 isOpening ? (

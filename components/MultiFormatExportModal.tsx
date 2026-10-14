@@ -214,7 +214,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
                   </div>
                   <Button
                     size="sm"
-                    variant={downloaded ? "outline-solid" : "filled"}
+                    variant={downloaded ? "outline" : "filled"}
                     leftIcon={
                       downloaded ? (
                         <Check className="h-3.5 w-3.5" />
