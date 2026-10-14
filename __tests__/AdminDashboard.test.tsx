@@ -201,7 +201,7 @@ describe("system admin hub", () => {
       "p-1",
       "-mx-1",
       "-mt-1",
-      "-mb-[5px]",
+      "mb-[-5px]",
     );
     for (const name of ["Dealers", "Admins", "Users", "Connections"]) {
       const tab = screen.getByRole("tab", { name });

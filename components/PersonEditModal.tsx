@@ -524,7 +524,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
 
           {managerPromotionPending ? (
             <div
-              className="rounded-2xl border border-warning-400/25 bg-warning-500/8 px-4 py-3 text-sm text-warning-100"
+              className="rounded-2xl border border-warning-400/25 bg-warning-500/8 px-4 py-3 text-sm text-warning-100 in-[.theme-light]:text-warning-900"
               role="status"
             >
               Save the manager role first. You can then reopen this account to set up
