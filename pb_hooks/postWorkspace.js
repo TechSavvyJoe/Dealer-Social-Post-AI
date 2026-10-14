@@ -214,9 +214,12 @@ function matches(item, options) {
     return false;
   if (options.status && item.approval_status !== options.status) return false;
   if (options.owner && item.owner_person_id !== options.owner) return false;
-  if (options.since && item.generated_at.replace("T", " ") < options.since)
+  // Mixed PocketBase spellings ("T" vs space, ".000Z" vs "Z") do not sort
+  // as instants. The same timestampKey the cursor uses keeps a post inside
+  // the UTC day it was created.
+  if (options.since && timestampKey(item.generated_at) < timestampKey(options.since))
     return false;
-  if (options.until && item.generated_at.replace("T", " ") > options.until)
+  if (options.until && timestampKey(item.generated_at) > timestampKey(options.until))
     return false;
   if (options.media === "image" && !item.creative_image_url) return false;
   if (options.media === "video_generated" && !item.has_video) return false;

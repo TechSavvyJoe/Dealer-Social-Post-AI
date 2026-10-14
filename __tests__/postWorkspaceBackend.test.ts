@@ -323,6 +323,15 @@ describe("post workspace authorized search and detail", () => {
         .payload.items.map((row: Values) => row.id),
     ).toEqual(["same-day"]);
     expect(h.list({ until: "2026-10-12T00:00:00.000Z" }).payload.total).toBe(0);
+    const mixed = harness([
+      makePost("whole-second", { generated_at: "2026-10-12 23:59:59Z" }),
+      makePost("next-instant", { generated_at: "2026-10-13T00:00:00.000Z" }),
+    ]);
+    expect(
+      mixed
+        .list({ since: "2026-10-12", until: "2026-10-12" })
+        .payload.items.map((row: Values) => row.id),
+    ).toEqual(["whole-second"]);
   });
   it("filters dates, actual image availability, generated-video metadata and website state", () => {
     const h = harness([

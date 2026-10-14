@@ -74,6 +74,18 @@ export interface ToGeneratedPostOptions {
 }
 
 /**
+ * Server-derived ownership. `salesperson_id` was client-selectable on older
+ * posts, so a matching display id is not permission to edit or archive.
+ */
+export const isAuthoritativePostOwner = (
+  post: Pick<PostRecord, "attribution_authoritative" | "owner_person_id">,
+  personId?: string,
+): boolean =>
+  Boolean(
+    personId && post.attribution_authoritative && post.owner_person_id === personId,
+  );
+
+/**
  * Builds the GeneratedPost a reopened History record hydrates into. Moved
  * verbatim from components/PostHistory.tsx's openCreative — the async image
  * fetch and the store writes stay with the caller (hooks/usePostHistoryList).
@@ -105,8 +117,7 @@ export const toGeneratedPostFromRecord = (
         ? "save_failed"
         : "not_required",
     historyReadOnly:
-      role !== "salesperson" &&
-      (!currentPersonId || post.salesperson_id !== currentPersonId),
+      role !== "salesperson" && !isAuthoritativePostOwner(post, currentPersonId),
     // Preserve an explicit empty selection for Website-only posts while
     // restoring social destinations for records created before
     // platform_ids existed.
