@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { isolateFromLiveApi } from "./isolateFromLiveApi";
 
 type ManifestIcon = {
   src: string;
@@ -175,7 +176,6 @@ async function expectMaskableSafeZone(page: Page, sources: string[]) {
 }
 
 async function stubAuthenticatedHome(page: Page) {
-  const { isolateFromLiveApi } = await import("./isolateFromLiveApi");
   await isolateFromLiveApi(page);
   await page.route("**/api/app/session", async (route) => {
     await route.fulfill({
@@ -218,6 +218,7 @@ test.describe("Home Screen PWA contracts", () => {
       "One browser is sufficient for static install metadata and image contracts.",
     );
 
+    await isolateFromLiveApi(page);
     await page.route("**/api/app/session", async (route) => {
       await route.fulfill({
         status: 401,
