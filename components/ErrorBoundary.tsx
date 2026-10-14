@@ -159,7 +159,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="p-8 max-w-lg w-full text-center border border-error-500/30 rounded-lg bg-surface-overlay shadow-elevation-3">
             <div className="w-16 h-16 bg-error-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg
-                className="w-8 h-8 text-error-400 [.theme-light_&]:text-error-700"
+                className="w-8 h-8 text-error-400 in-[.theme-light]:text-error-700"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -182,7 +182,7 @@ export class ErrorBoundary extends Component<Props, State> {
             {this.state.confirmingReset && (
               <p
                 role="alert"
-                className="mb-6 rounded-lg border border-warning-500/40 bg-warning-500/10 px-3 py-2 text-sm text-warning-100 [.theme-light_&]:text-warning-900"
+                className="mb-6 rounded-lg border border-warning-500/40 bg-warning-500/10 px-3 py-2 text-sm text-warning-100 in-[.theme-light]:text-warning-900"
               >
                 This removes photos and posts saved on this device and signs you out.
                 Anything already shared or saved to your dealership stays. Try
@@ -213,7 +213,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   </button>
                   <button
                     onClick={this.handleResetSession}
-                    className="px-4 py-2.5 bg-error-600/30 hover:bg-error-600/50 border border-error-500/40 text-error-100 [.theme-light_&]:text-error-900 rounded-lg transition-colors text-sm font-semibold"
+                    className="px-4 py-2.5 bg-error-600/30 hover:bg-error-600/50 border border-error-500/40 text-error-100 in-[.theme-light]:text-error-900 rounded-lg transition-colors text-sm font-semibold"
                   >
                     Clear and sign out
                   </button>
@@ -221,7 +221,7 @@ export class ErrorBoundary extends Component<Props, State> {
               ) : (
                 <button
                   onClick={() => this.setState({ confirmingReset: true })}
-                  className="px-4 py-2.5 bg-warning-600/30 hover:bg-warning-600/50 border border-warning-500/40 text-warning-100 [.theme-light_&]:text-warning-900 rounded-lg transition-colors text-sm"
+                  className="px-4 py-2.5 bg-warning-600/30 hover:bg-warning-600/50 border border-warning-500/40 text-warning-100 in-[.theme-light]:text-warning-900 rounded-lg transition-colors text-sm"
                 >
                   Sign out and clear this device
                 </button>

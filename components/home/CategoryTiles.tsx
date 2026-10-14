@@ -196,11 +196,11 @@ export const CategoryTiles: React.FC<CategoryTilesProps> = ({
               <TilePhoto categoryId={tile.categoryId} />
               <span
                 aria-hidden="true"
-                className="absolute inset-0 bg-gradient-to-t from-photo-shade/95 via-photo-shade/25 to-transparent"
+                className="absolute inset-0 bg-linear-to-t from-photo-shade/95 via-photo-shade/25 to-transparent"
               />
               <span className="relative flex items-end gap-2 px-3.5 pb-3 pt-10">
                 <span className="min-w-0 flex-1">
-                  <span className="block break-words font-display text-[17px] font-semibold leading-[22px]">
+                  <span className="block wrap-break-word font-display text-[17px] font-semibold leading-[22px]">
                     {tile.label}
                   </span>
                   <span

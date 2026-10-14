@@ -165,7 +165,7 @@ export const Home: React.FC<HomeProps> = ({
             leftIcon={<Images />}
             disabled={intake.isProcessing}
             onClick={() => libraryInputRef.current?.click()}
-            className="min-h-[52px] justify-start border-brand-ink bg-gradient-to-r from-brand-fill/60 to-brand-fill/35 px-4 text-base text-ink"
+            className="min-h-[52px] justify-start border-brand-ink bg-linear-to-r from-brand-fill/60 to-brand-fill/35 px-4 text-base text-ink"
           >
             Choose from library
           </Button>

@@ -26,7 +26,7 @@ const DialpadButton: React.FC<{
       "border border-hairline bg-surface-elevated",
       "shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-[background-color,border-color,transform] duration-150",
       "hover:border-strong hover:bg-surface-raised active:translate-y-px active:bg-surface-raised",
-      "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-2",
+      "focus:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-2",
       className,
     )}
   >
@@ -42,7 +42,7 @@ const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
  */
 export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => (
   <div
-    className="mx-auto grid h-full min-h-0 w-full max-w-[min(20rem,86vw)] grid-rows-[repeat(4,minmax(0,1fr))] gap-[clamp(0.4rem,1.2dvh,0.7rem)]"
+    className="mx-auto grid h-full min-h-0 w-full max-w-[min(20rem,86vw)] grid-rows-4 gap-[clamp(0.4rem,1.2dvh,0.7rem)]"
     role="group"
     aria-label="Four digit access code keypad"
   >

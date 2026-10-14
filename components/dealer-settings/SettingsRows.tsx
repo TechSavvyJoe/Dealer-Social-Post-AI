@@ -12,7 +12,7 @@ import { cn } from "../../utils/classNames";
  */
 
 /** 16/22 semibold: the label of a setting, switch or disclosure row. */
-export const ROW_LABEL = "text-base font-semibold leading-[1.375rem] text-ink";
+export const ROW_LABEL = "text-base font-semibold leading-5.5 text-ink";
 /** 14/20: the helper sentence under a label. */
 export const ROW_HELPER = "text-sm text-ink-2";
 /** 14/20 medium: a field's label above its control. */
@@ -223,10 +223,7 @@ export const SwitchRow: React.FC<SwitchRowProps> = ({
       <div className="min-w-0 flex-1">
         <p
           id={labelId}
-          className={cn(
-            "text-base leading-[1.375rem] text-ink",
-            !subtle && "font-semibold",
-          )}
+          className={cn("text-base leading-5.5 text-ink", !subtle && "font-semibold")}
         >
           {label}
         </p>
@@ -302,10 +299,7 @@ export const ChoiceRow: React.FC<ChoiceRowProps> = ({
         <span className="flex min-w-0 flex-col gap-0.5">
           <span
             id={labelId}
-            className={cn(
-              "text-base leading-[1.375rem] text-ink",
-              checked && "font-semibold",
-            )}
+            className={cn("text-base leading-5.5 text-ink", checked && "font-semibold")}
           >
             {label}
           </span>
@@ -317,9 +311,7 @@ export const ChoiceRow: React.FC<ChoiceRowProps> = ({
         </span>
       </label>
       {checked && children ? (
-        <div
-          className={cn("min-w-0 pb-3", compact ? "pl-[1.875rem]" : "pl-[2.125rem]")}
-        >
+        <div className={cn("min-w-0 pb-3", compact ? "pl-7.5" : "pl-8.5")}>
           {children}
         </div>
       ) : null}

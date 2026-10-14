@@ -170,9 +170,9 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
       >
         <div className="flex flex-col items-center justify-center text-center">
           <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-error-500/30 bg-error-500/10">
-            <AlertTriangle className="w-8 h-8 text-error-300 [.theme-light_&]:text-error-800" />
+            <AlertTriangle className="w-8 h-8 text-error-300 in-[.theme-light]:text-error-800" />
           </div>
-          <p className="text-error-100 text-base leading-relaxed [.theme-light_&]:text-error-800">
+          <p className="text-error-100 text-base leading-relaxed in-[.theme-light]:text-error-800">
             {error}
           </p>
           <Button onClick={handleClose} className="mt-6">
@@ -184,8 +184,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
   }
 
   // Determine aspect ratio for the container. Using Tailwind's arbitrary values feature for portrait.
-  const aspectRatioClass =
-    orientation === "portrait" ? "aspect-[9/16]" : "aspect-video";
+  const aspectRatioClass = orientation === "portrait" ? "aspect-9/16" : "aspect-video";
 
   return (
     <Modal
@@ -240,7 +239,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
             onClick={handleCapture}
             title="Take photo"
             aria-label="Take photo"
-            className="w-20 h-20 p-1 rounded-full bg-white/80 hover:bg-white active:bg-white transition-all flex items-center justify-center shadow-lg shadow-black/30 transform active:scale-95 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900"
+            className="w-20 h-20 p-1 rounded-full bg-white/80 hover:bg-white active:bg-white transition-all flex items-center justify-center shadow-lg shadow-black/30 transform active:scale-95 focus-visible:outline-hidden focus-visible:ring-4 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900"
           >
             <div className="w-full h-full rounded-full bg-white ring-4 ring-inset ring-surface-900"></div>
           </button>

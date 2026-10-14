@@ -402,7 +402,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         </p>
         {mode === "scanner" && (
           <div className="space-y-3">
-            <div className="relative aspect-[4/3] overflow-hidden rounded-lg border border-strong bg-black">
+            <div className="relative aspect-photo overflow-hidden rounded-lg border border-strong bg-black">
               <video
                 ref={videoRef}
                 className="h-full w-full object-cover"

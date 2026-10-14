@@ -40,7 +40,7 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
       className,
     )}
   >
-    <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
     <span className="min-w-0 flex-1">{message}</span>
     {onRetry && (
       <Button
@@ -50,7 +50,7 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
         disableHaptics
         onClick={onRetry}
         leftIcon={actionLabel === "Try again" ? <RefreshCw /> : undefined}
-        className="-my-3 -mr-2.5 min-h-11 flex-shrink-0 self-center px-2.5 text-error-ink"
+        className="-my-3 -mr-2.5 min-h-11 shrink-0 self-center px-2.5 text-error-ink"
       >
         {actionLabel}
       </Button>

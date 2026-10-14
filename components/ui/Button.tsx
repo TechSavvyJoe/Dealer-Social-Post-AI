@@ -17,7 +17,7 @@ type Variant =
   | "filled"
   | "tinted"
   | "plain"
-  | "outline"
+  | "outline-solid"
   | "danger"
   | "gradient-sky"
   | "gradient-teal"

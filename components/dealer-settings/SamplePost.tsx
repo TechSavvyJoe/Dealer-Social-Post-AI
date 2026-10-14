@@ -23,7 +23,7 @@ export interface SamplePostProps {
  * The sample imitates a Facebook post, so its caption is set at Facebook's
  * own 15 px reading size (between the app's 14 and 16 px steps).
  */
-const POST_TEXT = "text-[0.9375rem] leading-[1.375rem]";
+const POST_TEXT = "text-[0.9375rem] leading-5.5";
 
 /** The one mark: a 2 px brand-ink rule under the marked words, on every line they wrap to. */
 const Marked: React.FC<{
@@ -133,7 +133,7 @@ export const SamplePost: React.FC<SamplePostProps> = ({ dealer, mark, className 
 
           <div
             data-sample-caption=""
-            className="flex flex-col gap-2.5 whitespace-pre-line break-words p-3.5"
+            className="flex flex-col gap-2.5 whitespace-pre-line wrap-break-word p-3.5"
           >
             {caption.disclosure ? (
               <p data-part="disclosure" className="text-caption text-ink-2">

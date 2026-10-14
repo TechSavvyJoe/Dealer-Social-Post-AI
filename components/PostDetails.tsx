@@ -291,7 +291,7 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
           ? ({ "--details-bar-space": `${barHeight + 24}px` } as React.CSSProperties)
           : undefined
       }
-      className="mx-auto grid w-full max-w-[1240px] gap-4 pb-[var(--details-bar-space,calc(8.5rem+var(--sab)))] sm:gap-6 sm:px-6 sm:pt-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(350px,.65fr)] lg:grid-rows-[auto_1fr] lg:gap-x-12 lg:gap-y-6 lg:px-8 lg:pb-10 lg:pt-10"
+      className="mx-auto grid w-full max-w-[1240px] gap-4 pb-(--details-bar-space,calc(8.5rem+var(--sab))) sm:gap-6 sm:px-6 sm:pt-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(350px,.65fr)] lg:grid-rows-[auto_1fr] lg:gap-x-12 lg:gap-y-6 lg:px-8 lg:pb-10 lg:pt-10"
     >
       {/* The header carries the category title on phones; this heading names
           the page for screen readers there and is the display title on desktop. */}

@@ -154,7 +154,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
     >
       <div className="space-y-5">
         {renderError && (
-          <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-4 py-3 text-error-100 text-sm [.theme-light_&]:text-error-800">
+          <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-4 py-3 text-error-100 text-sm in-[.theme-light]:text-error-800">
             {renderError}
           </div>
         )}
@@ -214,7 +214,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
                   </div>
                   <Button
                     size="sm"
-                    variant={downloaded ? "outline" : "filled"}
+                    variant={downloaded ? "outline-solid" : "filled"}
                     leftIcon={
                       downloaded ? (
                         <Check className="h-3.5 w-3.5" />

@@ -565,7 +565,7 @@ const StoreDetail: React.FC<StoreDetailProps> = ({
                       <span
                         key={`${row.id}-${index}`}
                         className={cn(
-                          "block break-words",
+                          "block wrap-break-word",
                           row.id === "voice" && "line-clamp-3",
                         )}
                       >
@@ -762,7 +762,7 @@ const StoreDetail: React.FC<StoreDetailProps> = ({
   }
 
   return (
-    <div className="flex flex-wrap items-start gap-x-10 gap-y-8 pb-6 pl-[4.625rem] pr-6 pt-2">
+    <div className="flex flex-wrap items-start gap-x-10 gap-y-8 pb-6 pl-18.5 pr-6 pt-2">
       <div className="flex min-w-0 flex-[999_1_35rem] flex-col gap-6">
         <div className="flex flex-wrap items-start gap-x-10 gap-y-8">
           <div className="flex min-w-0 flex-[1_1_18.75rem] flex-col">
@@ -778,7 +778,7 @@ const StoreDetail: React.FC<StoreDetailProps> = ({
         )}
         {actions}
       </div>
-      <div className="w-[13.5rem] shrink-0">{sampleBlock}</div>
+      <div className="w-54 shrink-0">{sampleBlock}</div>
     </div>
   );
 };
@@ -889,7 +889,7 @@ export const SetupBoard: React.FC<SetupBoardProps> = ({
     <div className="flex flex-col gap-4 md:flex-row md:flex-wrap md:items-end md:justify-between md:gap-x-6">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <h2 className="font-display text-[1.625rem] font-semibold leading-[1.875rem] tracking-[-0.01em] text-ink md:text-3xl">
+          <h2 className="font-display text-[1.625rem] font-semibold leading-7.5 tracking-[-0.01em] text-ink md:text-3xl">
             Setup board
           </h2>
           {summary && !loading ? (
@@ -955,13 +955,13 @@ export const SetupBoard: React.FC<SetupBoardProps> = ({
     <div className="overflow-x-auto">
       <table
         aria-busy={loading || undefined}
-        className="w-full min-w-[60rem] table-fixed border-collapse"
+        className="w-full min-w-240 table-fixed border-collapse"
       >
         <caption className="sr-only">Setup status for each dealership</caption>
         <colgroup>
           <col />
           {columns.map((column) => (
-            <col key={column.id} className="w-[4.5rem]" />
+            <col key={column.id} className="w-18" />
           ))}
           <col className="w-48" />
           {isSystemAdmin ? <col className="w-40" /> : null}
@@ -1212,7 +1212,7 @@ export const SetupBoard: React.FC<SetupBoardProps> = ({
                   />
                 </button>
                 {open ? (
-                  <div id={detailIdFor(dealer)} className="pb-5 pl-[3.25rem]">
+                  <div id={detailIdFor(dealer)} className="pb-5 pl-13">
                     {detailFor(dealer, "stack")}
                   </div>
                 ) : null}

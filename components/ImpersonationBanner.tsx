@@ -36,7 +36,7 @@ export const ImpersonationBanner: React.FC = () => {
       className="sticky top-0 z-50 border-b border-violet-400/30 bg-violet-950/95 text-violet-50 shadow-lg backdrop-blur-md"
       role="status"
     >
-      <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:px-10">
+      <div className="mx-auto flex max-w-(--breakpoint-2xl) flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:px-10">
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <UserRound className="h-4 w-4 shrink-0 text-violet-300" />
           <span>
