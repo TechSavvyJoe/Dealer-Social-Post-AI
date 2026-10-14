@@ -62,34 +62,47 @@ function owner(context, record) {
 function stateAllowsDelivery(state, policyState) {
   return state === "approved" || (state === "n_a" && policyState === "n_a");
 }
+function integerCount(value) {
+  const total = Number(value);
+  if (!Number.isFinite(total) || total < 0 || Math.floor(total) !== total) return NaN;
+  return total;
+}
+// COUNT, not a 1000-row page. findRecordsByFilter stops at that page, so a
+// person past the cap never reaches first_n and stays in review. salesperson_id
+// was client-selectable and must not be counted.
+function countApprovedForReview(dao, dealerId, personId) {
+  const parameters = { dealer: dealerId, person: personId };
+  const posts = new DynamicModel({ total: 0 });
+  dao
+    .db()
+    .newQuery(
+      "SELECT COUNT(*) AS total FROM posts " +
+        "WHERE dealer = {:dealer} AND attribution_authoritative = 1 " +
+        "AND owner_person_id = {:person} AND approval_status = 'approved'",
+    )
+    .bind(parameters)
+    .one(posts);
+  const spins = new DynamicModel({ total: 0 });
+  dao
+    .db()
+    .newQuery(
+      "SELECT COUNT(*) AS total FROM vehicle_spins " +
+        "WHERE dealer = {:dealer} AND person = {:person} AND state = 'approved'",
+    )
+    .bind(parameters)
+    .one(spins);
+  const postTotal = integerCount(posts.total);
+  const spinTotal = integerCount(spins.total);
+  if (!(postTotal >= 0) || !(spinTotal >= 0)) return NaN;
+  return postTotal + spinTotal;
+}
 function policyState(record, dealer) {
   const policies = require(__hooks + "/requestPolicies.js");
   return policies.initialApprovalStatus(dealer, {
     category: "inventory",
     involvesCustomer: false,
     countApprovedPosts: function () {
-      const parameters = { dealer: dealer.id, person: record.getString("person") };
-      const posts = $app
-        .dao()
-        .findRecordsByFilter(
-          "posts",
-          "dealer = {:dealer} && owner_person_id = {:person} && attribution_authoritative = true && approval_status = 'approved'",
-          "",
-          1000,
-          0,
-          parameters,
-        );
-      const spins = $app
-        .dao()
-        .findRecordsByFilter(
-          "vehicle_spins",
-          "dealer = {:dealer} && person = {:person} && state = 'approved'",
-          "",
-          1000,
-          0,
-          parameters,
-        );
-      return posts.length + spins.length;
+      return countApprovedForReview($app.dao(), dealer.id, record.getString("person"));
     },
   });
 }
@@ -513,4 +526,5 @@ module.exports = {
   storageHasRoom,
   capacity,
   adminCapacity,
+  policyState,
 };

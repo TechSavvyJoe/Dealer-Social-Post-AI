@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { loadPocketBaseModule } from "../test/loadPocketBaseModule";
 
 const module = {
   exports: {} as {
@@ -108,6 +109,74 @@ describe("vehicle spin server boundary", () => {
     expect(storageHasRoom(df, "102400 /pb/pb_data", 24000000)).toBe(true);
     expect(storageHasRoom(df, "900000 /pb/pb_data", 24000000)).toBe(false);
     expect(storageHasRoom("unavailable", "0 /pb/pb_data", 500000)).toBe(false);
+  });
+  it("lets a first_n count above the old 1000-row cap unlock review", () => {
+    const queries: string[] = [];
+    const totals: Record<string, number> = { posts: 1001, vehicle_spins: 0 };
+    const dao = {
+      findRecordsByFilter: () => {
+        throw new Error("review counts must not load a capped page of rows");
+      },
+      db: () => ({
+        newQuery: (sql: string) => ({
+          bind: (params: Record<string, string>) => ({
+            one: (row: { total: number }) => {
+              queries.push(sql);
+              expect(params).toEqual({ dealer: "dealer-1", person: "person-1" });
+              expect(sql).not.toContain("salesperson_id");
+              if (sql.includes("FROM posts")) {
+                expect(sql).toContain("attribution_authoritative = 1");
+                expect(sql).toContain("owner_person_id = {:person}");
+                row.total = totals.posts;
+              } else if (sql.includes("FROM vehicle_spins")) {
+                expect(sql).toContain("person = {:person}");
+                expect(sql).toContain("state = 'approved'");
+                row.total = totals.vehicle_spins;
+              } else {
+                throw new Error("unexpected count query " + sql);
+              }
+            },
+          }),
+        }),
+      }),
+    };
+    const policies = loadPocketBaseModule("requestPolicies.js", {});
+    const spins = loadPocketBaseModule<{
+      policyState: (record: unknown, dealer: unknown) => string;
+    }>("vehicleSpins.js", {
+      __hooks: "/hooks",
+      DynamicModel: function DynamicModel(shape: { total: number }) {
+        return shape;
+      },
+      $app: { dao: () => dao },
+      require: (path: string) => {
+        if (String(path).endsWith("/requestPolicies.js")) return policies;
+        throw new Error("unexpected require " + path);
+      },
+    });
+    const dealer = {
+      id: "dealer-1",
+      getBool: (field: string) => field === "requires_approval",
+      getString: (field: string) =>
+        field === "approval_policy"
+          ? JSON.stringify({ mode: "first_n", firstN: 1001 })
+          : "",
+    };
+    const record = {
+      getString: (field: string) => (field === "person" ? "person-1" : ""),
+    };
+    // The old page stopped at 1000, so 1001 approved posts stayed pending.
+    expect(spins.policyState(record, dealer)).toBe("n_a");
+    expect(queries.some((sql) => sql.includes("COUNT(*)"))).toBe(true);
+
+    queries.length = 0;
+    totals.posts = 1000;
+    expect(spins.policyState(record, dealer)).toBe("pending");
+
+    queries.length = 0;
+    totals.posts = 600;
+    totals.vehicle_spins = 401;
+    expect(spins.policyState(record, dealer)).toBe("n_a");
   });
   it("locks both collections and their file assets, with bounded request bodies", () => {
     const migration = readFileSync("pb_migrations/1752600000_vehicle_spins.js", "utf8");

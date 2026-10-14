@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import { fakeCollection, fieldsOf } from "../test/fakePocketBaseSchema";
 
 type AnyRecord = Record<string, unknown>;
 type RouteResult = { status: number; payload: AnyRecord };
@@ -40,16 +41,35 @@ const dealer = { id: "dealer-1" };
 const runRoute = (
   start: string,
   post: ReturnType<typeof fakePost>,
-  options: { role?: string; onSave?: () => void } = {},
+  options: { role?: string; onSave?: () => void; body?: AnyRecord } = {},
 ) => {
   let handler: ((c: unknown) => RouteResult) | undefined;
   const saved: unknown[] = [];
   const queries: Array<{ sql: string; params: AnyRecord }> = [];
+  const dao = {
+    findRecordById: () => post,
+    saveRecord: (record: unknown) => {
+      options.onSave?.();
+      saved.push(record);
+    },
+    db: () => ({
+      newQuery: (sql: string) => ({
+        bind: (params: AnyRecord) => ({
+          execute: () => {
+            queries.push({ sql, params });
+            return { rowsAffected: () => 1 };
+          },
+        }),
+      }),
+    }),
+    runInTransaction: (fn: (tx: unknown) => unknown) => fn(dao),
+  };
   runInNewContext(routeSource(start), {
     __hooks: "/hooks",
     routerAdd: (_method: string, _path: string, callback: typeof handler) => {
       handler = callback;
     },
+    $apis: { requestInfo: () => ({ data: options.body || {} }) },
     require: (path: string) => {
       if (path.endsWith("/postWorkspace.js"))
         return { assertActive: () => {}, respond: () => false };
@@ -63,6 +83,12 @@ const runRoute = (
           readSessionToken: () => "session-token",
           hashSessionToken: () => "owner-hash",
           isAuthoritativePostPerson: () => false,
+          assertString: (val: unknown, maxLength = 1024) => {
+            if (typeof val !== "string") throw new Error("Expected a string");
+            if (val.length > maxLength)
+              throw new Error("String exceeds maximum length");
+            return val;
+          },
         };
       }
       if (path.endsWith("/requestPolicies.js")) {
@@ -75,28 +101,21 @@ const runRoute = (
         return {
           findPublicationForPost: () => null,
           publicationSummaryForPost: () => ({ status: "not_configured" }),
+          acquirePostWriteFence: (tx: typeof dao, postId: string) => {
+            const result = tx
+              .db()
+              .newQuery("UPDATE posts SET updated = updated WHERE id = {:post}")
+              .bind({ post: postId })
+              .execute();
+            if (!result || result.rowsAffected() !== 1)
+              throw new Error("source_post_missing");
+          },
         };
       }
       throw new Error("unexpected require " + path);
     },
     $app: {
-      dao: () => ({
-        findRecordById: () => post,
-        saveRecord: (record: unknown) => {
-          options.onSave?.();
-          saved.push(record);
-        },
-        db: () => ({
-          newQuery: (sql: string) => ({
-            bind: (params: AnyRecord) => ({
-              execute: () => {
-                queries.push({ sql, params });
-                return { rowsAffected: () => 1 };
-              },
-            }),
-          }),
-        }),
-      }),
+      dao: () => dao,
     },
     console: { error: vi.fn(), log: vi.fn() },
   });
@@ -150,6 +169,83 @@ describe("revisions on non-draft writes", () => {
     expect(saved).toHaveLength(0);
     expect(queries).toHaveLength(0);
     expect(result).toEqual({ status: 200, payload: { id: "post-1", has_video: true } });
+  });
+
+  it("schedule writes only scheduled_for and does not rewrite the post or move its revision", () => {
+    const values: AnyRecord = {
+      dealer: "dealer-1",
+      owner_session_hash: "owner-hash",
+      caption: "Saved by another tab after this record was read.",
+      approval_status: "approved",
+      updated: "2026-10-05 10:00:00.000Z",
+    };
+    const when = "2026-10-20T15:00:00.000Z";
+    const { result, saved, queries } = runRoute(
+      'routerAdd("POST", "/api/app/posts/:id/schedule"',
+      fakePost(values),
+      { body: { scheduled_for: when } },
+    );
+    expect(saved).toHaveLength(0);
+    const schedule = queries.find((query) => query.sql.includes("scheduled_for"));
+    expect(schedule?.sql).toMatch(
+      /^UPDATE posts SET scheduled_for = \{:scheduledFor\} WHERE id = \{:post\}/,
+    );
+    expect(schedule?.sql).not.toMatch(/updated|caption|approval_status|has_video/);
+    expect(schedule?.params).toEqual({
+      scheduledFor: when,
+      post: "post-1",
+      dealer: "dealer-1",
+    });
+    expect(values.caption).toBe("Saved by another tab after this record was read.");
+    expect(values.updated).toBe("2026-10-05 10:00:00.000Z");
+    expect(values.scheduled_for).toBeUndefined();
+    expect(result).toEqual({
+      status: 200,
+      payload: { id: "post-1", scheduled_for: when },
+    });
+  });
+
+  it("adds the scheduled_for column the route updates", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "pb_migrations/1791900000_post_scheduled_for.js"),
+      "utf8",
+    );
+    let up: ((db: unknown) => void) | undefined;
+    let down: ((db: unknown) => void) | undefined;
+    runInNewContext(source, {
+      migrate: (apply: typeof up, rollback: typeof down) => {
+        up = apply;
+        down = rollback;
+      },
+      Dao: function Dao(db: unknown) {
+        return db;
+      },
+      SchemaField: function SchemaField(definition: AnyRecord) {
+        return definition;
+      },
+    });
+    const posts = Object.assign(fakeCollection([{ name: "caption", type: "text" }]), {
+      name: "posts",
+    });
+    const saved: unknown[] = [];
+    const dao = {
+      findCollectionByNameOrId: () => posts,
+      saveCollection: (collection: unknown) => {
+        saved.push(collection);
+      },
+    };
+    up!(dao);
+    const added = fieldsOf(posts.schema).find(
+      (field) => field.name === "scheduled_for",
+    );
+    expect(added).toMatchObject({
+      type: "text",
+      required: false,
+      options: { max: 40 },
+    });
+    expect(saved).toEqual([posts]);
+    down!(dao);
+    expect(fieldsOf(posts.schema).map((field) => field.name)).toEqual(["caption"]);
   });
 
   it("the approval status poll carries the revision a manager decision produced", () => {
