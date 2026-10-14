@@ -175,6 +175,8 @@ async function expectMaskableSafeZone(page: Page, sources: string[]) {
 }
 
 async function stubAuthenticatedHome(page: Page) {
+  const { isolateFromLiveApi } = await import("./isolateFromLiveApi");
+  await isolateFromLiveApi(page);
   await page.route("**/api/app/session", async (route) => {
     await route.fulfill({
       status: 200,
