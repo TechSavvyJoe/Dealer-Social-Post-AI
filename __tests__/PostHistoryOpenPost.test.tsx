@@ -76,4 +76,32 @@ describe("PostHistory reopen handler", () => {
     expect(screen.getByText("Could not load your posts.")).toBeVisible();
     expect(screen.queryByText("No posts logged yet")).not.toBeInTheDocument();
   });
+
+  it("shows a rejection note and hides it while the post is safety-held", () => {
+    const reason = "PRIVATE requested changes";
+    const rejected = {
+      id: "post-1",
+      generated_at: "2026-10-12T15:00:00.000Z",
+      approval_status: "rejected",
+      rejection_reason: reason,
+      salesperson_name: "Alex Rivera",
+    };
+    hook.state = { items: [rejected], filtered: [rejected] };
+    const { rerender } = render(<PostHistory />);
+    expect(screen.getByText(reason)).toBeVisible();
+
+    hook.state = {
+      items: [{ ...rejected, image_review_required: true }],
+      filtered: [{ ...rejected, image_review_required: true }],
+    };
+    rerender(<PostHistory />);
+    expect(screen.queryByText(reason)).not.toBeInTheDocument();
+
+    hook.state = {
+      items: [{ ...rejected, identity_review_required: true }],
+      filtered: [{ ...rejected, identity_review_required: true }],
+    };
+    rerender(<PostHistory />);
+    expect(screen.queryByText(reason)).not.toBeInTheDocument();
+  });
 });

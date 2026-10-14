@@ -194,6 +194,8 @@ describe("the reason reaches the salesperson", () => {
   it("appears on the row in the manager's post history", () => {
     const history = read("components/PostHistory.tsx");
     expect(history).toContain("p.rejection_reason");
+    // The same hold rule as the inspector. A safety-held note must not render.
+    expect(history).toContain("!postIsHeld(p, identityGrounding)");
   });
 
   it("survives reopening the post from My work", () => {

@@ -31,6 +31,7 @@ import {
 } from "../services/websitePublishing";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
 import { savedPostIdentityIsSafe } from "../utils/historyPost";
+import { postIsHeld } from "./workspace/workspacePresentation";
 import { usePostHistoryList } from "../hooks/usePostHistoryList";
 import type { GeneratedPost } from "../types";
 
@@ -616,9 +617,13 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                         </td>
                         <td className="py-2 px-2">
                           {statusBadge(p.approval_status)}
-                          {p.approval_status === "rejected" && p.rejection_reason ? (
+                          {p.approval_status === "rejected" &&
+                          p.rejection_reason &&
+                          !postIsHeld(p, identityGrounding) ? (
                             // Without this the row says "rejected" and the
-                            // salesperson has to go ask why.
+                            // salesperson has to go ask why. The same hold
+                            // rule as the inspector keeps a safety-held note
+                            // off the row.
                             <span className="mt-0.5 block max-w-88 text-[11px] leading-snug text-error-200 in-[.theme-light]:text-error-800">
                               {p.rejection_reason}
                             </span>
