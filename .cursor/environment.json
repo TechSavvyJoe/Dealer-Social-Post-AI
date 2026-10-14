@@ -1,0 +1,9 @@
+{
+  "name": "Dealer Social Post AI",
+  "install": "bash .cursor/cloud-agent-install.sh",
+  "start": "bash .cursor/cloud-agent-start.sh",
+  "ports": [
+    { "name": "Vite", "port": 5173 },
+    { "name": "PocketBase", "port": 8090 }
+  ]
+}

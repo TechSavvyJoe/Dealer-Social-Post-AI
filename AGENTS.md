@@ -20,6 +20,15 @@ Quick reference:
 - Checks: `npm run typecheck` (this is the type/lint gate — there is no ESLint),
   `npm test` (vitest), `npx playwright test` (frontend-only smoke; stubs `/api`, no
   backend needed).
+- Cloud Agents: `.cursor/environment.json` installs Node `22.23.1` (the image's
+  default `node` can be older and sorts first on `PATH`), runs `npm ci`, installs
+  Playwright Chromium, and downloads PocketBase `0.22.55`. On boot,
+  `.cursor/cloud-agent-start.sh` writes gitignored `.env.local` and runs
+  `npm run dev:full`. Injected `GEMINI_API_KEY`, `ADMIN_LOGIN_USERNAME`, and
+  `ADMIN_LOGIN_PASSWORD` are copied into that file. When those admin values are
+  absent it creates username `admin` and a random password (read `.env.local`;
+  do not print it). Without `GEMINI_API_KEY`, sign-in and dealer setup still
+  work, and `/api/app/health` returns `ok:false` (503).
 
 ### Non-obvious setup caveats
 
