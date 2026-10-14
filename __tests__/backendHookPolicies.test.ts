@@ -1377,7 +1377,9 @@ You are a strict visual quality-control inspector for an automotive dealership i
     );
     expect(approvalCall).toContain("releaseRequired ||");
     expect(approvalCall).toContain('approvalMapping.kind === "customer_story"');
-    expect(approvalCall).toContain("{:dealer} AND salesperson_id = {:person} ");
+    expect(approvalCall).toContain("attribution_authoritative = 1");
+    expect(approvalCall).toContain("owner_person_id = {:person}");
+    expect(approvalCall).not.toContain("salesperson_id = {:person}");
     expect(approvalCall).toContain("AND approval_status = 'approved'");
     expect(approvalCall).toContain(
       "bind({ dealer: dealer.id, person: salespersonId })",

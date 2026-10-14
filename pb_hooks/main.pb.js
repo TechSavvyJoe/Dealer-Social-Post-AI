@@ -3052,13 +3052,17 @@ routerAdd("POST", "/api/app/posts", (c) => {
           approvalMapping.kind === "customer_story",
         countApprovedPosts: function () {
           if (!salespersonId) return NaN;
+          // salesperson_id was client-selectable on older posts, so it cannot
+          // earn a first_n review exemption. Count only manager-approved posts
+          // this session's person authoritatively owns.
           const row = new DynamicModel({ total: 0 });
           $app
             .dao()
             .db()
             .newQuery(
               "SELECT COUNT(*) AS total FROM posts " +
-                "WHERE dealer = {:dealer} AND salesperson_id = {:person} " +
+                "WHERE dealer = {:dealer} AND attribution_authoritative = 1 " +
+                "AND owner_person_id = {:person} " +
                 "AND approval_status = 'approved'",
             )
             .bind({ dealer: dealer.id, person: salespersonId })
