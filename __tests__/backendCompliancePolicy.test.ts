@@ -328,6 +328,21 @@ describe("PocketBase migrations remove schema fields with an API that works", ()
     ).toEqual([]);
   });
 
+  it("never indexes collection.schema or reads schema.length", () => {
+    const offenders: string[] = [];
+    for (const name of migrations) {
+      const code = withoutComments(readFileSync(resolve(dir, name), "utf8"));
+      for (const match of code.matchAll(/\w+\.schema\s*(\.length|\[)/g)) {
+        const line = code.slice(0, match.index).split("\n").length;
+        offenders.push(`pb_migrations/${name}:${line}  ${match[0]}`);
+      }
+    }
+    expect(
+      offenders,
+      `collection.schema is not a JS array on PocketBase 0.22; use getFieldByName:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
   it("finishes the credential-column drop that the original migration only believed it did", () => {
     // 1750200000 dropped `code_attempted` with the no-op idiom, so the column
     // survived in production with the migration marked applied. A later

@@ -84,9 +84,8 @@ const nativeMultipartRoundTrip = (
   bytes: Uint8Array,
 ) => {
   const source = `
-    let input = "";
-    for await (const chunk of process.stdin) input += chunk;
-    const data = JSON.parse(input);
+(async () => {
+    const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
     const form = new FormData();
     for (const [name, value] of Object.entries(data.fields)) form.set(name, value);
     form.set("creative_image", new Blob([Buffer.from(data.bytes, "base64")], { type: data.mime }), data.name);
@@ -98,6 +97,10 @@ const nativeMultipartRoundTrip = (
       fields: Object.fromEntries(${JSON.stringify(POST_SAVE_FIELDS)}.map(name => [name, String(parsed.get(name) || "")])),
       bytes, name: image.name, mime: image.type,
     }));
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
   `;
   return JSON.parse(
     execFileSync(process.execPath, ["-e", source], {
