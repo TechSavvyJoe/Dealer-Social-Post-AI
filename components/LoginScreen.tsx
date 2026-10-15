@@ -496,7 +496,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       <div
         className={cn(
           "flex min-h-0 w-full flex-1 flex-col",
-          "lg:grid lg:max-w-[65rem] lg:flex-none lg:grid-cols-[27rem_minmax(0,1fr)]",
+          "lg:grid lg:max-w-260 lg:flex-none lg:grid-cols-[27rem_minmax(0,1fr)]",
           // Never taller than <main>'s scrollport (100dvh minus its lg:py-6).
           // The single implicit row has to be clamped to the card box too
           // (`minmax(0,1fr)`), or it sizes to its content, ignores max-height
@@ -516,7 +516,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             src="/dealer-social-v6-symbol-white.svg"
             alt=""
             aria-hidden="true"
-            className="pointer-events-none absolute -bottom-10 -right-24 w-[34rem] max-w-none opacity-[0.12]"
+            className="pointer-events-none absolute -bottom-10 -right-24 w-136 max-w-none opacity-[0.12]"
           />
 
           <Logo
@@ -547,7 +547,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
           {isSuccess ? (
             <div
-              className="flex min-h-0 w-full flex-1 flex-col items-center justify-center text-center lg:w-[22rem] lg:flex-none"
+              className="flex min-h-0 w-full flex-1 flex-col items-center justify-center text-center lg:w-88 lg:flex-none"
               role="status"
               aria-live="polite"
             >
@@ -561,7 +561,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             </div>
           ) : isLoading ? (
             <div
-              className="flex min-h-0 w-full flex-1 flex-col items-center justify-center text-center lg:w-[22rem] lg:flex-none"
+              className="flex min-h-0 w-full flex-1 flex-col items-center justify-center text-center lg:w-88 lg:flex-none"
               role="status"
             >
               <Loader2 className="h-7 w-7 animate-spin text-ink-2" aria-hidden="true" />
@@ -573,7 +573,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           ) : (
             // Exactly three children, in this order: the short-landscape layout
             // in styles/globals.css places them by :nth-child.
-            <div className="login-form grid min-h-0 w-full flex-1 grid-rows-[auto_auto_minmax(min-content,1fr)] gap-5 lg:w-[22rem] lg:flex-none lg:grid-rows-[auto_auto_auto] lg:gap-6">
+            <div className="login-form grid min-h-0 w-full flex-1 grid-rows-[auto_auto_minmax(min-content,1fr)] gap-5 lg:w-88 lg:flex-none lg:grid-rows-[auto_auto_auto] lg:gap-6">
               <div
                 className={cn(
                   "login-intro flex shrink-0 flex-col gap-1.5",

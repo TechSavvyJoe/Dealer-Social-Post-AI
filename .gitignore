@@ -36,6 +36,8 @@ test-results
 pocketbase
 pocketbase.zip
 pb_data/
+# Local copy of `dist` for real PocketBase e2e (CI uses the Docker image).
+pb_public/
 .genkit/
 
 # Sensitive keys and credentials

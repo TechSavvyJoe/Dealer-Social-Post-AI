@@ -1,11 +1,443 @@
-@import "@fontsource/inter/latin-400.css";
-@import "@fontsource/inter/latin-500.css";
-@import "@fontsource/inter/latin-600.css";
-@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/inter/latin-400.css" layer(base);
+@import "@fontsource/inter/latin-500.css" layer(base);
+@import "@fontsource/inter/latin-600.css" layer(base);
+@import "@fontsource/inter/latin-700.css" layer(base);
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@config '../tailwind.config.js';
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+@utility toast-viewport {
+  bottom: max(1rem, var(--sab));
+  @media (max-width: 1023px) {
+    /* Keep notifications above the Post screen's fixed share bar. */
+    bottom: calc(max(0.75rem, var(--sab)) + 5.5rem);
+  }
+}
+
+@utility container-custom {
+  /* The Post screen's share bar is fixed to the bottom below lg (1024px). */
+
+  /* Container with max-width */
+  @apply max-w-(--breakpoint-2xl) mx-auto px-4 sm:px-6 lg:px-10;
+}
+
+@utility touch-target {
+  /* Touch target (Apple HIG - minimum 44px) */
+  @apply min-w-[44px] min-h-[44px] inline-flex items-center justify-center;
+}
+
+@utility table-lit {
+  /* The light table: a photo well is a panel lit from beneath, and a print
+     lying on it gets an edge, never a drop shadow (spec §4.3). */
+  background-color: rgb(var(--panel));
+  background-image: var(--table-lift);
+  .theme-light & {
+    background-color: rgb(var(--panel-raised));
+  }
+}
+
+@utility theme-light {
+  & .table-lit {
+    background-color: rgb(var(--panel-raised));
+  }
+
+  /* Login has no photo, so the light table itself is the stage: one soft lift
+     under the centred access card. Desktop only — the phone screen is the card
+     and needs no ground under it — and, like .table-lit, none in Sunlight
+     Mode, where a grey glow on a warm white canvas reads as a smudge. */
+  @media (min-width: 1024px) {
+    & .login-stage {
+      background-image: none;
+    }
+  }
+
+  /* A 13" laptop leaves roughly 680-780px of viewport once browser chrome is
+     counted, and the access column needs ~600 of it. Close the card's padding
+     and gaps there so the keypad and the brand copy both stay whole rather
+     than meeting the card's max-height. */
+
+  /* Sunlight Mode separates white surfaces with a border rather than with
+     tone (spec §4.1): --panel-raised is barely off --panel there, so the
+     borderless keys and the access switch would dissolve into the card. */
+  & .login-key {
+    border: 1px solid rgb(var(--hairline));
+  }
+
+  /* The switch is `h-[52px] p-1` under border-box, so a real border would come
+     out of the segments and drop them from 44px to 42px — below the touch
+     target the spec pins. An inset ring draws the same edge for free. */
+  & .login-switch {
+    box-shadow: inset 0 0 0 1px rgb(var(--hairline));
+  }
+
+  /* --overlay is pure white in Sunlight — the login card's own colour — so the
+     key variant's shared `hover:bg-overlay` erases the key face instead of
+     lifting it. On a white card the lift goes DOWN a tone, so Sunlight keeps
+     the raised fill and darkens it with the theme's own hover overlay.
+     `!important` because the utility sits in the later @layer utilities. */
+  & .login-key:hover {
+    background-color: rgb(var(--panel-raised)) !important;
+    background-image: linear-gradient(var(--fill-hover), var(--fill-hover));
+  }
+}
+
+@utility login-stage {
+  @media (min-width: 1024px) {
+    background-image: radial-gradient(
+      60% 55% at 50% 48%,
+      rgb(var(--panel-raised) / 0.55) 0%,
+      transparent 72%
+    );
+    .theme-light & {
+      background-image: none;
+    }
+  }
+}
+
+@utility login-access-pane {
+  @media (min-width: 1024px) {
+    /* The access column is the card's own scrollport of last resort. `safe`
+       keeps the top of the column reachable when it does overflow — plain
+       `center` would push it past the scroll origin, where scrollTop clamps
+       to 0 and the heading can never be reached.
+       `!important` for the same reason as the short-landscape block below:
+       this rule is in @layer components and would otherwise lose to the
+       element's own `lg:justify-center` utility. The element keeps that
+       utility so a browser without `safe` alignment still centres. */
+    justify-content: safe center !important;
+  }
+  @media (min-width: 1024px) and (min-height: 501px) and (max-height: 820px) {
+    padding-top: 1.5rem !important;
+    padding-bottom: 1.5rem !important;
+  }
+}
+
+@utility login-form {
+  @media (min-width: 1024px) and (min-height: 501px) and (max-height: 820px) {
+    gap: 1.25rem !important;
+  }
+}
+
+@utility login-mode-panel {
+  @media (min-width: 1024px) and (min-height: 501px) and (max-height: 820px) {
+    gap: 1.25rem !important;
+  }
+}
+
+@utility login-keypad-group {
+  @media (min-width: 1024px) and (min-height: 501px) and (max-height: 820px) {
+    gap: 1.25rem !important;
+  }
+}
+
+@utility login-card-brand {
+  @media (min-width: 1024px) and (min-height: 501px) and (max-height: 820px) {
+    padding: 2rem !important;
+  }
+}
+
+@utility login-key {
+  /* Login has no photo, so the light table itself is the stage: one soft lift
+     under the centred access card. Desktop only — the phone screen is the card
+     and needs no ground under it — and, like .table-lit, none in Sunlight
+     Mode, where a grey glow on a warm white canvas reads as a smudge. */
+
+  /* A 13" laptop leaves roughly 680-780px of viewport once browser chrome is
+     counted, and the access column needs ~600 of it. Close the card's padding
+     and gaps there so the keypad and the brand copy both stay whole rather
+     than meeting the card's max-height. */
+
+  /* Sunlight Mode separates white surfaces with a border rather than with
+     tone (spec §4.1): --panel-raised is barely off --panel there, so the
+     borderless keys and the access switch would dissolve into the card. */
+  .theme-light & {
+    border: 1px solid rgb(var(--hairline));
+  }
+
+  /* --overlay is pure white in Sunlight — the login card's own colour — so the
+     key variant's shared `hover:bg-overlay` erases the key face instead of
+     lifting it. On a white card the lift goes DOWN a tone, so Sunlight keeps
+     the raised fill and darkens it with the theme's own hover overlay.
+     `!important` because the utility sits in the later @layer utilities. */
+  .theme-light &:hover {
+    background-color: rgb(var(--panel-raised)) !important;
+    background-image: linear-gradient(var(--fill-hover), var(--fill-hover));
+  }
+}
+
+@utility login-switch {
+  /* The switch is `h-[52px] p-1` under border-box, so a real border would come
+     out of the segments and drop them from 44px to 42px — below the touch
+     target the spec pins. An inset ring draws the same edge for free. */
+  .theme-light & {
+    box-shadow: inset 0 0 0 1px rgb(var(--hairline));
+  }
+}
+
+@utility print {
+  border: var(--print-edge, 1px solid rgb(var(--border-strong) / 0.6));
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+@utility card-hover {
+  /* Interactive-card affordance — border/background emphasis, no lift. */
+  transition:
+    border-color var(--duration-base) var(--ease-out),
+    background-color var(--duration-base) var(--ease-out);
+  &:hover {
+    border-color: rgb(var(--color-border-strong));
+    background-color: rgb(var(--color-surface-raised));
+  }
+}
+
+@utility btn-press {
+  /* Button press effect */
+  @apply active:scale-[0.98] transition-transform duration-100;
+}
+
+@utility shimmer {
+  /* Shimmer effect for skeletons — theme-aware so Sunlight Mode skeletons
+     read as light cards instead of dark slabs. */
+  background: linear-gradient(
+    90deg,
+    rgb(var(--color-surface-elevated)) 0%,
+    rgb(var(--color-surface-overlay)) 20%,
+    rgb(var(--color-surface-raised)) 40%,
+    rgb(var(--color-surface-overlay)) 60%,
+    rgb(var(--color-surface-elevated)) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+@utility scrollbar-hide {
+  /* Scrollbar hide */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility pulse-ring {
+  /* Pulse animation for loading */
+  @apply absolute inset-0 rounded-full;
+  @apply border-2 border-primary-500;
+  animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@utility elevation-transition {
+  /* Smooth elevation transition */
+  @apply transition-shadow duration-300 ease-apple;
+}
+
+@utility card-interactive {
+  /* Interactive card state — border/background emphasis, no glow. */
+  @apply cursor-pointer;
+  @apply transition-colors duration-200 ease-apple;
+  @apply hover:border-strong hover:bg-overlay;
+  @apply active:scale-[0.98];
+}
+
+@utility disabled-state {
+  /* Disabled state */
+  @apply opacity-50 cursor-not-allowed pointer-events-none;
+}
+
+@utility badge-dot {
+  /* Badge dot */
+  @apply w-2 h-2 rounded-full;
+  @apply animate-pulse-soft;
+}
+
+@utility tooltip-arrow {
+  /* Tooltip arrow */
+  @apply absolute w-2 h-2 bg-overlay border border-hairline;
+  @apply rotate-45;
+}
+
+@utility text-balance {
+  /* Text utilities */
+  text-wrap: balance;
+}
+
+@utility text-pretty {
+  text-wrap: pretty;
+}
+
+@utility space-y-section {
+  /* Spacing utilities */
+  @apply space-y-12 md:space-y-16 lg:space-y-20;
+}
+
+@utility flex-center {
+  /* Flex center */
+  @apply flex items-center justify-center;
+}
+
+@utility absolute-center {
+  /* Absolute center */
+  @apply absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2;
+}
+
+@utility safe-top {
+  /* Safe area insets for mobile */
+  padding-top: env(safe-area-inset-top);
+}
+
+@utility safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@utility safe-left {
+  padding-left: env(safe-area-inset-left);
+}
+
+@utility safe-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+@utility line-clamp-1 {
+  /* Truncate with lines */
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@utility line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@utility line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@utility hide-scrollbar {
+  /* Hide scrollbar but keep functionality */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility aspect-square {
+  /* Aspect ratios */
+  aspect-ratio: 1 / 1;
+}
+
+@utility aspect-video {
+  aspect-ratio: 16 / 9;
+}
+
+@utility aspect-photo {
+  aspect-ratio: 4 / 3;
+}
+
+@utility grid-auto-fill {
+  /* Grid helpers */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+}
+
+@utility grid-auto-fit {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+}
+
+@utility touch-pan-x {
+  /* Touch action */
+  touch-action: pan-x;
+}
+
+@utility touch-pan-y {
+  touch-action: pan-y;
+}
+
+@utility touch-pinch-zoom {
+  touch-action: pinch-zoom;
+}
+
+@utility will-change-transform {
+  /* Will change for performance */
+  will-change: transform;
+}
+
+@utility will-change-opacity {
+  will-change: opacity;
+}
+
+@utility will-change-scroll {
+  will-change: scroll-position;
+}
+
+@utility animate-shimmer {
+  /* Shimmer animation for loading states */
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@utility ripple {
+  /* Ripple effect for button interactions */
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  transform: scale(0);
+  animation: ripple-animation 600ms ease-out;
+  pointer-events: none;
+}
+
+@utility stagger-1 {
+  /* Staggered animation utilities */
+  animation-delay: 0.1s;
+}
+
+@utility stagger-2 {
+  animation-delay: 0.2s;
+}
+
+@utility stagger-3 {
+  animation-delay: 0.3s;
+}
+
+@utility animate-slide-in-up {
+  /* Entrance animations */
+  animation: slide-in-up 0.5s var(--ease-smooth) forwards;
+}
+
+@utility animate-slide-in-down {
+  animation: slide-in-down 0.5s var(--ease-smooth) forwards;
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.4s var(--ease-ios) forwards;
+}
 
 @layer base {
   /* =========================================================================
@@ -1073,148 +1505,6 @@
 }
 
 @layer components {
-  .toast-viewport {
-    bottom: max(1rem, var(--sab));
-  }
-
-  /* The Post screen's share bar is fixed to the bottom below lg (1024px). */
-  @media (max-width: 1023px) {
-    .toast-viewport {
-      /* Keep notifications above the Post screen's fixed share bar. */
-      bottom: calc(max(0.75rem, var(--sab)) + 5.5rem);
-    }
-  }
-
-  /* Container with max-width */
-  .container-custom {
-    @apply max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-10;
-  }
-
-  /* Touch target (Apple HIG - minimum 44px) */
-  .touch-target {
-    @apply min-w-[44px] min-h-[44px] inline-flex items-center justify-center;
-  }
-
-  /* The light table: a photo well is a panel lit from beneath, and a print
-     lying on it gets an edge, never a drop shadow (spec §4.3). */
-  .table-lit {
-    background-color: rgb(var(--panel));
-    background-image: var(--table-lift);
-  }
-  .theme-light .table-lit {
-    background-color: rgb(var(--panel-raised));
-  }
-
-  /* Login has no photo, so the light table itself is the stage: one soft lift
-     under the centred access card. Desktop only — the phone screen is the card
-     and needs no ground under it — and, like .table-lit, none in Sunlight
-     Mode, where a grey glow on a warm white canvas reads as a smudge. */
-  @media (min-width: 1024px) {
-    .login-stage {
-      background-image: radial-gradient(
-        60% 55% at 50% 48%,
-        rgb(var(--panel-raised) / 0.55) 0%,
-        transparent 72%
-      );
-    }
-    .theme-light .login-stage {
-      background-image: none;
-    }
-
-    /* The access column is the card's own scrollport of last resort. `safe`
-       keeps the top of the column reachable when it does overflow — plain
-       `center` would push it past the scroll origin, where scrollTop clamps
-       to 0 and the heading can never be reached.
-       `!important` for the same reason as the short-landscape block below:
-       this rule is in @layer components and would otherwise lose to the
-       element's own `lg:justify-center` utility. The element keeps that
-       utility so a browser without `safe` alignment still centres. */
-    .login-access-pane {
-      justify-content: safe center !important;
-    }
-  }
-
-  /* A 13" laptop leaves roughly 680-780px of viewport once browser chrome is
-     counted, and the access column needs ~600 of it. Close the card's padding
-     and gaps there so the keypad and the brand copy both stay whole rather
-     than meeting the card's max-height. */
-  @media (min-width: 1024px) and (min-height: 501px) and (max-height: 820px) {
-    .login-access-pane {
-      padding-top: 1.5rem !important;
-      padding-bottom: 1.5rem !important;
-    }
-
-    .login-form,
-    .login-mode-panel,
-    .login-keypad-group {
-      gap: 1.25rem !important;
-    }
-
-    .login-card-brand {
-      padding: 2rem !important;
-    }
-  }
-
-  /* Sunlight Mode separates white surfaces with a border rather than with
-     tone (spec §4.1): --panel-raised is barely off --panel there, so the
-     borderless keys and the access switch would dissolve into the card. */
-  .theme-light .login-key {
-    border: 1px solid rgb(var(--hairline));
-  }
-
-  /* The switch is `h-[52px] p-1` under border-box, so a real border would come
-     out of the segments and drop them from 44px to 42px — below the touch
-     target the spec pins. An inset ring draws the same edge for free. */
-  .theme-light .login-switch {
-    box-shadow: inset 0 0 0 1px rgb(var(--hairline));
-  }
-
-  /* --overlay is pure white in Sunlight — the login card's own colour — so the
-     key variant's shared `hover:bg-overlay` erases the key face instead of
-     lifting it. On a white card the lift goes DOWN a tone, so Sunlight keeps
-     the raised fill and darkens it with the theme's own hover overlay.
-     `!important` because the utility sits in the later @layer utilities. */
-  .theme-light .login-key:hover {
-    background-color: rgb(var(--panel-raised)) !important;
-    background-image: linear-gradient(var(--fill-hover), var(--fill-hover));
-  }
-  .print {
-    border: var(--print-edge, 1px solid rgb(var(--border-strong) / 0.6));
-    border-radius: var(--radius-sm);
-    box-shadow: none;
-  }
-
-  /* Interactive-card affordance — border/background emphasis, no lift. */
-  .card-hover {
-    transition:
-      border-color var(--duration-base) var(--ease-out),
-      background-color var(--duration-base) var(--ease-out);
-  }
-  .card-hover:hover {
-    border-color: rgb(var(--color-border-strong));
-    background-color: rgb(var(--color-surface-raised));
-  }
-
-  /* Button press effect */
-  .btn-press {
-    @apply active:scale-[0.98] transition-transform duration-100;
-  }
-
-  /* Shimmer effect for skeletons — theme-aware so Sunlight Mode skeletons
-     read as light cards instead of dark slabs. */
-  .shimmer {
-    background: linear-gradient(
-      90deg,
-      rgb(var(--color-surface-elevated)) 0%,
-      rgb(var(--color-surface-overlay)) 20%,
-      rgb(var(--color-surface-raised)) 40%,
-      rgb(var(--color-surface-overlay)) 60%,
-      rgb(var(--color-surface-elevated)) 100%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 2s linear infinite;
-  }
-
   @keyframes shimmer {
     0% {
       background-position: -200% 0;
@@ -1222,23 +1512,6 @@
     100% {
       background-position: 200% 0;
     }
-  }
-
-  /* Scrollbar hide */
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Pulse animation for loading */
-  .pulse-ring {
-    @apply absolute inset-0 rounded-full;
-    @apply border-2 border-primary-500;
-    animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
 
   @keyframes pulse-ring {
@@ -1251,161 +1524,9 @@
       opacity: 0;
     }
   }
-
-  /* Smooth elevation transition */
-  .elevation-transition {
-    @apply transition-shadow duration-300 ease-apple;
-  }
-
-  /* Interactive card state — border/background emphasis, no glow. */
-  .card-interactive {
-    @apply cursor-pointer;
-    @apply transition-colors duration-200 ease-apple;
-    @apply hover:border-strong hover:bg-overlay;
-    @apply active:scale-[0.98];
-  }
-
-  /* Disabled state */
-  .disabled-state {
-    @apply opacity-50 cursor-not-allowed pointer-events-none;
-  }
-
-  /* Badge dot */
-  .badge-dot {
-    @apply w-2 h-2 rounded-full;
-    @apply animate-pulse-soft;
-  }
-
-  /* Tooltip arrow */
-  .tooltip-arrow {
-    @apply absolute w-2 h-2 bg-overlay border border-hairline;
-    @apply rotate-45;
-  }
 }
 
 @layer utilities {
-  /* Text utilities */
-  .text-balance {
-    text-wrap: balance;
-  }
-
-  .text-pretty {
-    text-wrap: pretty;
-  }
-
-  /* Spacing utilities */
-  .space-y-section {
-    @apply space-y-12 md:space-y-16 lg:space-y-20;
-  }
-
-  /* Flex center */
-  .flex-center {
-    @apply flex items-center justify-center;
-  }
-
-  /* Absolute center */
-  .absolute-center {
-    @apply absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2;
-  }
-
-  /* Safe area insets for mobile */
-  .safe-top {
-    padding-top: env(safe-area-inset-top);
-  }
-
-  .safe-bottom {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-
-  .safe-left {
-    padding-left: env(safe-area-inset-left);
-  }
-
-  .safe-right {
-    padding-right: env(safe-area-inset-right);
-  }
-
-  /* Truncate with lines */
-  .line-clamp-1 {
-    display: -webkit-box;
-    -webkit-line-clamp: 1;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .line-clamp-2 {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .line-clamp-3 {
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  /* Hide scrollbar but keep functionality */
-  .hide-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .hide-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Aspect ratios */
-  .aspect-square {
-    aspect-ratio: 1 / 1;
-  }
-
-  .aspect-video {
-    aspect-ratio: 16 / 9;
-  }
-
-  .aspect-photo {
-    aspect-ratio: 4 / 3;
-  }
-
-  /* Grid helpers */
-  .grid-auto-fill {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
-  }
-
-  .grid-auto-fit {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
-  }
-
-  /* Touch action */
-  .touch-pan-x {
-    touch-action: pan-x;
-  }
-
-  .touch-pan-y {
-    touch-action: pan-y;
-  }
-
-  .touch-pinch-zoom {
-    touch-action: pinch-zoom;
-  }
-
-  /* Will change for performance */
-  .will-change-transform {
-    will-change: transform;
-  }
-
-  .will-change-opacity {
-    will-change: opacity;
-  }
-
-  .will-change-scroll {
-    will-change: scroll-position;
-  }
-
-  /* Shimmer animation for loading states */
   @keyframes shimmer {
     0% {
       transform: translateX(-100%);
@@ -1415,41 +1536,12 @@
     }
   }
 
-  .animate-shimmer {
-    animation: shimmer 1.5s ease-in-out infinite;
-  }
-
-  /* Ripple effect for button interactions */
-  .ripple {
-    position: absolute;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.4);
-    transform: scale(0);
-    animation: ripple-animation 600ms ease-out;
-    pointer-events: none;
-  }
-
   @keyframes ripple-animation {
     to {
       transform: scale(2);
       opacity: 0;
     }
   }
-
-  /* Staggered animation utilities */
-  .stagger-1 {
-    animation-delay: 0.1s;
-  }
-
-  .stagger-2 {
-    animation-delay: 0.2s;
-  }
-
-  .stagger-3 {
-    animation-delay: 0.3s;
-  }
-
-  /* Entrance animations */
   @keyframes slide-in-up {
     from {
       opacity: 0;
@@ -1479,18 +1571,6 @@
     to {
       opacity: 1;
     }
-  }
-
-  .animate-slide-in-up {
-    animation: slide-in-up 0.5s var(--ease-smooth) forwards;
-  }
-
-  .animate-slide-in-down {
-    animation: slide-in-down 0.5s var(--ease-smooth) forwards;
-  }
-
-  .animate-fade-in {
-    animation: fade-in 0.4s var(--ease-ios) forwards;
   }
 }
 

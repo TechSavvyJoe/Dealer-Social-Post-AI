@@ -136,6 +136,17 @@ for attempt in $(seq 1 480); do
         -o /dev/null -w '%{http_code}' \
         http://127.0.0.1:8090/api/app/health 2>/dev/null || true)
     if [ "$health_status" = "200" ] || [ "$health_status" = "503" ]; then
+        # Re-check the child after the probe: a leftover process on :8090 can
+        # answer health after our start-pocketbase.sh has already exited.
+        if ! kill -0 "$POCKETBASE_PID" 2>/dev/null; then
+            backend_status=0
+            wait "$POCKETBASE_PID" || backend_status=$?
+            echo "ERROR: PocketBase exited before it became ready (status $backend_status)."
+            if [ "$backend_status" -eq 0 ]; then
+                exit 1
+            fi
+            exit "$backend_status"
+        fi
         BACKEND_READY=1
         break
     fi

@@ -244,7 +244,7 @@ export const SamplePhoto: React.FC<SamplePhotoProps> = ({
         decoding="async"
         alt={decorative ? "" : alt || SAMPLE_PHOTO_ALT}
         className={cn(
-          "block aspect-[4/5] h-auto w-full object-cover object-[46%_50%]",
+          "block aspect-4/5 h-auto w-full object-cover object-[46%_50%]",
           // The Look's photo finish: Hometown a little warmer, Turbo a little
           // more contrast. Part of the illustration, like the overlay.
           shown === "hometown" && "saturate-[1.12] sepia-[.12]",

@@ -220,7 +220,7 @@ export const LogoField: React.FC<LogoFieldProps> = ({
         {upload.kind === "error" ? <ErrorNote>{upload.message}</ErrorNote> : null}
       </div>
 
-      <div className="flex w-full flex-col sm:w-[12.5rem]">
+      <div className="flex w-full flex-col sm:w-50">
         <p id={placementId} className={cn("mb-2", FIELD_LABEL)}>
           Placement on photos
         </p>

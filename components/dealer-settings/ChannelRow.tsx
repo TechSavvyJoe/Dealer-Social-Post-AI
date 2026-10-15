@@ -46,7 +46,7 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
   const panelId = useId();
   return (
     <div className="border-b border-hairline">
-      <div className="flex min-h-[4.25rem] items-center gap-4 py-3">
+      <div className="flex min-h-17 items-center gap-4 py-3">
         <div className="min-w-0 flex-1">
           <h3 className="text-lg leading-6 text-ink">{title}</h3>
           {open ? null : (

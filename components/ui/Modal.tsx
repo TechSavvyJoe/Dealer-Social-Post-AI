@@ -119,7 +119,7 @@ export const Modal: React.FC<ModalProps> = ({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="modal-viewport fixed inset-0 z-[100] flex items-end justify-center sm:items-center">
+        <div className="modal-viewport fixed inset-0 z-100 flex items-end justify-center sm:items-center">
           {/* Backdrop */}
           <m.div
             initial={shouldReduceMotion ? false : { opacity: 0 }}
@@ -148,7 +148,7 @@ export const Modal: React.FC<ModalProps> = ({
             className={cn(
               "on-overlay relative w-full bg-overlay border border-hairline shadow-dialog overflow-hidden flex flex-col",
               "rounded-t-xl sm:rounded-lg", // Sheet-like on mobile
-              "max-h-[calc(100dvh_-_var(--header-safe-top))] sm:max-h-[90vh]",
+              "max-h-[calc(100dvh-var(--header-safe-top))] sm:max-h-[90vh]",
               sizeClasses[size],
               className,
             )}

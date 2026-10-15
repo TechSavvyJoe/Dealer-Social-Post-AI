@@ -78,7 +78,7 @@ const statusBadge = (status?: ApprovalStatus): React.ReactElement | null => {
       );
     case "rejected":
       return (
-        <span className="inline-flex items-center gap-1 text-error-200 text-[11px] [.theme-light_&]:text-error-800">
+        <span className="inline-flex items-center gap-1 text-error-200 text-[11px] in-[.theme-light]:text-error-800">
           <XCircle className="h-3 w-3" /> rejected
         </span>
       );
@@ -105,7 +105,7 @@ const websiteStatusBadge = (
         ready
           ? "text-success-200"
           : failed
-            ? "text-error-200 [.theme-light_&]:text-error-800"
+            ? "text-error-200 in-[.theme-light]:text-error-800"
             : withdrawn
               ? "text-surface-400"
               : "text-info-200",
@@ -295,7 +295,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
               className={cn(
                 "min-h-11 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap",
                 statusFilter === f.key
-                  ? "bg-primary-500/30 text-primary-100 [.theme-light_&]:text-primary-950"
+                  ? "bg-primary-500/30 text-primary-100 in-[.theme-light]:text-primary-950"
                   : "text-surface-400 hover:text-surface-200",
               )}
             >
@@ -394,7 +394,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                         type="button"
                         onClick={() => void openCreative(post)}
                         disabled={isOpening}
-                        className="h-20 w-16 shrink-0 overflow-hidden rounded-lg border border-hairline bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                        className="h-20 w-16 shrink-0 overflow-hidden rounded-lg border border-hairline bg-surface-950 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-400"
                         aria-label={`Open post from ${formatWhen(post.generated_at)}`}
                       >
                         <img
@@ -469,7 +469,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                               )}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100 [.theme-light_&]:text-success-900"
+                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100 in-[.theme-light]:text-success-900"
                             >
                               <Globe2 className="h-3 w-3" /> Site draft
                             </a>
@@ -482,7 +482,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                               type="button"
                               disabled={Boolean(websiteRetryingId)}
                               onClick={() => void retryWebsite(post)}
-                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50 [.theme-light_&]:text-error-800"
+                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50 in-[.theme-light]:text-error-800"
                             >
                               <RefreshCw
                                 className={cn(
@@ -549,7 +549,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                               type="button"
                               onClick={() => void openCreative(p)}
                               disabled={isOpening}
-                              className="h-12 w-12 overflow-hidden rounded-lg border border-hairline bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                              className="h-12 w-12 overflow-hidden rounded-lg border border-hairline bg-surface-950 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-400"
                               aria-label="Open creative"
                             >
                               <img
@@ -619,7 +619,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                           {p.approval_status === "rejected" && p.rejection_reason ? (
                             // Without this the row says "rejected" and the
                             // salesperson has to go ask why.
-                            <span className="mt-0.5 block max-w-[22rem] text-[11px] leading-snug text-error-200 [.theme-light_&]:text-error-800">
+                            <span className="mt-0.5 block max-w-88 text-[11px] leading-snug text-error-200 in-[.theme-light]:text-error-800">
                               {p.rejection_reason}
                             </span>
                           ) : null}
@@ -649,7 +649,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                                 )}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100 [.theme-light_&]:text-success-900"
+                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100 in-[.theme-light]:text-success-900"
                                 title="Review private website draft"
                               >
                                 <Globe2 className="h-3 w-3" /> Site
@@ -663,7 +663,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({
                                 type="button"
                                 disabled={Boolean(websiteRetryingId)}
                                 onClick={() => void retryWebsite(p)}
-                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50 [.theme-light_&]:text-error-800"
+                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50 in-[.theme-light]:text-error-800"
                               >
                                 <RefreshCw
                                   className={cn(

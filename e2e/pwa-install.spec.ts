@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { isolateFromLiveApi } from "./isolateFromLiveApi";
 
 type ManifestIcon = {
   src: string;
@@ -175,6 +176,7 @@ async function expectMaskableSafeZone(page: Page, sources: string[]) {
 }
 
 async function stubAuthenticatedHome(page: Page) {
+  await isolateFromLiveApi(page);
   await page.route("**/api/app/session", async (route) => {
     await route.fulfill({
       status: 200,
@@ -216,6 +218,7 @@ test.describe("Home Screen PWA contracts", () => {
       "One browser is sufficient for static install metadata and image contracts.",
     );
 
+    await isolateFromLiveApi(page);
     await page.route("**/api/app/session", async (route) => {
       await route.fulfill({
         status: 401,
@@ -417,15 +420,34 @@ test.describe("Home Screen PWA contracts", () => {
         ),
       ).toBe(true);
       const standaloneMediaRule = await page.evaluate(() => {
-        for (const styleSheet of Array.from(document.styleSheets)) {
-          for (const rule of Array.from(styleSheet.cssRules)) {
+        // Tailwind v4 emits `@layer base` as a real CSS layer, so the
+        // standalone media query is nested in a CSSLayerBlockRule. A
+        // top-level walk only sees that layer and misses the rule.
+        const findStandaloneBodyRule = (rules: CSSRuleList): string => {
+          for (const rule of Array.from(rules)) {
             if (
               rule instanceof CSSMediaRule &&
-              rule.conditionText.includes("display-mode: standalone")
+              rule.conditionText.includes("display-mode: standalone") &&
+              rule.cssText.includes("body")
             ) {
               return rule.cssText;
             }
+            if (rule instanceof CSSGroupingRule) {
+              const nested = findStandaloneBodyRule(rule.cssRules);
+              if (nested) return nested;
+            }
           }
+          return "";
+        };
+        for (const styleSheet of Array.from(document.styleSheets)) {
+          let rules: CSSRuleList;
+          try {
+            rules = styleSheet.cssRules;
+          } catch {
+            continue;
+          }
+          const found = findStandaloneBodyRule(rules);
+          if (found) return found;
         }
         return "";
       });

@@ -106,7 +106,7 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
         {values.approval ? (
           // A sibling of the radiogroup, so that group holds only its two
           // radios; indented to sit under "Require manager approval".
-          <div className="min-w-0 pb-3 pl-[2.125rem]">
+          <div className="min-w-0 pb-3 pl-8.5">
             <fieldset className="min-w-0 border-t border-hairline pt-3.5">
               <legend className="float-left w-full pb-1 text-sm font-semibold text-ink-2">
                 Which posts need approval?

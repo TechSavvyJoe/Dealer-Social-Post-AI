@@ -1,9 +1,1 @@
-[
-  {
-    "advisory": "GHSA-vfj7-8cjw-p6xm",
-    "package": "braces",
-    "reviewed": "2026-10-05",
-    "expires": "2026-11-05",
-    "reason": "No patched braces exists (3.0.3 is the latest release and the advisory covers <=3.0.3). It is reached only through tailwindcss@3 -> chokidar/micromatch at build time, expanding the glob patterns in this repo's own tailwind.config.js; no user, request or uploaded file ever supplies a pattern, and braces is not in the browser bundle or the PocketBase image. npm's only offered fix is the Tailwind 4 major migration. Re-check for a braces release before the expiry."
-  }
-]
+[]

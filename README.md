@@ -10,7 +10,7 @@ Production-oriented social post creation for automotive dealerships. An authenti
 
 Prerequisites:
 
-- Node.js 22 (`22.23.1` is pinned in `.node-version` and `.nvmrc`)
+- Node.js 22 (`engines` allow `>=22.12.0 <23`; CI/Docker/release pin `22.23.1` via `.node-version` and `.nvmrc`)
 - A Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
 
 ```bash

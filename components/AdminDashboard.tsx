@@ -598,7 +598,7 @@ export const AdminDashboard: React.FC = () => {
     <div className="mx-auto w-full max-w-7xl px-4 pb-12 pt-6 sm:px-6 sm:pt-10 lg:px-8">
       {/* One row: the page title and the four text tabs over one hairline. */}
       <div className="flex flex-col gap-2 border-b border-hairline sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-8">
-        <h1 className="font-display text-[1.625rem] font-semibold leading-[1.875rem] tracking-[-0.01em] text-ink sm:mb-3.5 sm:text-4xl">
+        <h1 className="font-display text-[1.625rem] font-semibold leading-7.5 tracking-[-0.01em] text-ink sm:mb-3.5 sm:text-4xl">
           System admin
         </h1>
         {/* A scroll box clips on both axes, so it carries 4 px of padding
@@ -606,7 +606,7 @@ export const AdminDashboard: React.FC = () => {
             with negative margins; -mb is 1 px more so the tabs still sit on
             the hairline. */}
         <div
-          className="-mx-1 -mb-[5px] -mt-1 flex gap-6 overflow-x-auto p-1 sm:gap-7"
+          className="-mx-1 mb-[-5px] -mt-1 flex gap-6 overflow-x-auto p-1 sm:gap-7"
           role="tablist"
           aria-label="System admin sections"
         >

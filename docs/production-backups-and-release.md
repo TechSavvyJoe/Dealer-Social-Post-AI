@@ -2,7 +2,7 @@
 
 This runbook keeps the single-writer PocketBase database recoverable and prevents a Vercel frontend from reaching the production domain before its matching Fly backend is ready.
 
-Local version files, GitHub Actions, npm, and Docker pin Node `22.23.1` (npm `10.9.8`). Vercel exposes Node only at the major-version level, so `package.json` constrains builds to Node 22 and Vercel applies its current Node 22 patch automatically. PocketBase remains pinned to `0.22.55`.
+Local version files, GitHub Actions, and Docker pin Node `22.23.1` (npm `10.9.8`). `package.json` `engines` allows `>=22.12.0 <23` so local typecheck/test and Vercel’s Node 22 patch line stay honest without requiring every laptop to match the release pin. Coordinated release scripts still require exact `22.23.1`. PocketBase remains pinned to `0.22.55`.
 
 ## One-time private R2 setup
 

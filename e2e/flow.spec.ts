@@ -1,6 +1,7 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { readFileSync } from "node:fs";
+import { isolateFromLiveApi } from "./isolateFromLiveApi";
 
 // These restored-post fixtures represent creatives generated under the current
 // reviewed image policy. Keep this in sync with config/gemini-model-policy.json;
@@ -166,6 +167,7 @@ test.describe("Dealer Social Post AI Flow", () => {
       "CDP Dynamic Island emulation runs on the representative Chromium phone",
     );
 
+    await isolateFromLiveApi(page);
     await page.route("**/api/app/session", async (route) => {
       await route.fulfill({
         status: 401,
@@ -258,6 +260,7 @@ test.describe("Dealer Social Post AI Flow", () => {
     // so Vite can run alone and the login failure path is deterministic.
     let loginAttempts = 0;
     let submittedTurnstileToken = "";
+    await isolateFromLiveApi(page);
     await page.route("**/api/app/session", async (route) => {
       if (route.request().method() === "POST") {
         loginAttempts += 1;
@@ -481,6 +484,7 @@ test.describe("Dealer Social Post AI Flow", () => {
             width: viewport.width,
             height: viewport.height,
           });
+          await isolateFromLiveApi(page);
           await page.route("**/api/app/session", (route) =>
             route.fulfill({
               status: 401,
@@ -617,6 +621,7 @@ test.describe("Dealer Social Post AI Flow", () => {
     page,
   }) => {
     const submittedCredentials: Array<Record<string, unknown>> = [];
+    await isolateFromLiveApi(page);
     await page.route("**/api/app/session", async (route) => {
       if (route.request().method() === "POST") {
         const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -731,6 +736,7 @@ test.describe("Dealer Social Post AI Flow", () => {
     );
 
     await page.emulateMedia({ reducedMotion: "reduce" });
+    await isolateFromLiveApi(page);
     await page.route("**/api/app/session", async (route) => {
       await route.fulfill({
         status: 200,
@@ -856,6 +862,7 @@ test.describe("Dealer Social Post AI Flow", () => {
   }, testInfo) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
 
+    await isolateFromLiveApi(page);
     await page.route("**/api/app/session", async (route) => {
       await route.fulfill({
         status: 200,
@@ -1560,6 +1567,7 @@ test.describe("Dealer Social Post AI Flow", () => {
       updatedAt: "2026-08-05T13:00:00.000Z",
     };
 
+    await isolateFromLiveApi(page);
     await page.route("**/api/app/session", async (route) => {
       await route.fulfill({
         status: 200,
@@ -1816,6 +1824,7 @@ test.describe("Dealer Social Post AI Flow", () => {
     // Otherwise a very small/slow phone can go offline while Vite is still
     // fetching the authenticated Home chunk, turning a banner test into a
     // nondeterministic module-load failure.
+    await isolateFromLiveApi(page);
     await page.route("**/api/app/session", async (route) => {
       await route.fulfill({
         status: 401,

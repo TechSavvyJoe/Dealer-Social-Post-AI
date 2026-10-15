@@ -138,9 +138,11 @@ const lightTableLeftovers = (file: string, source: string): string[] => {
   const offenders: string[] = [];
   const at = (index: number) => `${file}:${lineOf(source, index)}`;
 
-  for (const match of source.matchAll(/\[\.theme-light_&/g)) {
+  for (const match of source.matchAll(
+    /(?:\[\.theme-light_&\]|in-\[\.theme-light\])/g,
+  )) {
     offenders.push(
-      `${at(match.index)} — leftover [.theme-light_&] override; the token system makes it unnecessary`,
+      `${at(match.index)} — leftover theme-light override; the token system makes it unnecessary`,
     );
   }
   for (const match of source.matchAll(
@@ -297,7 +299,12 @@ const fixedColourHits = (
  * counts.
  */
 const hasLightOverride = (literal: string, ramp: string): boolean =>
-  new RegExp(`theme-light_&\\]:(?:[a-z-]+:)*text-${ramp}`).test(literal);
+  // Tailwind 3 used `[.theme-light_&]:text-*`; the v4 upgrade rewrites those
+  // to `in-[.theme-light]:text-*`. Accept either form so the legacy-file
+  // contrast rule still recognizes an override after the migration.
+  new RegExp(
+    `(?:theme-light_&\\]|in-\\[\\.theme-light\\]):(?:[a-z-]+:)*text-${ramp}`,
+  ).test(literal);
 
 describe("Sunlight Mode keeps selected controls readable", () => {
   it("scans every folder under components/, so a new one is never skipped", () => {
@@ -541,7 +548,7 @@ describe("Sunlight Mode keeps selected controls readable", () => {
     for (const file of sourceFiles()) {
       const source = read(file);
       for (const match of source.matchAll(
-        /\[\.theme-light_&\]:text-surface-(\d{2,3})/g,
+        /(?:\[\.theme-light_&\]|in-\[\.theme-light\]):text-surface-(\d{2,3})/g,
       )) {
         // Toast's close button predates this rule and measures 8.40:1; it
         // darkens rather than inverting, so it is grandfathered by exact site.
