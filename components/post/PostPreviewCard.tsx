@@ -199,7 +199,7 @@ export const PostPreviewCard: React.FC<PostPreviewCardProps> = ({
             <div
               ref={mediaRailRef}
               tabIndex={0}
-              className={`flex snap-x snap-mandatory overscroll-x-contain scrollbar-none ${mediaSelectionDisabled ? "overflow-x-hidden" : "overflow-x-auto"}`}
+              className={`flex snap-x snap-mandatory overscroll-x-contain scrollbar-hide ${mediaSelectionDisabled ? "overflow-x-hidden" : "overflow-x-auto"}`}
               role="group"
               aria-label="Image and video previews"
               onScroll={(event) => {

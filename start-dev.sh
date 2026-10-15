@@ -57,7 +57,7 @@ if [ -z "${GEMINI_API_KEY:-}" ] || [ "$GEMINI_API_KEY" = "your-api-key-here" ]; 
     echo "3. Replace 'your-api-key-here' with your actual API key"
     echo "4. Save the file and run this script again"
     echo ""
-    echo "The app will open, but AI generation and deep readiness will be unavailable."
+    echo "The app will open, but AI generation fails and /api/app/health reports ok:false (503)."
 else
     echo "✓ GEMINI_API_KEY is configured"
 fi

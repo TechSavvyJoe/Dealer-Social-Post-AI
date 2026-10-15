@@ -1553,20 +1553,21 @@ routerAdd("GET", "/api/app/health", (c) => {
     }
   }
 
-  // Env presence (booleans only — never echo the values)
-  checks.gemini_key_set = !!(
-    require(__hooks + "/connectionConfig.js").runtimeValue("GEMINI_API_KEY") || ""
-  ).trim();
+  // Env presence (booleans only — never echo the values). Placeholder scaffold
+  // values from start-dev.sh do not count as configured.
+  checks.gemini_key_set = helpers.isConfiguredProviderApiKey(
+    require(__hooks + "/connectionConfig.js").runtimeValue("GEMINI_API_KEY"),
+  );
   // Retained in the health contract for one compatibility release. Shared
   // proxy tokens are intentionally unsupported; every paid route requires a
   // continuously revalidated application session.
   checks.proxy_token_set = false;
-  checks.anthropic_key_set = !!(
-    require(__hooks + "/connectionConfig.js").runtimeValue("ANTHROPIC_API_KEY") || ""
-  ).trim();
-  checks.openai_key_set = !!(
-    require(__hooks + "/connectionConfig.js").runtimeValue("OPENAI_API_KEY") || ""
-  ).trim();
+  checks.anthropic_key_set = helpers.isConfiguredProviderApiKey(
+    require(__hooks + "/connectionConfig.js").runtimeValue("ANTHROPIC_API_KEY"),
+  );
+  checks.openai_key_set = helpers.isConfiguredProviderApiKey(
+    require(__hooks + "/connectionConfig.js").runtimeValue("OPENAI_API_KEY"),
+  );
   checks.claude_fallback_enabled =
     checks.anthropic_key_set &&
     (
