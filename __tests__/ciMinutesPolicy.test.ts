@@ -32,6 +32,15 @@ describe("CI minute policy", () => {
     expect(ci).toContain('"docs/**"');
     expect(ci).toContain("bash scripts/ci-runner-scope.sh");
     expect(ci).not.toContain("pull_request:\n    paths-ignore:");
+    const detect = ci.slice(
+      ci.indexOf("detect-changes:"),
+      ci.indexOf("typecheck-and-test:"),
+    );
+    expect(detect).toContain("fetch-depth: 0");
+    expect(detect).not.toContain("if: github.event_name == 'pull_request'");
+    expect(detect).toContain(
+      "github.event.pull_request.base.sha || github.event.before",
+    );
   });
 
   it("runs WebKit and the 3x unit pass on main and nightly, not on pull requests", () => {

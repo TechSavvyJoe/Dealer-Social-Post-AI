@@ -11,7 +11,11 @@
 # Env:
 #   EVENT_NAME   push | pull_request | schedule | workflow_dispatch
 #   PR_DRAFT     true | false
-#   BASE_SHA     pull request base. Used when CHANGED_FILES is unset.
+#   BASE_SHA     pull request base, or github.event.before on push.
+#                Empty or all zeros means there is no parent commit. Push,
+#                schedule, and workflow_dispatch ignore it and keep their
+#                fixed lane set. A pull request with no base runs the heavy
+#                lanes instead of calling git diff.
 #   CHANGED_FILES  optional NUL-separated path list. Tests set this so the
 #                  decision does not depend on the checkout.
 #   GITHUB_OUTPUT  when set, KEY=value lines are appended for Actions.
@@ -79,7 +83,7 @@ case "$EVENT_NAME" in
       list_file="$(mktemp)"
       if [ -n "${CHANGED_FILES:-}" ]; then
         cp "$CHANGED_FILES" "$list_file"
-      elif [ -z "$BASE_SHA" ]; then
+      elif [ -z "$BASE_SHA" ] || [[ "$BASE_SHA" =~ ^0+$ ]]; then
         docs_only=false
         editor_match=true
         diff_empty=false
