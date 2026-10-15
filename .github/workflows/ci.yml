@@ -3,23 +3,47 @@ name: CI
 on:
   push:
     branches: [main]
+    # Docs-only commits must not start runners or a production deploy.
+    # workflow_run on this workflow is what Deploy production listens for, so
+    # skipping the run is what keeps a markdown push off Fly and Vercel.
+    # Pull requests do not use paths-ignore: a skipped workflow leaves required
+    # checks pending. PR docs-only changes skip jobs inside detect-changes
+    # instead, which still reports those checks.
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.mdx"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE/**"
+      - ".github/pull_request_template.md"
   # No base-branch filter here on purpose. `branches:` under pull_request
   # filters the PR's BASE, not its head, so `[main]` silently skipped every
   # stacked PR (a feature branch based on another feature branch). Those PRs
   # showed four green checks -- Socket Security and Vercel -- while typecheck,
   # vitest, Playwright and the container job never ran at all.
+  # ready_for_review is not in the default set. Listing types replaces that
+  # set, so opened, synchronize, and reopened stay explicit.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # WebKit and the 3x unit pass also run overnight. This cron is separate from
+  # the backup, model-policy, and revision-observation schedules. Deploy
+  # production ignores schedule events.
+  schedule:
+    - cron: "15 9 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
+  # actions/cache writes the Playwright and node_modules caches.
+  actions: write
 
 # Covering every PR costs minutes, so supersede a PR's own in-flight run when
 # it is pushed again. Pushes to main are never cancelled: Deploy production
 # keys off a *completed* CI run for that head SHA, and cancelling one would
-# silently skip a release.
+# silently skip a release. The nightly run has its own group so it cannot
+# queue behind, or be queued behind, that release.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event_name == 'schedule' && 'nightly' || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Required-action SHA pinning (post tj-actions/changed-files Mar 2025).
@@ -27,11 +51,44 @@ concurrency:
 # release page — not the tag.
 
 jobs:
+  # Decides which heavy lanes run. Job-level skips (a false if) report
+  # "skipped", and branch protection treats that as success. A workflow-level
+  # paths-ignore on pull_request would leave those checks pending instead.
+  detect-changes:
+    name: detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      unit: ${{ steps.scope.outputs.unit }}
+      stability: ${{ steps.scope.outputs.stability }}
+      chromium: ${{ steps.scope.outputs.chromium }}
+      webkit: ${{ steps.scope.outputs.webkit }}
+      editor: ${{ steps.scope.outputs.editor }}
+      container: ${{ steps.scope.outputs.container }}
+      small: ${{ steps.scope.outputs.small }}
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      draft: ${{ steps.scope.outputs.draft }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && 'true' || 'false' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash scripts/ci-runner-scope.sh
+
   typecheck-and-test:
     name: typecheck + vitest
+    needs: detect-changes
+    if: >-
+      !cancelled() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.unit == 'true'
     runs-on: ubuntu-latest
-    # test:stability runs the whole suite three times (about 3.3 min a pass
-    # with 4,000+ tests), so 10 minutes cut the third pass off.
+    # test:stability runs the whole suite three times on main and nightly.
+    # Pull requests run it once. 20 minutes still covers the 3x pass.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -39,7 +96,15 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-      - run: npm ci --no-audit --no-fund
+      - name: Cache npm dependencies
+        id: npm-deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('.node-version', 'package-lock.json') }}
+      - name: Install npm dependencies
+        if: steps.npm-deps.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
       - run: npm run security:secrets
       - run: npm run model-policy:check
       - run: npm run skill:creative-director:check
@@ -47,7 +112,12 @@ jobs:
       - run: npm run vercel-config:check
       - run: npm run format:check
       - run: npm run typecheck
-      - run: npm run test:stability
+      - name: Run the unit suite once
+        if: needs.detect-changes.outputs.stability != 'true'
+        run: npm test
+      - name: Run the unit suite three times
+        if: needs.detect-changes.outputs.stability == 'true'
+        run: npm run test:stability
       - run: npm run build
         env:
           # Official public always-pass key. Production rejects this value.
@@ -57,6 +127,11 @@ jobs:
 
   launch-capacity:
     name: 25 dealerships / 250 users
+    needs: detect-changes
+    if: >-
+      !cancelled() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.small == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -118,6 +193,11 @@ jobs:
   # typecheck-and-test.
   automation-checks:
     name: automation package (typecheck + vitest)
+    needs: detect-changes
+    if: >-
+      !cancelled() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.small == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -132,35 +212,26 @@ jobs:
       - run: npm run check
         working-directory: automation
 
-  playwright-browser:
-    name: Playwright ${{ matrix.browser }} shard ${{ matrix.shard }}/${{ matrix.shards }}
+  # Chromium shard names stay "Playwright chromium shard 1/2" and "2/2".
+  # Pull requests run only these two. WebKit is a separate job so a skipped
+  # WebKit lane cannot hide inside a successful Chromium matrix result.
+  playwright-chromium:
+    name: Playwright chromium shard ${{ matrix.shard }}/${{ matrix.shards }}
+    needs: detect-changes
+    if: >-
+      !cancelled() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.chromium == 'true'
     runs-on: ubuntu-latest
-    # Independent runners retain every test and one worker per runner.
-    # Start alongside unit checks; the aggregate below still requires both.
-    # The full 48-frame model run remains separate.
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
         include:
-          - browser: chromium
-            shard: 1
+          - shard: 1
             shards: 2
-          - browser: chromium
-            shard: 2
+          - shard: 2
             shards: 2
-          - browser: webkit
-            shard: 1
-            shards: 4
-          - browser: webkit
-            shard: 2
-            shards: 4
-          - browser: webkit
-            shard: 3
-            shards: 4
-          - browser: webkit
-            shard: 4
-            shards: 4
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Reserve browser diagnostic disk space
@@ -175,12 +246,31 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-      - run: npm ci --no-audit --no-fund
-      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Cache npm dependencies
+        id: npm-deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('.node-version', 'package-lock.json') }}
+      - name: Install npm dependencies
+        if: steps.npm-deps.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - name: Cache Playwright browsers
+        id: playwright-browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-chromium-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browser
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright operating-system dependencies
+        if: steps.playwright-browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - name: Run Playwright e2e
         run: |
           if [ -d e2e ]; then
-            npx playwright test --project='${{ matrix.browser }}-*' \
+            npx playwright test --project='chromium-*' \
               --shard=${{ matrix.shard }}/${{ matrix.shards }} \
               --grep-invert 'vehicle background controls preserve originals'
           else
@@ -195,12 +285,99 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: playwright-${{ matrix.browser }}-shard-${{ matrix.shard }}-of-${{ matrix.shards }}-test-results
+          name: playwright-chromium-shard-${{ matrix.shard }}-of-${{ matrix.shards }}-test-results
           path: test-results/
           retention-days: 7
 
+  # One WebKit runner instead of four. Four shards were about 9 minutes each;
+  # one runner replays that work once, with a single npm ci and browser install.
+  # 45 minutes leaves room past the old 4 x 9 minute total. Pull requests skip
+  # this job. Push to main, workflow_dispatch, and the nightly schedule run it.
+  # The aggregate below treats a skip on push as failure, so a missed WebKit
+  # lane cannot go green and deploy.
+  playwright-webkit:
+    name: Playwright webkit shard 1/1
+    needs: detect-changes
+    if: >-
+      !cancelled() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.webkit == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Reserve browser diagnostic disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android
+          df -h / /tmp
+          available=$(df -Pk /tmp | awk 'NR == 2 {print $4}')
+          test "$available" -ge 2097152
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Cache npm dependencies
+        id: npm-deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('.node-version', 'package-lock.json') }}
+      - name: Install npm dependencies
+        if: steps.npm-deps.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - name: Cache Playwright browsers
+        id: playwright-browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-webkit-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browser
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps webkit
+      - name: Install Playwright operating-system dependencies
+        if: steps.playwright-browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps webkit
+      - name: Run Playwright e2e
+        run: |
+          if [ -d e2e ]; then
+            npx playwright test --project='webkit-*' \
+              --shard=1/1 \
+              --grep-invert 'vehicle background controls preserve originals'
+          else
+            echo "No e2e/ directory present — skipping Playwright run."
+          fi
+        env:
+          CI: true
+          DEBUG: pw:test
+      - name: Retain browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-webkit-shard-1-of-1-test-results
+          path: test-results/
+          retention-days: 7
+
+  # Previous WebKit check names. Branch protection may still require them.
+  # `if: false` reports each one as skipped and does not start a runner.
+  # Live WebKit coverage is "Playwright webkit shard 1/1", and Playwright e2e
+  # fails the main push when that job is skipped or failed.
+  playwright-webkit-legacy:
+    name: Playwright webkit shard ${{ matrix.shard }}/4
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - run: echo "WebKit e2e is Playwright webkit shard 1/1 on main and nightly."
+
   vehicle-spin-editor:
     name: Full 48-angle background editor
+    needs: detect-changes
+    if: >-
+      !cancelled() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.editor == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 18
     steps:
@@ -209,8 +386,27 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-      - run: npm ci --no-audit --no-fund
-      - run: npx playwright install --with-deps chromium
+      - name: Cache npm dependencies
+        id: npm-deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('.node-version', 'package-lock.json') }}
+      - name: Install npm dependencies
+        if: steps.npm-deps.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - name: Cache Playwright browsers
+        id: playwright-browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-chromium-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browser
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright operating-system dependencies
+        if: steps.playwright-browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
       - name: Process and correct all 48 frames with the real model
         run: >-
           npx playwright test e2e/vehicle-spin-editor.spec.ts
@@ -229,18 +425,97 @@ jobs:
     # Preserve the existing check name for branch protection.
     name: Playwright e2e
     runs-on: ubuntu-latest
-    needs: [typecheck-and-test, playwright-browser, vehicle-spin-editor]
-    if: always()
+    needs:
+      - detect-changes
+      - typecheck-and-test
+      - launch-capacity
+      - automation-checks
+      - playwright-chromium
+      - playwright-webkit
+      - vehicle-spin-editor
+      - container-smoke
+    if: always() && !cancelled()
     steps:
-      - name: Require unit checks, both engines and the full model run
+      - name: Require the lanes that gate this event
         env:
-          UNIT_RESULT: ${{ needs.typecheck-and-test.result }}
-          BROWSER_RESULT: ${{ needs.playwright-browser.result }}
-          EDITOR_RESULT: ${{ needs.vehicle-spin-editor.result }}
-        run: test "$UNIT_RESULT" = success && test "$BROWSER_RESULT" = success && test "$EDITOR_RESULT" = success
+          EVENT_NAME: ${{ github.event_name }}
+          DOCS_ONLY: ${{ needs.detect-changes.outputs.docs_only }}
+          DRAFT: ${{ needs.detect-changes.outputs.draft }}
+          DETECT: ${{ needs.detect-changes.result }}
+          UNIT: ${{ needs.typecheck-and-test.result }}
+          SMALL_CAPACITY: ${{ needs.launch-capacity.result }}
+          SMALL_AUTOMATION: ${{ needs.automation-checks.result }}
+          CHROMIUM: ${{ needs.playwright-chromium.result }}
+          WEBKIT: ${{ needs.playwright-webkit.result }}
+          EDITOR: ${{ needs.vehicle-spin-editor.result }}
+          CONTAINER: ${{ needs.container-smoke.result }}
+        run: |
+          set -eu
+          if [ "$DETECT" != "success" ]; then
+            echo "detect changed paths is $DETECT" >&2
+            exit 1
+          fi
+          require() {
+            if [ "$2" != "success" ]; then
+              echo "$1 is $2" >&2
+              exit 1
+            fi
+          }
+          allow_skip() {
+            if [ "$2" != "success" ] && [ "$2" != "skipped" ]; then
+              echo "$1 is $2" >&2
+              exit 1
+            fi
+          }
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$DOCS_ONLY" = "true" ]; then
+            echo "Docs-only pull request; heavy checks were skipped."
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$DRAFT" = "true" ]; then
+            require "25 dealerships / 250 users" "$SMALL_CAPACITY"
+            require "automation package (typecheck + vitest)" "$SMALL_AUTOMATION"
+            echo "Draft pull request; heavy checks run when it is marked ready."
+            exit 0
+          fi
+          case "$EVENT_NAME" in
+            push|workflow_dispatch)
+              require "typecheck + vitest" "$UNIT"
+              require "25 dealerships / 250 users" "$SMALL_CAPACITY"
+              require "automation package (typecheck + vitest)" "$SMALL_AUTOMATION"
+              require "Playwright chromium" "$CHROMIUM"
+              require "Playwright webkit" "$WEBKIT"
+              require "Full 48-angle background editor" "$EDITOR"
+              require "production container + migration and backup safety" "$CONTAINER"
+              ;;
+            schedule)
+              require "typecheck + vitest" "$UNIT"
+              require "Playwright webkit" "$WEBKIT"
+              allow_skip "Playwright chromium" "$CHROMIUM"
+              allow_skip "Full 48-angle background editor" "$EDITOR"
+              allow_skip "production container + migration and backup safety" "$CONTAINER"
+              ;;
+            pull_request)
+              require "typecheck + vitest" "$UNIT"
+              require "25 dealerships / 250 users" "$SMALL_CAPACITY"
+              require "automation package (typecheck + vitest)" "$SMALL_AUTOMATION"
+              require "Playwright chromium" "$CHROMIUM"
+              require "production container + migration and backup safety" "$CONTAINER"
+              allow_skip "Playwright webkit" "$WEBKIT"
+              allow_skip "Full 48-angle background editor" "$EDITOR"
+              ;;
+            *)
+              echo "Unsupported CI event: $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
 
   container-smoke:
     name: production container + migration and backup safety
+    needs: detect-changes
+    if: >-
+      !cancelled() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.container == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -251,8 +526,27 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-      - run: npm ci --no-audit --no-fund
-      - run: npx playwright install --with-deps chromium webkit
+      - name: Cache npm dependencies
+        id: npm-deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('.node-version', 'package-lock.json') }}
+      - name: Install npm dependencies
+        if: steps.npm-deps.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - name: Cache Playwright browsers
+        id: playwright-browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-chromium-webkit-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browsers
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium webkit
+      - name: Install Playwright operating-system dependencies
+        if: steps.playwright-browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium webkit
       - name: Build production image
         run: |
           docker build \
@@ -308,7 +602,7 @@ jobs:
             --publish 127.0.0.1:8090:8090 \
             dealer-social-post-ai:ci)"
 
-          for attempt in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             if curl --silent --fail http://127.0.0.1:18081/ready >/dev/null; then
               break
             fi
@@ -316,7 +610,7 @@ jobs:
           done
           curl --silent --fail http://127.0.0.1:18081/ready >/dev/null
 
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl --silent --fail \
               http://127.0.0.1:8090/api/app/health \
               --output /tmp/health.json; then
