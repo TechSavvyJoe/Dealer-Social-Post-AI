@@ -65,6 +65,21 @@ describe("CI runner scope", () => {
     }
   });
 
+  it("keeps the full push bar when GitHub sends no previous commit", () => {
+    const scope = run({
+      EVENT_NAME: "push",
+      BASE_SHA: "0".repeat(40),
+    });
+    expect(scope).toMatchObject({
+      unit: "true",
+      webkit: "true",
+      chromium: "true",
+      editor: "true",
+      container: "true",
+      stability: "true",
+    });
+  });
+
   it("keeps the nightly run to WebKit and the 3x unit pass", () => {
     expect(run({ EVENT_NAME: "schedule" })).toMatchObject({
       unit: "true",
@@ -146,6 +161,18 @@ describe("CI runner scope", () => {
       expect(scope.webkit, file).toBe("false");
       expect(scope.stability, file).toBe("false");
     }
+  });
+
+  it("runs the heavy lanes when a pull request has no base commit", () => {
+    const scope = run({
+      EVENT_NAME: "pull_request",
+      PR_DRAFT: "false",
+      BASE_SHA: "0".repeat(40),
+    });
+    expect(scope.docs_only).toBe("false");
+    expect(scope.editor).toBe("true");
+    expect(scope.chromium).toBe("true");
+    expect(scope.webkit).toBe("false");
   });
 
   it("runs the heavy lanes when the diff is empty", () => {

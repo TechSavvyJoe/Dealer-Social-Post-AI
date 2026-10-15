@@ -69,14 +69,16 @@ jobs:
       draft: ${{ steps.scope.outputs.draft }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
       - id: scope
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && 'true' || 'false' }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Push events use github.event.before. A new branch, or a push with
+          # no parent, sends forty zeros. The scope script treats that as
+          # "no base" and does not run git diff against it.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash scripts/ci-runner-scope.sh
 
   typecheck-and-test:
