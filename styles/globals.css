@@ -786,14 +786,13 @@
     overscroll-behavior-y: none;
     /* Shell geometry — position, height, overflow — is owned by the critical
        inline CSS in index.html so it applies before this bundle loads.
-       Nothing here may set `position` or `min-height` on body: Tailwind's
-       `@layer base` is a build-time directive, not a native CSS layer, so
-       these rules are unlayered and load after index.html and would win.
-       A `min-height` here re-introduces a document taller than the visual
-       viewport on iOS, which is what let the page rubber-band outside the
-       app; a `position` here unpins the mobile shell and leaves a gap at the
-       bottom of the screen. Desktop restores relative positioning in the
-       index.html media query. */
+       Nothing here may set `position` or `min-height` on body: Tailwind v4
+       emits `@layer base` as a real CSS layer, and unlayered index.html rules
+       win over layered utilities/base for the same property. A `min-height`
+       here still re-introduces a document taller than the visual viewport on
+       iOS (rubber-band outside the app); a `position` here unpins the mobile
+       shell and leaves a gap at the bottom. Desktop restores relative
+       positioning in the index.html media query. */
     /* Momentum scrolling on iOS for nested overflow regions */
     -webkit-overflow-scrolling: touch;
     /* Tap highlight tone matches brand instead of default blue flash */

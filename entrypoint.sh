@@ -20,7 +20,41 @@ fi
 mkdir -p /pb/temp
 chmod 700 /pb/temp
 
-# Run PocketBase as PID 1 so SIGTERM reaches it and SQLite can shut down
-# cleanly during Fly deploys and machine stops.
-echo "Starting PocketBase..."
-exec /pb/pocketbase serve --http=0.0.0.0:8090 --hooksDir=/pb/pb_hooks --migrationsDir=/pb/pb_migrations --dir=/pb/pb_data
+# PocketBase binds loopback only. Caddy is the public listener on :8090 and
+# blocks /_/ unless POCKETBASE_ADMIN_UI_ENABLED=true selects the open config.
+echo "Starting PocketBase on 127.0.0.1:8091..."
+/pb/pocketbase serve \
+  --http=127.0.0.1:8091 \
+  --hooksDir=/pb/pb_hooks \
+  --migrationsDir=/pb/pb_migrations \
+  --dir=/pb/pb_data &
+PB_PID=$!
+
+if [ "${POCKETBASE_ADMIN_UI_ENABLED:-}" = "true" ]; then
+  echo "WARNING: PocketBase admin UI /_/ is enabled on the public listener." >&2
+  CADDYFILE=/pb/Caddyfile.open-admin
+else
+  CADDYFILE=/pb/Caddyfile
+fi
+
+echo "Starting Caddy on 0.0.0.0:8090..."
+caddy run --config "$CADDYFILE" --adapter caddyfile &
+CADDY_PID=$!
+
+shutdown() {
+  kill -TERM "$CADDY_PID" 2>/dev/null || true
+  kill -TERM "$PB_PID" 2>/dev/null || true
+  wait "$PB_PID" 2>/dev/null || true
+  wait "$CADDY_PID" 2>/dev/null || true
+}
+trap shutdown TERM INT
+
+# Poll so either child exiting tears the pair down. Fly then replaces the
+# machine instead of leaving a half-live container. SIGTERM during sleep
+# runs the trap above so SQLite can shut down cleanly.
+while kill -0 "$PB_PID" 2>/dev/null && kill -0 "$CADDY_PID" 2>/dev/null; do
+  sleep 1
+done
+echo "ERROR: PocketBase or Caddy exited unexpectedly; shutting down." >&2
+shutdown
+exit 1

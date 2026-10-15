@@ -768,11 +768,7 @@ function sessionContext(c, daoOverride) {
     return reject();
   }
 
-  if (
-    (recordBool(dealer, "invitation_required") ||
-      session.getString("invitation_fingerprint")) &&
-    !require(__hooks + "/dealershipInvitations.js").sessionAllowed(session, dealer)
-  )
+  if (!require(__hooks + "/dealershipInvitations.js").sessionAllowed(session, dealer))
     return reject();
 
   const isImpersonating = recordBool(session, "is_impersonation");
@@ -1032,15 +1028,12 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
 
   // Recheck the invitation in the same transaction that creates the session.
   // A rotation between credential comparison and minting cannot revive access.
+  // Personal-code sessions always carry a fingerprint; manager password,
+  // impersonation, and system admin do not.
   const invitationFingerprint = (
     options.expectedInvitationFingerprint || ""
   ).toString();
-  if (
-    !options.isImpersonation &&
-    !managerAccount &&
-    role !== "super_admin" &&
-    (recordBool(dealer, "invitation_required") || invitationFingerprint)
-  ) {
+  if (!options.isImpersonation && !managerAccount && role !== "super_admin") {
     if (
       !/^[a-f0-9]{64}$/.test(invitationFingerprint) ||
       invitationFingerprint !== dealer.getString("invitation_hash")

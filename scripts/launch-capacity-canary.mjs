@@ -447,8 +447,9 @@ routerAdd("POST", "/__launch/capacity", (c) => {
   checks.push(
     "Invitation rotation revoked old links and other PIN sessions, preserved the issuing manager, and explicit store switching revoked the old bearer",
   );
-  // Exercise the compatibility state of a dealership that predates this
-  // migration. Only this disposable database is writable by the fixture.
+  // Personal-code sign-in always needs the private invitation, even when a
+  // pre-activation store still has invitation_required = 0. Manager password
+  // recovery stays available without the cookie.
   const fixtureDb = new DatabaseSync(join(scratch, "data/data.db"));
   try {
     fixtureDb
@@ -457,15 +458,30 @@ routerAdd("POST", "/__launch/capacity", (c) => {
   } finally {
     fixtureDb.close();
   }
-  const legacySeller = await api("/api/app/session", {
+  const legacyManagerUsername = "launch.mgr24";
+  const legacyManagerPassword = `${randomBytes(18).toString("hex")}Aa1!`;
+  await api(`/api/app/salespeople/${people[240].id}/manager-login`, {
+    method: "PUT",
+    cookie: admin,
+    data: {
+      username: legacyManagerUsername,
+      password: legacyManagerPassword,
+    },
+  });
+  await api("/api/app/session", {
     method: "POST",
     ip: "203.0.113.239",
     data: { dealerCode: people[241].pin },
+    expected: 401,
   });
   const legacyManager = await api("/api/app/session", {
     method: "POST",
     ip: "203.0.113.239",
-    data: { dealerCode: people[240].pin },
+    data: {
+      authType: "manager_password",
+      username: legacyManagerUsername,
+      password: legacyManagerPassword,
+    },
   });
   const legacyInvite = await api(`/api/app/dealers/${dealers[24].id}/invitation`, {
     cookie: legacyManager.cookie,
@@ -473,20 +489,7 @@ routerAdd("POST", "/__launch/capacity", (c) => {
     data: { action: "issue" },
   });
   assert.equal(legacyInvite.value.required, false);
-  await api("/api/app/session", { cookie: legacySeller.cookie });
-  await api(`/api/app/dealers/${dealers[24].id}/invitation`, {
-    cookie: legacyManager.cookie,
-    method: "POST",
-    data: { action: "require" },
-  });
   await api("/api/app/session", { cookie: legacyManager.cookie });
-  await api("/api/app/session", { cookie: legacySeller.cookie, expected: 401 });
-  await api("/api/app/session", {
-    method: "POST",
-    ip: "203.0.113.239",
-    data: { dealerCode: people[241].pin },
-    expected: 401,
-  });
   await api("/api/app/session", {
     method: "POST",
     ip: "203.0.113.239",
@@ -494,7 +497,7 @@ routerAdd("POST", "/__launch/capacity", (c) => {
     data: { dealerCode: people[241].pin },
   });
   checks.push(
-    "Existing-store access survived issuing a link until explicit activation; activation revoked uninvited sessions and kept the issuing manager signed in",
+    "Personal-code sign-in requires the private invitation even before activation; manager password recovery can still issue the link",
   );
   report.status = "passed";
   report.completedAt = new Date().toISOString();

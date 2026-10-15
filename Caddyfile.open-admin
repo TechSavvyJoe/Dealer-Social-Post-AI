@@ -1,0 +1,14 @@
+# Break-glass Caddyfile: proxies /_/ to PocketBase.
+# Only selected when POCKETBASE_ADMIN_UI_ENABLED=true at container start.
+
+{
+	admin off
+}
+
+:8090 {
+	encode gzip
+
+	handle {
+		reverse_proxy 127.0.0.1:8091
+	}
+}

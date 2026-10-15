@@ -2103,14 +2103,17 @@ routerAdd("POST", "/api/app/session", (c) => {
           record = $app
             .dao()
             .findRecordById("dealers", personRecord.getString("dealer"));
-          if (invitedDealer && invitedDealer.id === record.id) {
-            verifiedInvitationFingerprint = invitedDealer.getString("invitation_hash");
-          } else if (record.getBool("invitation_required")) {
+          // Personal codes always need the private invitation for this store.
+          // Manager password and system-admin login never enter this branch.
+          // invitation_required still drives setup-board readiness; it is not
+          // an escape hatch for PIN-only sign-in on pre-activation stores.
+          if (!invitedDealer || invitedDealer.id !== record.id) {
             return rejectInvalidCredential(
               "credential not recognized",
               credentialPresent,
             );
           }
+          verifiedInvitationFingerprint = invitedDealer.getString("invitation_hash");
         } catch (_e) {
           cancelReservedAttempt();
           return unavailableResponse();

@@ -17,7 +17,7 @@ function load(file: string, globals: Record<string, unknown> = {}) {
 
 describe("private dealership invitation authority", () => {
   const invitations = load("pb_hooks/dealershipInvitations.js");
-  it("preserves legacy access until required and rejects old bound sessions after rotation", () => {
+  it("requires a current invitation binding for personal-code sessions", () => {
     const current = "a".repeat(64);
     const dealer = record({ invitation_required: true, invitation_hash: current });
     expect(invitations.sessionAllowed(record({}), dealer)).toBe(false);
@@ -30,8 +30,15 @@ describe("private dealership invitation authority", () => {
         dealer,
       ),
     ).toBe(false);
+    // Pre-activation stores no longer keep unbound personal sessions alive.
     expect(
       invitations.sessionAllowed(record({}), record({ invitation_required: false })),
+    ).toBe(false);
+    expect(
+      invitations.sessionAllowed(
+        record({ invitation_fingerprint: current }),
+        record({ invitation_required: false, invitation_hash: current }),
+      ),
     ).toBe(true);
     expect(
       invitations.sessionAllowed(record({ manager_account: "manager-auth" }), dealer),

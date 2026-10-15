@@ -627,7 +627,10 @@ This is the PocketBase **superuser**, authenticated at `/api/admins/auth-with-pa
 system-administrator login in §4, and **nothing in this repo provisions it** — `entrypoint.sh`
 only starts PocketBase.
 
-1. Change the password in the PocketBase admin UI, on the production instance.
+1. Change the password in the PocketBase admin UI on the production instance
+   (`fly proxy 8090:8090 -a dealer-social-post-ai-production`, then
+   `http://127.0.0.1:8090/_/`). The public origin blocks `/_/` unless
+   `POCKETBASE_ADMIN_UI_ENABLED=true`.
 2. Update the GitHub secret:
 
    ```bash

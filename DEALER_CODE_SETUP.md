@@ -37,9 +37,11 @@ evidence.
 
 ## Set up private dealership invitations
 
-New dealerships require an invitation before any personal code can sign in.
-Existing dealerships keep their current access until the manager distributes a
-link and explicitly activates the requirement.
+Every personal-code sign-in requires a current private dealership invitation on
+that device. Manager password sign-in and authorized admin impersonation do not
+use the invitation cookie and remain available for recovery. The setup board's
+**Require invitation for sign-in** control still marks a store as fully
+activated for readiness tracking; it is not a PIN-only bypass.
 
 1. In the system-admin **Dealers** setup board, expand the store and open
    **Private dealership access**. A manager finds the same panel under **Team**.
@@ -53,10 +55,10 @@ link and explicitly activates the requirement.
    Use **Change dealership** to replace an existing device setup. Opening a link
    in Safari alone does not update an already-installed app's invitation cookie.
    This follows [Apple's web-app storage behavior](https://developer.apple.com/videos/play/wwdc2023/10120/).
-4. For an existing store, only after distribution choose **Require invitation for
-   sign-in**. Uninvited personal-code sessions end. The manager performing the
-   action stays signed in; manager passwords and authorized admin impersonation
-   remain available for recovery.
+4. After distribution, choose **Require invitation for sign-in** so the setup
+   board marks the store ready. Uninvited personal-code sessions end. The
+   manager performing the action stays signed in; manager passwords and
+   authorized admin impersonation remain available for recovery.
 5. Use **Replace private invitation** if a link is lost or exposed. Previous links,
    invited devices and personal-code sessions become invalid, except the manager
    performing the replacement. Distribute the new link. Deactivate a departing
