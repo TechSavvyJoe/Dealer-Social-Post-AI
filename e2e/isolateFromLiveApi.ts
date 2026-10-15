@@ -4,6 +4,8 @@ import type { Page } from "@playwright/test";
  * Catch-all /api stub so a developer's live PocketBase (Vite → :8090) cannot
  * answer fixture e2e. Call BEFORE more-specific page.route handlers —
  * Playwright matches last-registered first, so later stubs win.
+ *
+ * Unstubbed paths fail closed so a missing fixture cannot silently pass.
  */
 export async function isolateFromLiveApi(page: Page): Promise<void> {
   await page.route("**/api/**", async (route) => {
@@ -43,7 +45,6 @@ export async function isolateFromLiveApi(page: Page): Promise<void> {
     if (path.startsWith("/api/proxy/")) {
       return json({ error: "Unstubbed proxy in fixture" }, 500);
     }
-    if (method === "GET") return json({});
-    return json({ success: true });
+    return json({ error: `Unstubbed ${method} ${path} in fixture` }, 501);
   });
 }

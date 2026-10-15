@@ -339,6 +339,10 @@ describe("backend operational hardening", () => {
     expect(health).toContain("new DynamicModel({ total: 0 })");
     expect(health).toContain('arrayOf(new DynamicModel({ name: "", count: 0 }))');
     expect(health).not.toContain("findRecordsByFilter(");
+    // Placeholder scaffold keys must not satisfy readiness.
+    expect(health).toContain("helpers.isConfiguredProviderApiKey(");
+    expect(helpers).toContain("function isConfiguredProviderApiKey");
+    expect(helpers).toContain("your-api-key-here");
 
     const dealerList = hook.slice(hook.indexOf('routerAdd("GET", "/api/app/dealers"'));
     expect(dealerList).toContain('c.queryParam("limit")');

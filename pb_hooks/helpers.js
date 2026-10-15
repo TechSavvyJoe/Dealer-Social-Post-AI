@@ -2868,6 +2868,28 @@ function isTurnstileTestSecret(value) {
   return TURNSTILE_TEST_SECRETS.indexOf((value || "").toString()) !== -1;
 }
 
+// Dev scaffold values must not count as configured for readiness. start-dev.sh
+// seeds GEMINI_API_KEY=your-api-key-here; treating that as set made /api/app/health
+// report ok while every generation call fails.
+function isConfiguredProviderApiKey(value) {
+  const key = (value || "").toString().trim();
+  if (!key) return false;
+  const lower = key.toLowerCase();
+  if (
+    lower === "your-api-key-here" ||
+    lower === "changeme" ||
+    lower === "replace-me" ||
+    lower === "todo" ||
+    lower === "xxx" ||
+    lower.indexOf("your-api-key") !== -1 ||
+    lower.indexOf("insert") !== -1 ||
+    lower.indexOf("placeholder") !== -1
+  ) {
+    return false;
+  }
+  return key.length >= 16;
+}
+
 function formEncode(value) {
   return encodeURIComponent((value || "").toString()).replace(/%20/g, "+");
 }
@@ -4571,6 +4593,7 @@ module.exports = {
   configuredTurnstileHostnames,
   isTurnstileTestSiteKey,
   isTurnstileTestSecret,
+  isConfiguredProviderApiKey,
   checkProxyRateLimit,
   proxyRateLimitStateSize,
   acquireProxyConcurrency,

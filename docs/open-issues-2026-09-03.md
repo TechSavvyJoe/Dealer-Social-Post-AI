@@ -3,66 +3,46 @@
 Findings from the browser review of the Phase 1 Brand section plus a
 production failure reported from the field. Ordered by severity.
 
-## P0 — Photo release lock strands a real delivery post
+## P0 — Photo release lock strands a real delivery post — resolved
 
-**Reported from production 2026-09-02 (iPhone, installed PWA).** A signed
-delivery post rendered with "Photo release not saved · Delivery locked", and
-Copy, Share, Save, and Export were all locked. The only remedy offered is
-"create another post to retry", which means re-signing with a customer who has
-already driven away.
+**Originally reported from production 2026-09-02 (iPhone, installed PWA).** A
+signed delivery post rendered with "Photo release not saved · Delivery locked"
+after `linkReleaseToPost` failed while the signature itself had already been
+stored.
 
-**What the code actually does.** `runWithPersistedPhotoRelease`
-(`services/photoReleases.ts:86`) stores the signature **before** the paid
-provider call and rejects before `providerTask` if that store fails. The
-reported post has a finished image and caption, so the provider call ran, so
-**the signature was stored successfully**. The lock therefore comes from the
-_second_ step: `linkReleaseToPost` (`hooks/useGeneration.ts:665`) threw, its
-catch only calls `logError("photo_release.link_failed")`
-(`hooks/useGeneration.ts:668-674`), and `releaseStatus` stays `"save_failed"`
-→ `releaseLocked` (`components/PostResult.tsx:860`) → `deliveryLocked`.
+**Status (2026-10-15):** fixed in product code. Do not treat this document as
+an open defect list for the lock path.
 
-Consequences:
+What landed:
 
-1. **The message is factually wrong.** "The signed photo release was not
-   stored, so consent cannot be verified" (`components/PostResult.tsx:1022`,
-   `hooks/useGeneration.ts:713`). In this path it _was_ stored — it is sitting
-   on the server as an unlinked `photo_releases` record. Consent exists; only
-   the association is missing.
-2. **The remedy is wrong and expensive.** Both ids are already in hand
-   (`releaseId`, `post.id`). A single retry of the link call fixes it. Instead
-   the salesperson is told to redo the photo, the generation (paid), and the
-   customer signature.
-3. **There is no retry at all.** The link failure is caught and logged, never
-   retried — not even once, and not queued. It is a small first-party POST to
-   `/api/app/photo_releases/:id/link-post`.
+- `linkReleaseToPostWithRetry` with backoff (`services/photoReleases.ts`)
+- Generation path uses the retry helper (`hooks/useGeneration.ts`)
+- Explicit repair flow via `hooks/useReleaseRepair.ts` ("Retry saving release")
+- Hourly prune still expires unlinked `photo_releases` after `expires_at`
+  (`pb_hooks/main.pb.js` `prune-unlinked-photo-releases`)
 
-Fix:
+Coverage: `hooks/useGeneration.test.tsx`, `hooks/useReleaseRepair.test.tsx`.
 
-- Retry `linkReleaseToPost` with backoff, and queue it for retry on reconnect
-  (the app already has an offline queue and an authEpoch guard to scope it).
-- Add an explicit "Retry saving release" action on the locked banner that
-  re-runs the link using the ids already on the post.
-- Correct the copy for the link-failure path: consent was captured, the post
-  is not yet linked to it, and it can be retried. Reserve "was not stored" for
-  the genuine pre-generation failure, which today cannot reach this screen
-  because it aborts generation.
-- Second entry point to the same state: a post whose `release_required` is
-  true while the server's `release_status !== "saved"`
-  (`hooks/useGeneration.ts:657-662`). Distinguish it, since there the consent
-  really may be missing.
-- Server-side sweep: unlinked `photo_releases` rows are orphaned consent
-  records. Either reconcile them to their post or expire them on a schedule.
+The original failure analysis below is kept as historical context only.
 
-**Presentation of the same failure** (visible in the report):
+<details>
+<summary>Original 2026-09-03 analysis</summary>
 
-- The identical error is shown three times — the top banner, a toast overlay,
-  and a disabled "Release not saved" button in the action bar.
-- The toast overlay is positioned over the photo, covering the customers'
-  faces.
-- The website-draft banner truncates mid-word: "Website draft was not s…" and
-  "The original post did not finish saving, so nothing can…".
-- "Release not saved" reads as a button but is a status; it should not look
-  pressable.
+`runWithPersistedPhotoRelease` (`services/photoReleases.ts`) stores the
+signature **before** the paid provider call and rejects before `providerTask`
+if that store fails. The reported post had a finished image and caption, so the
+provider call ran, so the signature was stored successfully. The lock came from
+the second step: `linkReleaseToPost` threw, its catch only logged
+`photo_release.link_failed`, and `releaseStatus` stayed `"save_failed"` →
+`releaseLocked` → `deliveryLocked`.
+
+Consequences at the time:
+
+1. The banner copy said consent was not stored when it was (unlinked row).
+2. The offered remedy was redo photo + generation + signature.
+3. There was no retry of the small first-party link POST.
+
+</details>
 
 ## P1 — Brand section contradicts the legacy control directly below it
 
