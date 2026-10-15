@@ -1,0 +1,27 @@
+# Production edge in front of PocketBase.
+# PocketBase listens on 127.0.0.1:8091; Fly's http_service hits :8090.
+#
+# The built-in admin UI at /_/ is blocked by default. Application routes
+# (/api/app/*, /api/proxy/*, static pb_public) and the backup API
+# (/api/admins/*, /api/backups/*) stay proxied. Set
+# POCKETBASE_ADMIN_UI_ENABLED=true and use Caddyfile.open-admin only when a
+# break-glass dashboard session is required.
+
+{
+	admin off
+}
+
+:8090 {
+	encode gzip
+
+	@pocketbase_admin {
+		path /_/ /_/*
+	}
+	handle @pocketbase_admin {
+		respond "Not Found" 404
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8091
+	}
+}

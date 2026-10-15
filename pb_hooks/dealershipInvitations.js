@@ -29,12 +29,11 @@ function deviceDealer(c) {
 function sessionAllowed(session, dealer) {
   const bound = session.getString("invitation_fingerprint");
   if (bound && bound !== dealer.getString("invitation_hash")) return false;
+  // Manager-password sessions and authorized impersonation never bind to the
+  // invitation cookie. Personal-code sessions always need a current binding.
   if (session.getBool("is_impersonation") || session.getString("manager_account"))
     return true;
-  return (
-    !dealer.getBool("invitation_required") ||
-    (!!bound && bound === dealer.getString("invitation_hash"))
-  );
+  return !!bound && bound === dealer.getString("invitation_hash");
 }
 function buildCookie(token) {
   return (

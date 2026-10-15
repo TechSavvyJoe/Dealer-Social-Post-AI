@@ -114,8 +114,10 @@
         inset: 0;
         width: 100%;
         max-width: 100%;
-        /* inset:0 defines the box; explicit min-height:0 neutralises the
-           `min-height: 100dvh` that globals.css sets in @layer base. */
+        /* inset:0 defines the box; explicit min-height:0 keeps any future
+           layered body min-height from globals.css from stretching the
+           document past the visual viewport. Unlayered rules here win over
+           Tailwind v4's real `@layer base`. */
         height: auto;
         min-height: 0;
         overflow: hidden;

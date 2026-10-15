@@ -19,6 +19,7 @@ type Helpers = {
       isImpersonation?: boolean;
       impersonatorSessionId?: string;
       expectedPersonPinFingerprint?: string;
+      expectedInvitationFingerprint?: string;
     },
   ): { token: string; expiresAt: Date };
   sessionContext(c: unknown): unknown;
@@ -28,7 +29,17 @@ type Helpers = {
 function loadPocketBaseCommonJs<T>(relativePath: string): T {
   const source = readFileSync(resolve(process.cwd(), relativePath), "utf8");
   const module = { exports: {} as T };
-  new Function("module", "exports", source)(module, module.exports);
+  const hooksRoot = resolve(process.cwd(), "pb_hooks");
+  const requireHook = (requestPath: string) => {
+    const fileName = requestPath.replace(/\\/g, "/").split("/").pop() || "";
+    return loadPocketBaseCommonJs(`pb_hooks/${fileName}`);
+  };
+  new Function("module", "exports", "require", "__hooks", source)(
+    module,
+    module.exports,
+    requireHook,
+    hooksRoot,
+  );
   return module.exports;
 }
 
@@ -82,6 +93,7 @@ describe("PocketBase sensitive-storage hardening", () => {
         savedData = data;
       }
     };
+    const invitationHash = "d".repeat(64);
     const dao = {
       findCollectionByNameOrId: () => ({ id: "sessions" }),
       findRecordById: (collection: string) =>
@@ -89,6 +101,8 @@ describe("PocketBase sensitive-storage hardening", () => {
           ? {
               id: "dealer-id",
               getBool: () => false,
+              getString: (field: string) =>
+                field === "invitation_hash" ? invitationHash : "",
             }
           : {
               id: "person-id",
@@ -115,6 +129,7 @@ describe("PocketBase sensitive-storage hardening", () => {
       {
         personId: "person-id",
         expectedPersonPinFingerprint: "c".repeat(64),
+        expectedInvitationFingerprint: invitationHash,
       },
     );
 
@@ -355,12 +370,31 @@ describe("Generated video transport", () => {
 });
 
 describe("PocketBase container startup", () => {
-  it("fails closed on incompatible data and preserves PID 1", () => {
+  it("fails closed on incompatible data and fronts PocketBase with Caddy", () => {
     const entrypoint = readFileSync(resolve(process.cwd(), "entrypoint.sh"), "utf8");
+    const caddyfile = readFileSync(resolve(process.cwd(), "Caddyfile"), "utf8");
+    const openAdmin = readFileSync(
+      resolve(process.cwd(), "Caddyfile.open-admin"),
+      "utf8",
+    );
+    const dockerfile = readFileSync(resolve(process.cwd(), "Dockerfile"), "utf8");
 
     expect(entrypoint).not.toContain("data.db.v23bak");
     expect(entrypoint).not.toMatch(/mv\s+\/pb\/pb_data/);
     expect(entrypoint).toContain("exit 1");
-    expect(entrypoint).toContain("exec /pb/pocketbase serve");
+    // Public listener is Caddy; PocketBase stays on loopback.
+    expect(entrypoint).toContain("/pb/pocketbase serve");
+    expect(entrypoint).toContain("--http=127.0.0.1:8091");
+    expect(entrypoint).not.toMatch(/pocketbase serve[^\n]*0\.0\.0\.0:8090/);
+    expect(entrypoint).toContain("caddy run");
+    expect(entrypoint).toContain("POCKETBASE_ADMIN_UI_ENABLED");
+    expect(entrypoint).toMatch(/trap shutdown TERM INT/);
+    expect(caddyfile).toMatch(/path \/_\/ \/_\/\*/);
+    expect(caddyfile).toContain('respond "Not Found" 404');
+    expect(caddyfile).toContain("reverse_proxy 127.0.0.1:8091");
+    expect(openAdmin).toContain("reverse_proxy 127.0.0.1:8091");
+    expect(openAdmin).not.toMatch(/path \/_\/ \/_\/\*/);
+    expect(dockerfile).toContain("CADDY_VERSION");
+    expect(dockerfile).toContain("COPY Caddyfile /pb/Caddyfile");
   });
 });

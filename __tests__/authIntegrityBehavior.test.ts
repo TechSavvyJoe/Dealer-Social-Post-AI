@@ -21,6 +21,7 @@ type AuthHelpers = {
       isImpersonation?: boolean;
       impersonatorSessionId?: string;
       expectedPersonPinFingerprint?: string;
+      expectedInvitationFingerprint?: string;
     },
   ) => { token: string; expiresAt: Date; sessionId: string };
   replaceImpersonationSession: (
@@ -109,7 +110,19 @@ afterEach(() => {
 function loadCommonJs<T>(relativePath: string): T {
   const source = readFileSync(resolve(process.cwd(), relativePath), "utf8");
   const module = { exports: {} as T };
-  new Function("module", "exports", source)(module, module.exports);
+  const hooksRoot = resolve(process.cwd(), "pb_hooks");
+  const requireHook = (requestPath: string) => {
+    const fileName = requestPath.replace(/\\/g, "/").split("/").pop() || "";
+    return loadCommonJs(`pb_hooks/${fileName}`);
+  };
+  // PocketBase exposes require() + __hooks for hook modules. sessionContext
+  // always loads dealershipInvitations.js for personal-session binding checks.
+  new Function("module", "exports", "require", "__hooks", source)(
+    module,
+    module.exports,
+    requireHook,
+    hooksRoot,
+  );
   return module.exports;
 }
 
@@ -420,6 +433,7 @@ describe("people integrity migration behavior", () => {
 describe("authoritative session revalidation", () => {
   const helpers = loadCommonJs<AuthHelpers>("pb_hooks/helpers.js");
   const token = "a".repeat(64);
+  const invitationHash = "e".repeat(64);
   const adminAuthFp = () =>
     sha256("dealer-social-post-ai:admin-auth:v1:admin-account-1:token-key-1");
 
@@ -448,7 +462,12 @@ describe("authoritative session revalidation", () => {
         expires_at: "2999-01-01T00:00:00.000Z",
         admin_secret_fingerprint: adminAuthFp(),
       });
-    const dealer = options?.dealer ?? makeRecord("dealer-1", { is_system: false });
+    const dealer =
+      options?.dealer ??
+      makeRecord("dealer-1", {
+        is_system: false,
+        invitation_hash: invitationHash,
+      });
     const systemDealer =
       options?.systemDealer ?? makeRecord("system-dealer", { is_system: true });
     const person =
@@ -652,6 +671,7 @@ describe("authoritative session revalidation", () => {
       is_impersonation: false,
       impersonator_session: "",
       expires_at: "2999-01-01T00:00:00.000Z",
+      invitation_fingerprint: invitationHash,
       person_pin_fingerprint: sha256(
         "dealer-social-post-ai:person-pin:v1:person-1:1234",
       ),

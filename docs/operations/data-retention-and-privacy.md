@@ -121,7 +121,7 @@ No handler serves the file and no file token is minted anywhere in the repo (the
 
 Contrast this with `posts.creative_image`, which is also `protected` but _is_ served — through a session-gated route, `GET /api/app/posts/:id/creative-image` (`pb_hooks/main.pb.js:3591-3634`), that requires the requester to be the owning session, an authoritative same-person, or a manager, and responds with `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`.
 
-**Consequence:** the only way to look at a stored customer signature today is the PocketBase superuser dashboard on the Fly origin (`/_/`), authenticated with the PocketBase admin credentials. No hook in this repo blocks that path. That is also the only way to produce one for a subpoena, a customer request, or a dispute — there is no export tooling.
+**Consequence:** the only way to look at a stored customer signature today is the PocketBase superuser dashboard (`/_/`), authenticated with the PocketBase admin credentials. The production edge (Caddy in the Fly container) returns 404 for `/_/` by default, so that path is not internet-reachable. Open a break-glass session with `fly proxy` to the machine (or temporarily set `POCKETBASE_ADMIN_UI_ENABLED=true` and redeploy) before using the steps below. That dashboard path is also the only way to produce a signature for a subpoena, a customer request, or a dispute — there is no export tooling.
 
 ---
 
@@ -135,19 +135,21 @@ Nothing in the product supports this. Everything below is manual work in the Poc
 
 Get the request in writing (the signed release text promises withdrawal "in writing"). You need the customer's name as it was typed at signing, and ideally the VIN or the approximate date.
 
-### Step 2 — Open the PocketBase superuser dashboard
+### Step 2 — Open the PocketBase superuser dashboard (break-glass)
 
-Open this URL in a browser:
+The public Fly origin blocks `/_/` (Caddy returns 404). Use a private tunnel:
 
+```bash
+fly proxy 8090:8090 -a dealer-social-post-ai-production
 ```
-https://dealer-social-post-ai-production.fly.dev/_/
-```
 
-(On macOS, `open "https://dealer-social-post-ai-production.fly.dev/_/"` does it from a shell. `open` is macOS-only — on Linux use `xdg-open`, or just paste the URL.)
+Then open `http://127.0.0.1:8090/_/` in a browser. Leave the proxy running only for the duration of the work.
+
+Only if `fly proxy` is unavailable: set Fly secret/env `POCKETBASE_ADMIN_UI_ENABLED=true`, redeploy, use `https://dealer-social-post-ai-production.fly.dev/_/`, then remove the flag and redeploy immediately after. Prefer the proxy.
 
 The hostname is the Fly app name from `fly.toml` line 1 (`app = "dealer-social-post-ai-production"`); the same origin is hardcoded as the API target in `vercel.ts:62` and allowlisted in `pb_hooks/requestPolicies.js:1621`.
 
-Log in with the PocketBase admin credentials (`POCKETBASE_ADMIN_EMAIL` / `POCKETBASE_ADMIN_PASSWORD`). This is the same superuser account the backup job authenticates as — it posts those two values to `/api/admins/auth-with-password` (`scripts/pocketbase-r2-backup.mjs:117-124`), and both are stored as secrets in the protected `production-backup` GitHub environment (`docs/production-backups-and-release.md:11,17`; `.github/workflows/pocketbase-backup.yml:20,102-103`).
+Log in with the PocketBase admin credentials (`POCKETBASE_ADMIN_EMAIL` / `POCKETBASE_ADMIN_PASSWORD`). This is the same superuser account the backup job authenticates as — it posts those two values to `/api/admins/auth-with-password` (`scripts/pocketbase-r2-backup.mjs:117-124`), and both are stored as secrets in the protected `production-backup` GitHub environment (`docs/production-backups-and-release.md:11,17`; `.github/workflows/pocketbase-backup.yml:20,102-103`). The backup job uses `/api/admins/*` and `/api/backups/*`, which remain proxied when `/_/` is blocked.
 
 Note this is **not** the app's own super-admin login. That one uses `ADMIN_LOGIN_USERNAME` / `ADMIN_LOGIN_PASSWORD` (`pb_hooks/helpers.js:236-261`, `.env.example:20-21`) to sign in to the app's own `/api/app/*` routes, and it does not authenticate the PocketBase dashboard.
 

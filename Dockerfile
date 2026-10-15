@@ -36,6 +36,11 @@ FROM ubuntu:22.04
 # API change for our hooks.
 ARG PB_VERSION=0.22.55
 ARG PB_SHA256="2e404f98bc693cfa7c8160bc9f1903fc7dc448c4f6fe78128c0cd1561a2db46e"
+# Caddy terminates Fly's public :8090 and blocks /_/ by default so the
+# PocketBase admin UI is not internet-reachable. Keep this pin in lockstep
+# with the checksum below when bumping.
+ARG CADDY_VERSION=2.9.1
+ARG CADDY_SHA256="0542edbb5ce0d6987de6a37caa2bbc52a42445ec094fb9ba3e605534af5dd898"
 # Cache bust arg - change to force rebuild of frontend copy
 ARG CACHE_BUST=1
 
@@ -49,6 +54,14 @@ RUN apt-get update && apt-get install -y \
 # Download and verify PocketBase
 ADD https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip /tmp/pb.zip
 RUN if [ -n "$PB_SHA256" ]; then echo "${PB_SHA256}  /tmp/pb.zip" | sha256sum -c -; else echo "WARNING: PB_SHA256 not provided; skipping checksum verification."; fi && unzip /tmp/pb.zip -d /pb/
+
+# Download and verify Caddy (public edge in front of loopback PocketBase)
+ADD https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz /tmp/caddy.tgz
+RUN echo "${CADDY_SHA256}  /tmp/caddy.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/caddy.tgz -C /usr/local/bin caddy \
+    && chmod 755 /usr/local/bin/caddy \
+    && rm /tmp/caddy.tgz \
+    && caddy version
 
 # Force cache invalidation for frontend copy
 RUN echo "Cache bust: ${CACHE_BUST}"
@@ -64,13 +77,15 @@ COPY pb_migrations /pb/pb_migrations
 
 EXPOSE 8090
 
-# Start PocketBase with hooks enabled
+# Public edge (Caddy) + process supervisor. PocketBase is started on
+# 127.0.0.1:8091 by entrypoint.sh; only Caddy listens on 0.0.0.0:8090.
 COPY entrypoint.sh /pb/entrypoint.sh
+COPY Caddyfile /pb/Caddyfile
+COPY Caddyfile.open-admin /pb/Caddyfile.open-admin
 RUN chmod +x /pb/entrypoint.sh
 
 # Drop root privileges for runtime
 RUN useradd -m -d /home/pbuser pbuser && chown -R pbuser:pbuser /pb
 USER pbuser
 
-# Start PocketBase with hooks enabled
 CMD ["/pb/entrypoint.sh"]
