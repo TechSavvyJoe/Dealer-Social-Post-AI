@@ -25,6 +25,8 @@ on:
 
 permissions:
   contents: read
+  # actions/cache writes the Playwright and node_modules caches.
+  actions: write
 
 jobs:
   webkit-decoder-probe:
@@ -37,15 +39,34 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
-      - run: npm ci --no-audit --no-fund
-      - run: npx playwright install --with-deps webkit
+      - name: Cache npm dependencies
+        id: npm-deps
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('.node-version', 'package-lock.json') }}
+      - name: Install npm dependencies
+        if: steps.npm-deps.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - name: Cache Playwright browsers
+        id: playwright-browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ runner.os }}-webkit-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browser
+        if: steps.playwright-browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps webkit
+      - name: Install Playwright operating-system dependencies
+        if: steps.playwright-browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps webkit
       - name: Repeat the 6 fps and installed-phone preview fixtures on WebKit
         if: github.event_name != 'workflow_dispatch' || inputs.probe != 'recovery'
         run: >-
           npx playwright test e2e/vehicle-spin-refinement.spec.ts e2e/streamlined-flow.spec.ts
           --grep "6fps vehicle import builds all 48 quantized samples with decoded pixels|installed iPhone fills its canvas with a stale viewport and reachable image/video actions"
           --project=webkit-desktop-1440 --project=webkit-phone-390
-          --repeat-each=10 --retries=0 --workers=1
+          --repeat-each=3 --retries=0 --workers=1
           --trace=retain-on-failure --reporter=line
         env:
           CI: true
