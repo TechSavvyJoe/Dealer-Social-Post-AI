@@ -224,7 +224,7 @@ export const DeviceRecoveryGrid: React.FC<DeviceRecoveryGridProps> = ({
             />
           </span>
         )}
-        <span className="min-w-[5.5rem] flex-1">
+        <span className="min-w-22 flex-1">
           <span className="block truncate text-sm font-medium text-ink">{label}</span>
           <span className="block truncate text-caption text-ink-2">{when}</span>
         </span>

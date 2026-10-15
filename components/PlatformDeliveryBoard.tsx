@@ -135,7 +135,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
     <section
       className={cn(
         "min-w-0 overflow-hidden rounded-2xl border border-surface-700/70",
-        "bg-surface-900/95 shadow-[var(--shadow-lg)]",
+        "bg-surface-900/95 shadow-elevation-5",
         className,
       )}
       aria-labelledby={headingId}
@@ -151,7 +151,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
           <div className="flex items-center gap-2">
             <span
               className={cn(
-                "grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-primary-400/30 bg-primary-500/10 text-primary-200 [.theme-light_&]:text-primary-900",
+                "grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-primary-400/30 bg-primary-500/10 text-primary-200 in-[.theme-light]:text-primary-900",
                 compact && "lg:h-7 lg:w-7",
               )}
             >
@@ -254,7 +254,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
         <>
           <ul
             className={cn(
-              "flex min-w-0 list-none snap-x snap-mandatory gap-3 overflow-x-auto p-3 [scrollbar-width:thin] sm:grid sm:snap-none sm:overflow-visible sm:p-4",
+              "flex min-w-0 list-none snap-x snap-mandatory gap-3 overflow-x-auto p-3 scrollbar-thin sm:grid sm:snap-none sm:overflow-visible sm:p-4",
               compact && "lg:gap-2 lg:p-3",
             )}
             aria-label="Platform-ready deliverables"
@@ -304,7 +304,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                   {onToggleBatch && compact ? (
                     <label
                       className={cn(
-                        "group absolute right-0 top-0 z-10 grid h-11 w-11 place-items-center rounded-md has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary-400/70",
+                        "group absolute right-0 top-0 z-10 grid h-11 w-11 place-items-center rounded-md has-focus-visible:ring-2 has-focus-visible:ring-primary-400/70",
                         batchEligible
                           ? "cursor-pointer text-surface-100"
                           : "cursor-not-allowed text-surface-500 opacity-60",
@@ -317,7 +317,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                     >
                       <span
                         className={cn(
-                          "grid h-7 w-7 place-items-center rounded-md border border-surface-600/80 bg-surface-950/90 shadow-sm",
+                          "grid h-7 w-7 place-items-center rounded-md border border-surface-600/80 bg-surface-950/90 shadow-xs",
                           batchEligible && "group-hover:border-primary-400",
                         )}
                       >
@@ -330,7 +330,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                               onToggleBatch(output.id, event.currentTarget.checked);
                             }
                           }}
-                          className="h-4 w-4 accent-[var(--brand-primary)]"
+                          className="h-4 w-4 accent-(--brand-primary)"
                           aria-label={`Include ${name} in Share selected`}
                         />
                       </span>
@@ -344,11 +344,11 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                   <button
                     type="button"
                     className={cn(
-                      "group grid min-h-[5.75rem] w-full min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3 p-3 text-left",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-400",
+                      "group grid min-h-23 w-full min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3 p-3 text-left",
+                      "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-400",
                       "sm:min-h-[5rem] sm:p-3",
                       compact &&
-                        "lg:min-h-[4.5rem] lg:grid-cols-[3.75rem_minmax(0,1fr)] lg:gap-2.5 lg:p-2.5 lg:pr-11",
+                        "lg:min-h-18 lg:grid-cols-[3.75rem_minmax(0,1fr)] lg:gap-2.5 lg:p-2.5 lg:pr-11",
                     )}
                     onClick={() => onSelect(output.id)}
                     aria-pressed={Boolean(output.selected)}
@@ -357,7 +357,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                   >
                     <span
                       className={cn(
-                        "grid h-[4.25rem] w-[4.25rem] place-items-center overflow-hidden rounded-lg border border-surface-700/70 bg-surface-950/80",
+                        "grid h-17 w-17 place-items-center overflow-hidden rounded-lg border border-surface-700/70 bg-surface-950/80",
                         compact && "lg:h-14 lg:w-14",
                       )}
                     >
@@ -464,7 +464,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
 
                   <div
                     className={cn(
-                      "grid grid-cols-3 gap-2 border-t border-surface-700/70 p-2.5 sm:w-[15.5rem] sm:border-l sm:border-t-0",
+                      "grid grid-cols-3 gap-2 border-t border-surface-700/70 p-2.5 sm:w-62 sm:border-l sm:border-t-0",
                       compact &&
                         "lg:w-full lg:gap-1.5 lg:border-l-0 lg:border-t lg:px-2.5 lg:py-2",
                     )}
@@ -489,7 +489,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                               onToggleBatch(output.id, event.currentTarget.checked);
                             }
                           }}
-                          className="h-4 w-4 accent-[var(--brand-primary)]"
+                          className="h-4 w-4 accent-(--brand-primary)"
                           aria-label={`Include ${name} in Share selected`}
                         />
                         {batchEligible
@@ -509,7 +509,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                       className={cn(
                         "inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-semibold",
                         compact && "lg:min-h-9 lg:text-[11px]",
-                        "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success-300",
+                        "transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-success-300",
                         "border-success-400/40 bg-success-500/10 text-surface-100 hover:bg-success-500/20",
                         "disabled:cursor-not-allowed disabled:border-surface-700/60 disabled:bg-surface-900/40 disabled:text-surface-500",
                       )}
@@ -532,7 +532,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                       className={cn(
                         "inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-semibold",
                         compact && "lg:min-h-9 lg:text-[11px]",
-                        "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300",
+                        "transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-300",
                         "border-primary-400/40 bg-primary-500/10 text-surface-100 hover:bg-primary-500/20",
                         "disabled:cursor-not-allowed disabled:border-surface-700/60 disabled:bg-surface-900/40 disabled:text-surface-500",
                       )}
@@ -555,7 +555,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                       className={cn(
                         "inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-semibold",
                         compact && "lg:min-h-9 lg:text-[11px]",
-                        "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-300",
+                        "transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-error-300",
                         "border-error-400/40 bg-error-500/10 text-surface-100 hover:bg-error-500/20",
                         "disabled:cursor-not-allowed disabled:border-surface-700/60 disabled:bg-surface-900/40 disabled:text-surface-500",
                       )}

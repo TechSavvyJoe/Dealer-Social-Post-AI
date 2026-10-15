@@ -236,7 +236,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                     const Icon = SCENARIO_CATEGORY_ICON[editing.category];
                     return (
                       <span
-                        className="flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-sm border border-hairline bg-panel-raised"
+                        className="shrink-0 flex items-center justify-center w-11 h-11 rounded-sm border border-hairline bg-panel-raised"
                         title="Tile icon (set automatically by category)"
                       >
                         <Icon className="w-5 h-5 text-ink-2" aria-hidden="true" />
@@ -433,7 +433,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                   const Icon = SCENARIO_CATEGORY_ICON[s.category];
                   return (
                     <Icon
-                      className="mt-1 h-4 w-4 flex-shrink-0 text-ink-2"
+                      className="mt-1 h-4 w-4 shrink-0 text-ink-2"
                       aria-hidden="true"
                     />
                   );
@@ -450,7 +450,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                   </div>
                 </div>
               </div>
-              <div className="flex flex-shrink-0 items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1">
                 <button
                   type="button"
                   onClick={() => startEdit(s)}

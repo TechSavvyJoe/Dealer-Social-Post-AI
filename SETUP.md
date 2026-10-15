@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 22 (`22.23.1` is pinned in `.node-version` and `.nvmrc`)
+- Node.js 22 (`engines` allow `>=22.12.0 <23` so local typecheck/test work on current 22.x patches; CI, Docker, and release scripts pin `22.23.1` via `.node-version` / `.nvmrc`)
 - `curl` and `unzip` for the verified PocketBase download
 - A Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
 

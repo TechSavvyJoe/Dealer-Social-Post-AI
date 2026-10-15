@@ -117,7 +117,7 @@ export const VehicleSpinViewer: React.FC<VehicleSpinViewerProps> = ({
             ? selectionLabel
             : "Vehicle spin. Arrow keys rotate. Plus and minus zoom."
         }
-        className="relative flex aspect-[8/5] touch-none items-center justify-center overflow-hidden bg-canvas outline-offset-[-4px]"
+        className="relative flex aspect-8/5 touch-none items-center justify-center overflow-hidden bg-canvas -outline-offset-4"
         onKeyDown={stepAngle}
         onPointerDown={(event) => {
           if (onSelectVehicle) return;

@@ -563,7 +563,7 @@ export const SystemHealthPanel: React.FC = () => {
           rightIcon={
             <ChevronDown
               className={cn(
-                "h-4 w-4 transition-transform duration-[var(--duration-base)]",
+                "h-4 w-4 transition-transform duration-(--duration-base)",
                 expanded && "rotate-180",
               )}
             />
@@ -574,7 +574,7 @@ export const SystemHealthPanel: React.FC = () => {
       </div>
 
       {error && (
-        <div className="mx-4 mb-3 flex items-center gap-2 rounded-md border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-300 [.theme-light_&]:text-error-800 sm:mx-5">
+        <div className="mx-4 mb-3 flex items-center gap-2 rounded-md border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-300 in-[.theme-light]:text-error-800 sm:mx-5">
           <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
         </div>
       )}

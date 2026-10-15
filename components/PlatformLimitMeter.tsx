@@ -41,7 +41,7 @@ const stateClasses: Record<
   over: {
     dot: "bg-error-400",
     bar: "bg-error-500/80",
-    label: "text-error-200 font-semibold [.theme-light_&]:text-error-800",
+    label: "text-error-200 font-semibold in-[.theme-light]:text-error-800",
   },
 };
 
@@ -93,7 +93,7 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
             <div key={limit.id} className="space-y-0.5">
               <div className="flex items-center gap-2">
                 <div className={cn("w-1.5 h-1.5 rounded-full", klass.dot)} />
-                <span className={cn("text-[11px] flex-shrink-0 w-28", klass.label)}>
+                <span className={cn("text-[11px] shrink-0 w-28", klass.label)}>
                   {limit.label}
                 </span>
                 <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
@@ -104,7 +104,7 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
                 </div>
                 <span
                   className={cn(
-                    "text-[10px] font-mono tabular-nums flex-shrink-0 w-16 text-right",
+                    "text-[10px] font-mono tabular-nums shrink-0 w-16 text-right",
                     klass.label,
                   )}
                 >
@@ -112,7 +112,7 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
                 </span>
                 {(state === "over" || hashtagWarning) && (
                   <AlertTriangle
-                    className="w-3 h-3 text-error-400 flex-shrink-0"
+                    className="w-3 h-3 text-error-400 shrink-0"
                     aria-label={
                       state === "over"
                         ? `Over the ${limit.label} limit`
@@ -126,7 +126,7 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
                   className={cn(
                     "pl-3.5 text-[10px] leading-snug",
                     hashtagWarning
-                      ? "text-error-300 [.theme-light_&]:text-error-800"
+                      ? "text-error-300 in-[.theme-light]:text-error-800"
                       : "text-surface-400",
                   )}
                 >

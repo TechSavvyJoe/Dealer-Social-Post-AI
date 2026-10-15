@@ -157,7 +157,7 @@ const initialSettings = (connection?: ManagedConnection) => ({
 });
 
 const inputClass =
-  "min-h-11 w-full rounded-sm border border-strong bg-panel-raised px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus-visible:outline-none";
+  "min-h-11 w-full rounded-sm border border-strong bg-panel-raised px-3 py-2 text-sm text-ink placeholder:text-ink-3 focus-visible:outline-hidden";
 
 function ServiceCard({
   service,

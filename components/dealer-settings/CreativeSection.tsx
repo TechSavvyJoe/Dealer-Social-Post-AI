@@ -142,7 +142,8 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
                   decorative
                   className={cn(
                     "w-24 shrink-0 sm:w-full",
-                    selected && "outline outline-2 outline-offset-2 outline-brand-ink",
+                    selected &&
+                      "outline-solid outline-2 outline-offset-2 outline-brand-ink",
                   )}
                 />
                 <span className="flex min-w-0 items-start gap-2.5">
@@ -160,7 +161,7 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span
                       className={cn(
-                        "text-base leading-[1.375rem] text-ink",
+                        "text-base leading-5.5 text-ink",
                         selected ? "font-semibold" : "font-medium",
                       )}
                     >
@@ -226,7 +227,7 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
           helper="One fun treatment your team can try on a post. Turn it off for the whole team under Workflow."
         >
           {({ controlId, helperId }) => (
-            <div className="w-full sm:w-[12.5rem]">
+            <div className="w-full sm:w-50">
               <Select
                 id={controlId}
                 aria-describedby={helperId}
@@ -251,7 +252,7 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
           helper="The only accent in the app. Your team sees it on main buttons, like Save changes below."
         >
           {({ controlId, helperId }) => (
-            <div className="flex w-full items-center gap-2.5 sm:w-[12.5rem]">
+            <div className="flex w-full items-center gap-2.5 sm:w-50">
               <input
                 type="color"
                 value={HEX_RE.test(values.color) ? values.color : PICKER_FALLBACK}
@@ -305,7 +306,7 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
               }
             >
               {({ controlId, helperId }) => (
-                <div className="w-full sm:w-[12.5rem]">
+                <div className="w-full sm:w-50">
                   <Select
                     id={controlId}
                     aria-describedby={helperId}
@@ -352,7 +353,7 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
             </SettingRow>
             <SettingRow label="Audio" labelFor>
               {({ controlId }) => (
-                <div className="w-full sm:w-[12.5rem]">
+                <div className="w-full sm:w-50">
                   <Select
                     id={controlId}
                     value={form.motionAudio}
@@ -381,7 +382,7 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
               helper={logoSizeHelp(hasLogo, form.logoCorner)}
             >
               {({ controlId, helperId }) => (
-                <div className="flex w-full items-center gap-3 sm:w-[12.5rem]">
+                <div className="flex w-full items-center gap-3 sm:w-50">
                   <input
                     id={controlId}
                     type="range"
@@ -473,7 +474,7 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
             </SettingRow>
             <SettingRow label="Default classic style" labelFor>
               {({ controlId }) => (
-                <div className="w-full sm:w-[12.5rem]">
+                <div className="w-full sm:w-50">
                   <Select
                     id={controlId}
                     value={values.defaultStyle}

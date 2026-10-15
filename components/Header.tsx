@@ -95,7 +95,7 @@ export const Header: React.FC<HeaderProps> = ({
           "bg-panel border-b border-hairline",
         )}
       >
-        <div className="mx-auto flex h-full w-full max-w-screen-2xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-10">
+        <div className="mx-auto flex h-full w-full max-w-(--breakpoint-2xl) items-center justify-between gap-3 px-4 sm:px-6 lg:px-10">
           {/* Product/dealer identity */}
           <div className="flex min-w-0 items-center gap-3">
             {onBack && (

@@ -17,6 +17,15 @@
  */
 migrate(
   (db) => {
+    const dao = new Dao(db);
+    let dealersCol = null;
+    try {
+      dealersCol = dao.findCollectionByNameOrId("dealers");
+    } catch (e) {}
+    if (!dealersCol) {
+      throw new Error("dealers collection not found");
+    }
+
     const collection = new Collection({
       name: "posts",
       type: "base",
@@ -27,7 +36,7 @@ migrate(
           type: "relation",
           required: true,
           options: {
-            collectionId: "",
+            collectionId: dealersCol.id,
             cascadeDelete: false,
             maxSelect: 1,
             minSelect: 1,
@@ -63,22 +72,18 @@ migrate(
       deleteRule: null,
     });
 
-    const dao = new Dao(db);
-    let dealersCol = null; try { dealersCol = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
-    if (!dealersCol) {
-      throw new Error("dealers collection not found");
-    }
-    for (let i = 0; i < collection.schema.length; i++) { if (collection.schema[i].name === "dealer") { collection.schema[i].options.collectionId = dealersCol.id; break; } }
-
     return dao.saveCollection(collection);
   },
   (db) => {
     const dao = new Dao(db);
     try {
-      let collection = null; try { collection = dao.findCollectionByNameOrId("posts"); } catch(e) {}
+      let collection = null;
+      try {
+        collection = dao.findCollectionByNameOrId("posts");
+      } catch (e) {}
       if (collection) return dao.deleteCollection(collection);
     } catch (e) {
       // already gone
     }
-  }
+  },
 );

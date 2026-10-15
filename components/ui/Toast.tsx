@@ -338,7 +338,7 @@ const ToastContainer: React.FC<ToastContainerProps> = ({
 
   return (
     <div
-      className="toast-viewport pointer-events-none fixed z-[100]"
+      className="toast-viewport pointer-events-none fixed z-100"
       style={{
         width:
           "min(28rem, calc(100vw - max(1rem, var(--sal)) - max(1rem, var(--sar))))",
@@ -405,7 +405,7 @@ const ToastItem: React.FC<ToastItemProps> = ({
       }
       aria-atomic="true"
     >
-      {icons[toast.type] && <div className="flex-shrink-0">{icons[toast.type]}</div>}
+      {icons[toast.type] && <div className="shrink-0">{icons[toast.type]}</div>}
       <p className="flex-1 text-sm font-medium text-ink">
         {toast.message}
         {toast.revision > 1 ? (
@@ -418,7 +418,7 @@ const ToastItem: React.FC<ToastItemProps> = ({
       <button
         type="button"
         onClick={() => onRemove(toast.id)}
-        className="-my-2 -mr-2 inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-sm text-ink-hint transition-colors duration-120 ease-out hover:bg-fill-hover hover:text-ink"
+        className="-my-2 -mr-2 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-sm text-ink-hint transition-colors duration-120 ease-out hover:bg-fill-hover hover:text-ink"
         aria-label="Close notification"
       >
         <X className="w-4 h-4" />

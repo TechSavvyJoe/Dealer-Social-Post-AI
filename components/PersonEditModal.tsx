@@ -387,7 +387,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
     >
       <div className="space-y-5">
         {/* Identity header */}
-        <div className="relative overflow-hidden rounded-2xl border border-hairline bg-gradient-to-br from-surface-800/80 to-surface-900/90 p-4">
+        <div className="relative overflow-hidden rounded-2xl border border-hairline bg-linear-to-br from-surface-800/80 to-surface-900/90 p-4">
           <div
             className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-primary-500/10 blur-2xl"
             aria-hidden
@@ -437,7 +437,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                 onChange={(e) =>
                   setRole(e.target.value === "manager" ? "manager" : "salesperson")
                 }
-                className="w-full rounded-xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-surface-50 focus:border-primary-500 focus:outline-none"
+                className="w-full rounded-xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-surface-50 focus:border-primary-500 focus:outline-hidden"
               >
                 <option value="salesperson">Salesperson — create posts</option>
                 <option value="manager">Manager — store dashboard & team</option>
@@ -524,7 +524,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
 
           {managerPromotionPending ? (
             <div
-              className="rounded-2xl border border-warning-400/25 bg-warning-500/[0.08] px-4 py-3 text-sm text-warning-100"
+              className="rounded-2xl border border-warning-400/25 bg-warning-500/8 px-4 py-3 text-sm text-warning-100 in-[.theme-light]:text-warning-900"
               role="status"
             >
               Save the manager role first. You can then reopen this account to set up
@@ -533,7 +533,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
           ) : null}
 
           {showManagerLoginEditor ? (
-            <div className="space-y-4 rounded-2xl border border-primary-400/20 bg-primary-500/[0.06] p-4">
+            <div className="space-y-4 rounded-2xl border border-primary-400/20 bg-primary-500/6 p-4">
               <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
                 <div className="flex min-w-0 items-start gap-3">
                   <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-primary-500/10 ring-1 ring-primary-400/20">
@@ -553,7 +553,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   className={cn(
                     "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide",
                     person?.hasManagerLogin
-                      ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25 [.theme-light_&]:text-success-800"
+                      ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25 in-[.theme-light]:text-success-800"
                       : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                   )}
                 >
@@ -601,7 +601,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   rightAction={
                     <button
                       type="button"
-                      className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                      className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-400"
                       onClick={() => setShowManagerPassword((value) => !value)}
                       aria-label={
                         showManagerPassword
@@ -691,8 +691,8 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   className={cn(
                     "rounded-xl border px-3 py-2.5 text-xs",
                     managerLoginMessage.kind === "success"
-                      ? "border-success-500/25 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
-                      : "border-error-700/40 bg-error-900/30 text-error-100 [.theme-light_&]:text-error-800",
+                      ? "border-success-500/25 bg-success-500/10 text-success-100 in-[.theme-light]:text-success-900"
+                      : "border-error-700/40 bg-error-900/30 text-error-100 in-[.theme-light]:text-error-800",
                   )}
                   role={managerLoginMessage.kind === "error" ? "alert" : "status"}
                   aria-live="polite"
@@ -761,9 +761,9 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                 className={cn(
                   "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide",
                   needsDistribution
-                    ? "bg-warning-500/15 text-warning-200 ring-1 ring-warning-500/30 [.theme-light_&]:text-warning-800"
+                    ? "bg-warning-500/15 text-warning-200 ring-1 ring-warning-500/30 in-[.theme-light]:text-warning-800"
                     : hasExistingCode
-                      ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25 [.theme-light_&]:text-success-800"
+                      ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25 in-[.theme-light]:text-success-800"
                       : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                 )}
               >
@@ -928,7 +928,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
         {error && (
           <p
             role="alert"
-            className="rounded-xl border border-error-700/40 bg-error-900/30 px-3 py-2.5 text-xs text-error-100 [.theme-light_&]:text-error-800"
+            className="rounded-xl border border-error-700/40 bg-error-900/30 px-3 py-2.5 text-xs text-error-100 in-[.theme-light]:text-error-800"
           >
             {error}
           </p>

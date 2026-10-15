@@ -58,7 +58,7 @@ export const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
       alt={alt}
       className={cn(
         "transition-opacity duration-180",
-        isLoading ? "opacity-50 blur-sm" : "opacity-100",
+        isLoading ? "opacity-50 blur-xs" : "opacity-100",
         className,
       )}
       loading="lazy"
