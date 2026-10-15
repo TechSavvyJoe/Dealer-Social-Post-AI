@@ -2880,11 +2880,10 @@ function isConfiguredProviderApiKey(value) {
     lower === "your-api-key-here" ||
     lower === "changeme" ||
     lower === "replace-me" ||
+    lower === "placeholder" ||
     lower === "todo" ||
     lower === "xxx" ||
-    lower.indexOf("your-api-key") !== -1 ||
-    lower.indexOf("insert") !== -1 ||
-    lower.indexOf("placeholder") !== -1
+    lower.indexOf("your-api-key") !== -1
   ) {
     return false;
   }
