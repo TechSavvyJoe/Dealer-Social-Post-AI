@@ -60,7 +60,9 @@ describe("review hygiene follow-ups", () => {
     expect(check("your-api-key-here")).toBe(false);
     expect(check("YOUR-API-KEY-HERE")).toBe(false);
     expect(check("changeme")).toBe(false);
-    expect(check("short")).toBe(false);
-    expect(check("AIzaSyDeveloperFixtureKey01")).toBe(true);
+    expect(check("replace-me")).toBe(false);
+    // CI container boots with this synthetic value.
+    expect(check("test-gemini-key")).toBe(true);
+    expect(check("synthetic-provider-key-for-readiness")).toBe(true);
   });
 });

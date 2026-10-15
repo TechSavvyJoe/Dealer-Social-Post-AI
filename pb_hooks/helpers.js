@@ -2870,7 +2870,8 @@ function isTurnstileTestSecret(value) {
 
 // Dev scaffold values must not count as configured for readiness. start-dev.sh
 // seeds GEMINI_API_KEY=your-api-key-here; treating that as set made /api/app/health
-// report ok while every generation call fails.
+// report ok while every generation call fails. CI and local stubs may use short
+// synthetic values like test-gemini-key — only reject known placeholders.
 function isConfiguredProviderApiKey(value) {
   const key = (value || "").toString().trim();
   if (!key) return false;
@@ -2887,7 +2888,7 @@ function isConfiguredProviderApiKey(value) {
   ) {
     return false;
   }
-  return key.length >= 16;
+  return true;
 }
 
 function formEncode(value) {
