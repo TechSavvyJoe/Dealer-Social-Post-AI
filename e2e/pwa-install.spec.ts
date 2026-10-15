@@ -420,15 +420,34 @@ test.describe("Home Screen PWA contracts", () => {
         ),
       ).toBe(true);
       const standaloneMediaRule = await page.evaluate(() => {
-        for (const styleSheet of Array.from(document.styleSheets)) {
-          for (const rule of Array.from(styleSheet.cssRules)) {
+        // Tailwind v4 emits `@layer base` as a real CSS layer, so the
+        // standalone media query is nested in a CSSLayerBlockRule. A
+        // top-level walk only sees that layer and misses the rule.
+        const findStandaloneBodyRule = (rules: CSSRuleList): string => {
+          for (const rule of Array.from(rules)) {
             if (
               rule instanceof CSSMediaRule &&
-              rule.conditionText.includes("display-mode: standalone")
+              rule.conditionText.includes("display-mode: standalone") &&
+              rule.cssText.includes("body")
             ) {
               return rule.cssText;
             }
+            if (rule instanceof CSSGroupingRule) {
+              const nested = findStandaloneBodyRule(rule.cssRules);
+              if (nested) return nested;
+            }
           }
+          return "";
+        };
+        for (const styleSheet of Array.from(document.styleSheets)) {
+          let rules: CSSRuleList;
+          try {
+            rules = styleSheet.cssRules;
+          } catch {
+            continue;
+          }
+          const found = findStandaloneBodyRule(rules);
+          if (found) return found;
         }
         return "";
       });
