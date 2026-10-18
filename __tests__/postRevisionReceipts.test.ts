@@ -97,6 +97,14 @@ const runRoute = (
           geminiModelPolicySnapshot: () => ({ version: 5 }),
         };
       }
+      if (path.endsWith("/postProjection.js")) {
+        return {
+          projectRecords: (records: Array<{ getString: (field: string) => string }>) =>
+            records.map((record) => ({
+              rejection_reason: record.getString("rejection_reason"),
+            })),
+        };
+      }
       if (path.endsWith("/websitePublications.js")) {
         return {
           findPublicationForPost: () => null,

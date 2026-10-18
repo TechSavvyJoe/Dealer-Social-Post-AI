@@ -3984,6 +3984,28 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
       record.id,
       "",
     );
+    // projectRecords applies the same image/identity hold as postIsHeld and
+    // blanks rejection_reason while that hold is active. A failed projection
+    // withholds the note rather than sending the raw column.
+    let rejectionReason = "";
+    try {
+      const projected = require(__hooks + "/postProjection.js").projectRecords(
+        [record],
+        dealer,
+        helpers,
+        policies,
+        $app.dao(),
+      );
+      rejectionReason =
+        projected && projected[0]
+          ? (projected[0].rejection_reason || "").toString()
+          : "";
+    } catch (projectionError) {
+      console.error(
+        "[/api/app/posts/:id/status] withheld rejection reason",
+        projectionError,
+      );
+    }
     return c.json(200, {
       id: record.id,
       // A manager decision advances posts.updated. Once a post has left the
@@ -3993,7 +4015,7 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
       approval_status: record.getString("approval_status"),
       approved_by: record.getString("approved_by"),
       approved_at: record.getString("approved_at"),
-      rejection_reason: record.getString("rejection_reason"),
+      rejection_reason: rejectionReason,
       image_review_required:
         policies.postImageReviewRequired(
           record,

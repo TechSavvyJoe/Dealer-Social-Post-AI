@@ -735,14 +735,17 @@ describe("Content workspace requested changes", () => {
       image_review_required: true,
     });
     mocks.history.mockReturnValue(history({ filtered: [rejected], items: [rejected] }));
+    mocks.detail.mockResolvedValue(rejected);
     renderWork();
     expect(screen.queryByText(reason)).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Inspect Delivery" }),
     ).not.toHaveAttribute("aria-describedby");
     fireEvent.click(screen.getByRole("button", { name: "Inspect Delivery" }));
-    expect(await screen.findByLabelText("Content details")).not.toHaveTextContent(
-      reason,
-    );
+    // The details label is mounted while getPostDetail is still loading, and
+    // the list row already says the caption is withheld. Wait for the
+    // inspector-only held copy, which renders only after the detail arrives.
+    await screen.findByText(/Create a corrected post before sharing it/);
+    expect(screen.getByLabelText("Content details")).not.toHaveTextContent(reason);
   });
 });

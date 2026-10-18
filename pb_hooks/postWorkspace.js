@@ -160,7 +160,11 @@ function parseQuery(query) {
     limit: Number(limitRaw),
     cursor: null,
   };
-  if (options.since && options.until && options.since > options.until)
+  if (
+    options.since &&
+    options.until &&
+    timestampKey(options.since) > timestampKey(options.until)
+  )
     throw failure("INVALID_POST_FILTER", 400, "Date range is reversed");
   const cursor = String(query.cursor || "");
   if (cursor) {
@@ -233,8 +237,29 @@ function matches(item, options) {
 function timestampKey(value) {
   // PB saves use a space while approval SQL historically saved ISO with T.
   // Compare instants without rewriting the raw creative CAS token in the DTO.
-  const time = Date.parse(String(value || "").replace(" ", "T"));
-  return Number.isFinite(time) ? time : 0;
+  // Date.parse keeps millisecond precision and truncates any further digits,
+  // so 10:00:00.000900000Z would compare equal to 10:00:00.000Z and an
+  // earlier post would pass a since filter. Round the fraction to the nearest
+  // millisecond here, once, for filters, cursors, and sort keys.
+  const raw = String(value || "")
+    .trim()
+    .replace(" ", "T");
+  const extra = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{4,})(Z?)$/.exec(raw);
+  if (!extra) {
+    const time = Date.parse(raw);
+    return Number.isFinite(time) ? time : 0;
+  }
+  let milliseconds = Number(extra[2].slice(0, 3));
+  let carry = 0;
+  if (Number(extra[2][3]) >= 5) milliseconds += 1;
+  if (milliseconds >= 1000) {
+    milliseconds = 0;
+    carry = 1000;
+  }
+  const time = Date.parse(
+    extra[1] + "." + String(milliseconds).padStart(3, "0") + (extra[3] || ""),
+  );
+  return Number.isFinite(time) ? time + carry : 0;
 }
 function compareKeys(time, id, otherTime, otherId, descending) {
   const compared =
