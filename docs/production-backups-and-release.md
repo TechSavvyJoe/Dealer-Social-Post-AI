@@ -288,6 +288,8 @@ needs a human to look at generated output before customers do.
    unset RELEASE_SHA
    ```
 
+   Deployment polling reads the authenticated Vercel deployment API through the pinned CLI and requires the exact deployment ID, URL, project ID, owning team, production target, and ready state. CLI 58.4.4's `inspect --json` omits ownership fields; its reduced output cannot authorize staging. The API's reduced public response also fails closed. Neither command's full response should be copied into release evidence or logs.
+
    The provider canary, private website-handoff canary, owner cleanup verification, staging, hosted QA, and promotion share one atomic owner-bearing lock so they cannot overlap. An interrupted process deliberately leaves that lock in place instead of guessing that it is stale; remove `.release-evidence/vercel-release.lock` only after directly confirming that no release command is still running.
 
 7. Run the hosted-artifact browser gate against the exact staged URL. The gate is deliberately non-mutating: it never submits an invalid code, creates production data, or depends on source-only TypeScript modules that are absent from a production Vite build. It verifies the exact frontend SHA, same-origin health and proxy readiness, security headers, PWA metadata/icons/service worker, case-preserving masked admin entry, serious accessibility issues, horizontal overflow, Dynamic Island safe areas, and the complete Chromium/WebKit viewport matrix. The full stubbed UI, sharing, login-recovery, and real-PocketBase workflows already ran in CI before Fly deployment.
