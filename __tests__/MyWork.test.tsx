@@ -51,6 +51,7 @@ const post = (overrides: Record<string, unknown> = {}) => ({
   archived: false,
   dealer: "dealer-1",
   salesperson_id: "person-1",
+  owner_person_id: "person-1",
   attribution_authoritative: true,
   generated_at: "2026-09-30 12:00:00.000Z",
   scenario_id: "customer_delivery",
@@ -658,7 +659,7 @@ describe("Content inspector website publication", () => {
   it.each([
     { archived: true },
     { dealer: "other-dealer" },
-    { salesperson_id: "other-person" },
+    { owner_person_id: "other-person" },
   ])(
     "blocks retry when detail is outside allowed active ownership: %s",
     async (overrides) => {
@@ -726,7 +727,7 @@ describe("Content workspace requested changes", () => {
     assertReason();
   });
 
-  it("withholds a rejected reason when the post is held for safety review", () => {
+  it("withholds a rejected reason when the post is held for safety review", async () => {
     const reason = "PRIVATE requested changes";
     const rejected = post({
       approval_status: "rejected",
@@ -734,10 +735,17 @@ describe("Content workspace requested changes", () => {
       image_review_required: true,
     });
     mocks.history.mockReturnValue(history({ filtered: [rejected], items: [rejected] }));
+    mocks.detail.mockResolvedValue(rejected);
     renderWork();
     expect(screen.queryByText(reason)).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Inspect Delivery" }),
     ).not.toHaveAttribute("aria-describedby");
+    fireEvent.click(screen.getByRole("button", { name: "Inspect Delivery" }));
+    // The details label is mounted while getPostDetail is still loading, and
+    // the list row already says the caption is withheld. Wait for the
+    // inspector-only held copy, which renders only after the detail arrives.
+    await screen.findByText(/Create a corrected post before sharing it/);
+    expect(screen.getByLabelText("Content details")).not.toHaveTextContent(reason);
   });
 });

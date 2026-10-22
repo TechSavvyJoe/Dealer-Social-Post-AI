@@ -346,6 +346,42 @@ try {
     dealers: sql('PRAGMA table_info("dealers")'),
     posts: sql('PRAGMA table_info("posts")'),
   };
+  // Optional posts text columns are TEXT NOT NULL DEFAULT '' on PB 0.22.
+  // scheduled_for is that contract (max 40, required false). It is not part of
+  // the guided-connections feature. migrate down can only reverse a suffix, so
+  // reaching the guided boundary would also run this migration's down and drop
+  // the column. On this disposable copy, unregister that migration without
+  // running its down so the physical column stays. The strict posts compare
+  // then still requires scheduled_for exactly as the up migration created it.
+  const scheduledFor = unrelatedSchemaBeforeDown.posts.find(
+    (column) => column.name === "scheduled_for",
+  );
+  assert.deepEqual(
+    {
+      name: scheduledFor?.name,
+      type: scheduledFor?.type,
+      notnull: scheduledFor?.notnull,
+      dflt_value: scheduledFor?.dflt_value,
+      pk: scheduledFor?.pk,
+    },
+    {
+      name: "scheduled_for",
+      type: "TEXT",
+      notnull: 1,
+      dflt_value: "''",
+      pk: 0,
+    },
+  );
+  const preserveApplied = ["1791900000_post_scheduled_for.js"].filter((file) =>
+    rollbackFiles.includes(file),
+  );
+  const downMigrations = join(scratch, "down-migrations");
+  await cp(join(scratch, "migrations"), downMigrations, { recursive: true });
+  for (const file of preserveApplied) {
+    await rm(join(downMigrations, file));
+    sql(`DELETE FROM _migrations WHERE file = '${file}'`);
+  }
+  const guidedDownCount = rollbackFiles.length - preserveApplied.length;
   // PB's confirmation widget cancels even with exit 0 when stdin is a pipe.
   // Supply a real PTY and respond to its cursor-position queries and confirm
   // key. This wrapper runs exclusively against the copied synthetic DB.
@@ -395,9 +431,9 @@ sys.exit(code)`,
       resolve(binary),
       "migrate",
       "down",
-      String(rollbackFiles.length),
+      String(guidedDownCount),
       `--dir=${downData}`,
-      `--migrationsDir=${join(scratch, "migrations")}`,
+      `--migrationsDir=${downMigrations}`,
       `--hooksDir=${join(scratch, "empty-hooks")}`,
     ],
     { encoding: "utf8", timeout: 30_000, env: { PATH: process.env.PATH } },

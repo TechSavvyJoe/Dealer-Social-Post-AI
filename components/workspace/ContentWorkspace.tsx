@@ -35,6 +35,7 @@ import {
   postCategoryLabel,
   postStatusCopy,
 } from "../../utils/postLabels";
+import { isAuthoritativePostOwner } from "../../utils/historyPost";
 import { workspaceRequestForPost } from "../../utils/postWorkspace";
 import type { GeneratedPost, ImageSelection } from "../../types";
 import { Button } from "../ui/Button";
@@ -179,9 +180,7 @@ const WorkspaceBody: React.FC<ContentWorkspaceProps> = ({
   const manager =
     mode === "manager" && (role === "dealer_admin" || role === "super_admin");
   const ownPost = (post: PostRecord) =>
-    Boolean(
-      person?.id && post.attribution_authoritative && post.salesperson_id === person.id,
-    );
+    post.dealer === dealer?.id && isAuthoritativePostOwner(post, person?.id);
   const canManage = (post: PostRecord) =>
     post.dealer === dealer?.id && (manager || ownPost(post));
 

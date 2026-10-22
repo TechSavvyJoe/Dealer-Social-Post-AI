@@ -254,7 +254,12 @@ function projectRecords(page, dealer, helpers, policies, dao) {
       has_video: r.getBool ? r.getBool("has_video") : !!r.get("has_video"),
       approval_status: r.getString("approval_status"),
       approved_by: r.getString("approved_by"),
-      rejection_reason: r.getString("rejection_reason"),
+      // Same hold as postIsHeld: image review or unsafe customer identity.
+      // The inspector hides the note, but the raw text must not be in the JSON.
+      rejection_reason:
+        identityReviewRequired || imageReviewRequired
+          ? ""
+          : r.getString("rejection_reason"),
       approved_at: r.getString("approved_at"),
       caption: publicCaption,
       caption_source:

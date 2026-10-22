@@ -307,7 +307,7 @@ export const PostInspector: React.FC<PostInspectorProps> = ({
                 <span className={`cw-status cw-status-${review?.tone}`}>
                   {review?.label}
                 </span>
-                {post.rejection_reason && <p>{post.rejection_reason}</p>}
+                {post.rejection_reason && !held && <p>{post.rejection_reason}</p>}
                 {post.approved_by && (
                   <p>
                     {post.approved_by}

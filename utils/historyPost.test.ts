@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PostRecord } from "../services/posts";
 import {
+  isAuthoritativePostOwner,
   postStatusFor,
   savedPostIdentityIsSafe,
   shareStatusDetail,
@@ -89,13 +90,32 @@ describe("toGeneratedPostFromRecord", () => {
   });
 
   it("marks a manager reopening another salesperson's post as read-only", () => {
-    const post = basePost({ salesperson_id: "person-1" });
+    const post = basePost({
+      salesperson_id: "person-2",
+      owner_person_id: "person-1",
+      attribution_authoritative: true,
+    });
     const generated = toGeneratedPostFromRecord(post, {
       role: "dealer_admin",
       currentPersonId: "person-2",
       image: "data:image/jpeg;base64,AAAA",
     });
     expect(generated.historyReadOnly).toBe(true);
+    expect(isAuthoritativePostOwner(post, "person-2")).toBe(false);
+  });
+
+  it("lets a manager edit a post they authoritatively own", () => {
+    const post = basePost({
+      salesperson_id: "legacy-display-id",
+      owner_person_id: "person-2",
+      attribution_authoritative: true,
+    });
+    const generated = toGeneratedPostFromRecord(post, {
+      role: "dealer_admin",
+      currentPersonId: "person-2",
+      image: "data:image/jpeg;base64,AAAA",
+    });
+    expect(generated.historyReadOnly).toBe(false);
   });
 
   it("does not mark a salesperson's own reopened post as read-only", () => {

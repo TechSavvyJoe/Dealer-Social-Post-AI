@@ -312,6 +312,65 @@ describe("post workspace authorized search and detail", () => {
     expect(h.detail("held").payload.identity_review_required).toBe(true);
     expect(JSON.stringify(h.detail("held").payload)).not.toContain("Jordan");
   });
+  it("omits a held rejection reason and still returns one that is not held", () => {
+    const reason = "PRIVATE requested changes";
+    const h = harness([
+      makePost("held-image", {
+        approval_status: "rejected",
+        rejection_reason: reason,
+        model_policy_version: "stale",
+      }),
+      makePost("held-identity", {
+        approval_status: "rejected",
+        rejection_reason: reason,
+        customer_name: "Lisa Sample",
+        caption: "Congratulations to Lisa and Jordan!",
+        release_required: true,
+      }),
+      makePost("rejected", {
+        approval_status: "rejected",
+        rejection_reason: reason,
+      }),
+    ]);
+    for (const id of ["held-image", "held-identity"]) {
+      const payload = h.detail(id).payload;
+      expect(payload.rejection_reason).toBe("");
+      expect(JSON.stringify(payload)).not.toContain(reason);
+    }
+    expect(h.detail("rejected").payload.rejection_reason).toBe(reason);
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const from = hook.indexOf('routerAdd("GET", "/api/app/posts/:id/status"');
+    const route = hook.slice(from, hook.indexOf("routerAdd(", from + 20));
+    let handler: ((c: unknown) => { status: number; payload: Values }) | undefined;
+    const baseRequire = h.globals.require as (path: string) => Values;
+    runInNewContext(route, {
+      ...h.globals,
+      require: (path: string) => {
+        const loaded = baseRequire(path);
+        // The shared website module is loaded without $app. Status only needs
+        // an empty publication row; projection performs the hold check.
+        if (path.endsWith("/websitePublications.js"))
+          return { ...loaded, findPublicationForPost: () => null };
+        return loaded;
+      },
+      routerAdd: (_method: string, _path: string, callback: typeof handler) => {
+        handler = callback;
+      },
+      console: { error: () => {}, log: () => {} },
+    });
+    expect(handler).toBeTypeOf("function");
+    for (const id of ["held-image", "held-identity"]) {
+      h.detail(id);
+      const status = h.invoke(handler!);
+      expect(status, JSON.stringify(status)).toMatchObject({ status: 200 });
+      expect(status.payload.rejection_reason).toBe("");
+      expect(JSON.stringify(status.payload)).not.toContain(reason);
+    }
+    h.detail("rejected");
+    const open = h.invoke(handler!);
+    expect(open.status).toBe(200);
+    expect(open.payload.rejection_reason).toBe(reason);
+  });
   it("includes the whole UTC day for a date-only until filter", () => {
     const h = harness([
       makePost("same-day", { generated_at: "2026-10-12 23:59:59.999Z" }),
@@ -323,6 +382,46 @@ describe("post workspace authorized search and detail", () => {
         .payload.items.map((row: Values) => row.id),
     ).toEqual(["same-day"]);
     expect(h.list({ until: "2026-10-12T00:00:00.000Z" }).payload.total).toBe(0);
+    const mixed = harness([
+      makePost("whole-second", { generated_at: "2026-10-12 23:59:59Z" }),
+      makePost("next-instant", { generated_at: "2026-10-13T00:00:00.000Z" }),
+    ]);
+    expect(
+      mixed
+        .list({ since: "2026-10-12", until: "2026-10-12" })
+        .payload.items.map((row: Values) => row.id),
+    ).toEqual(["whole-second"]);
+  });
+  it("rounds a 9-digit fractional timestamp to the nearest millisecond", () => {
+    const h = harness([
+      makePost("on-ms", { generated_at: "2026-10-12 10:00:00.000Z" }),
+      makePost("next-ms", { generated_at: "2026-10-12 10:00:00.001Z" }),
+      makePost("nine", { generated_at: "2026-10-12 10:00:00.000900000Z" }),
+    ]);
+    // .000900000 is 0.9ms and rounds to .001, so the earlier .000 post is out.
+    expect(
+      h
+        .list({ since: "2026-10-12T10:00:00.000900000Z" })
+        .payload.items.map((row: Values) => row.id)
+        .sort(),
+    ).toEqual(["next-ms", "nine"]);
+    // .000400000 rounds down to .000. String order would call this range
+    // reversed because "Z" sorts after "0"; instant order does not.
+    const bounded = h.list({
+      since: "2026-10-12T10:00:00.000Z",
+      until: "2026-10-12T10:00:00.000400000Z",
+    });
+    expect(bounded.status).toBe(200);
+    expect(bounded.payload.items.map((row: Values) => row.id)).toEqual(["on-ms"]);
+    const roundedDown = harness([
+      makePost("exact", { generated_at: "2026-10-12 11:00:00.123Z" }),
+      makePost("before", { generated_at: "2026-10-12 11:00:00.122Z" }),
+    ]);
+    expect(
+      roundedDown
+        .list({ since: "2026-10-12T11:00:00.123456789Z" })
+        .payload.items.map((row: Values) => row.id),
+    ).toEqual(["exact"]);
   });
   it("filters dates, actual image availability, generated-video metadata and website state", () => {
     const h = harness([

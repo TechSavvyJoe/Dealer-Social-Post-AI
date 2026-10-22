@@ -3052,13 +3052,17 @@ routerAdd("POST", "/api/app/posts", (c) => {
           approvalMapping.kind === "customer_story",
         countApprovedPosts: function () {
           if (!salespersonId) return NaN;
+          // salesperson_id was client-selectable on older posts, so it cannot
+          // earn a first_n review exemption. Count only manager-approved posts
+          // this session's person authoritatively owns.
           const row = new DynamicModel({ total: 0 });
           $app
             .dao()
             .db()
             .newQuery(
               "SELECT COUNT(*) AS total FROM posts " +
-                "WHERE dealer = {:dealer} AND salesperson_id = {:person} " +
+                "WHERE dealer = {:dealer} AND attribution_authoritative = 1 " +
+                "AND owner_person_id = {:person} " +
                 "AND approval_status = 'approved'",
             )
             .bind({ dealer: dealer.id, person: salespersonId })
@@ -3917,9 +3921,27 @@ routerAdd("POST", "/api/app/posts/:id/schedule", (c) => {
     $app.dao().runInTransaction(function (tx) {
       require(__hooks + "/websitePublications.js").acquirePostWriteFence(tx, record.id);
       require(__hooks + "/postWorkspace.js").assertActive(tx, record.id);
-      const current = tx.findRecordById("posts", record.id);
-      current.set("scheduled_for", scheduledFor);
-      tx.saveRecord(current);
+      // Column-scoped on purpose. saveRecord would write every column loaded
+      // above (undoing a caption saved since the read) and advance
+      // posts.updated, the editor's compare-and-set revision. The fence locks
+      // the row with `updated = updated`, which does not move that revision.
+      const result = tx
+        .db()
+        .newQuery(
+          "UPDATE posts SET scheduled_for = {:scheduledFor} " +
+            "WHERE id = {:post} AND dealer = {:dealer} " +
+            "AND NOT EXISTS (SELECT 1 FROM post_workspace_state ws WHERE ws.post = posts.id AND ws.archived = 1)",
+        )
+        .bind({
+          scheduledFor: scheduledFor,
+          post: record.id,
+          dealer: dealer.id,
+        })
+        .execute();
+      if (!result || result.rowsAffected() !== 1) {
+        require(__hooks + "/postWorkspace.js").assertActive(tx, record.id);
+        throw new Error("schedule_not_applied");
+      }
     });
     return c.json(200, { id: record.id, scheduled_for: scheduledFor });
   } catch (err) {
@@ -3962,6 +3984,28 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
       record.id,
       "",
     );
+    // projectRecords applies the same image/identity hold as postIsHeld and
+    // blanks rejection_reason while that hold is active. A failed projection
+    // withholds the note rather than sending the raw column.
+    let rejectionReason = "";
+    try {
+      const projected = require(__hooks + "/postProjection.js").projectRecords(
+        [record],
+        dealer,
+        helpers,
+        policies,
+        $app.dao(),
+      );
+      rejectionReason =
+        projected && projected[0]
+          ? (projected[0].rejection_reason || "").toString()
+          : "";
+    } catch (projectionError) {
+      console.error(
+        "[/api/app/posts/:id/status] withheld rejection reason",
+        projectionError,
+      );
+    }
     return c.json(200, {
       id: record.id,
       // A manager decision advances posts.updated. Once a post has left the
@@ -3971,7 +4015,7 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
       approval_status: record.getString("approval_status"),
       approved_by: record.getString("approved_by"),
       approved_at: record.getString("approved_at"),
-      rejection_reason: record.getString("rejection_reason"),
+      rejection_reason: rejectionReason,
       image_review_required:
         policies.postImageReviewRequired(
           record,

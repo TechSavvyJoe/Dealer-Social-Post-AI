@@ -71,11 +71,19 @@ describe("a rejection has to say what to change", () => {
     );
   });
 
-  it("persists and returns it", () => {
+  it("persists and returns it unless the post is safety-held", () => {
     expect(hook).toContain("rejection_reason = {:rejectionReason}");
-    expect(hook).toContain('rejection_reason: record.getString("rejection_reason")');
-    expect(read("pb_hooks/postProjection.js")).toContain(
-      'rejection_reason: r.getString("rejection_reason")',
+    const projection = read("pb_hooks/postProjection.js");
+    expect(projection).toContain('r.getString("rejection_reason")');
+    expect(projection).toMatch(
+      /rejection_reason:\s*identityReviewRequired \|\| imageReviewRequired\s*\?\s*""\s*:\s*r\.getString\("rejection_reason"\)/,
+    );
+    const statusAt = hook.indexOf('routerAdd("GET", "/api/app/posts/:id/status"');
+    const statusRoute = hook.slice(statusAt, hook.indexOf("routerAdd(", statusAt + 20));
+    expect(statusRoute).toContain("projectRecords");
+    expect(statusRoute).toContain("rejection_reason: rejectionReason");
+    expect(statusRoute).not.toContain(
+      'rejection_reason: record.getString("rejection_reason")',
     );
   });
 
@@ -194,6 +202,8 @@ describe("the reason reaches the salesperson", () => {
   it("appears on the row in the manager's post history", () => {
     const history = read("components/PostHistory.tsx");
     expect(history).toContain("p.rejection_reason");
+    // The same hold rule as the inspector. A safety-held note must not render.
+    expect(history).toContain("!postIsHeld(p, identityGrounding)");
   });
 
   it("survives reopening the post from My work", () => {
