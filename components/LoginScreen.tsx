@@ -110,6 +110,31 @@ const segmentStyles = (selected: boolean) =>
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [entryMode, setEntryMode] = useState<EntryMode>("personal");
+  const accessPaneRef = useRef<HTMLDivElement>(null);
+  const [accessPaneHeight, setAccessPaneHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const pane = accessPaneRef.current;
+    if (!pane) return;
+    // Measure the real scrollport. Size containment can collapse this flex
+    // child on a resized/folded phone and leave the keypad clipped above an
+    // otherwise empty screen.
+    const measure = () =>
+      setAccessPaneHeight(Math.floor(pane.getBoundingClientRect().height));
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(pane);
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+    };
+  }, []);
+
   const [dealerCode, setDealerCode] = useState("");
   const [adminUsername, setAdminUsername] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
@@ -540,6 +565,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             whole phone screen below lg. Every control in it is exactly that
             width, so nothing steps in or out along the left edge. */}
         <div
+          ref={accessPaneRef}
+          data-login-compact={
+            accessPaneHeight !== null && accessPaneHeight <= 680 ? "true" : undefined
+          }
+          data-login-short={
+            accessPaneHeight !== null && accessPaneHeight <= 480 ? "true" : undefined
+          }
           className="login-access-pane flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain px-6 pb-6 pt-6 lg:min-h-0 lg:flex-none lg:items-center lg:justify-center lg:px-14 lg:py-12"
           aria-busy={isLoading}
         >

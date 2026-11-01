@@ -1179,140 +1179,142 @@
     }
   }
 
-  /* The app releases the document flow on taller tablets. Size containment
-     there would erase the pane's intrinsic height; only pinned phones use it. */
-  @media (max-width: 768px) {
-    .login-access-pane {
-      container-name: login-access;
-      container-type: size;
-    }
-  }
+  /* LoginScreen measures its scrollport. Avoid size containment so resized
+     phones retain the full login pane and a usable scrolling fallback. */
 
   @media (max-width: 1023px) and (orientation: portrait) {
-    @container login-access (max-height: 680px) {
-      .login-form {
-        row-gap: 0.25rem !important;
-        padding-block: 0;
-      }
+    /* Keep the controls together; auto margins give way to scrolling when tight. */
+    .login-form {
+      flex: 0 0 auto !important;
+      grid-template-rows: auto auto auto !important;
+      margin-block: auto;
+    }
 
-      .login-brand-row {
-        flex-direction: row;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.5rem;
-      }
+    .login-access-pane[data-login-compact="true"] .login-form {
+      row-gap: 0.25rem !important;
+      padding-block: 0;
+    }
 
-      .login-mobile-logo {
-        gap: 0.5rem !important;
-      }
+    .login-access-pane[data-login-compact="true"] .login-brand-row {
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
 
-      .login-brand-image {
-        width: 2rem;
-        height: 2rem;
-        border-radius: 0.5rem;
-      }
+    .login-access-pane[data-login-compact="true"] .login-mobile-logo {
+      gap: 0.5rem !important;
+    }
 
-      .login-wordmark {
-        font-size: 0.875rem;
-        line-height: 1rem;
-      }
+    .login-access-pane[data-login-compact="true"] .login-brand-image {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 0.5rem;
+    }
 
-      .login-brand-row h1 {
-        font-size: 1.25rem;
-        line-height: 1.5rem;
-      }
+    .login-access-pane[data-login-compact="true"] .login-wordmark {
+      font-size: 0.875rem;
+      line-height: 1rem;
+    }
 
-      .login-intro {
-        gap: 0 !important;
-      }
+    .login-access-pane[data-login-compact="true"] .login-brand-row h1 {
+      font-size: 1.25rem;
+      line-height: 1.5rem;
+    }
 
-      .login-personal-instruction {
-        display: none;
-      }
+    .login-access-pane[data-login-compact="true"] .login-intro {
+      gap: 0 !important;
+    }
 
-      .login-mode-instruction {
-        font-size: 0.8125rem;
-        line-height: 1.125rem;
-      }
+    .login-access-pane[data-login-compact="true"] .login-personal-instruction {
+      display: none;
+    }
 
+    .login-access-pane[data-login-compact="true"] .login-mode-instruction {
+      font-size: 0.8125rem;
+      line-height: 1.125rem;
+    }
+
+    .login-access-pane[data-login-compact="true"]
       .login-invited-intro:has(.login-invitation-note button[aria-expanded="false"]) {
-        display: grid !important;
-        grid-template-columns: minmax(0, 1fr) auto;
-        column-gap: 0.5rem !important;
-      }
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) auto;
+      column-gap: 0.5rem !important;
+    }
 
+    .login-access-pane[data-login-compact="true"]
       .login-invited-intro:has(.login-invitation-note button[aria-expanded="false"])
-        .login-brand-row {
-        grid-column: 1 / -1;
-      }
+      .login-brand-row {
+      grid-column: 1 / -1;
+    }
 
+    .login-access-pane[data-login-compact="true"]
       .login-invited-intro:has(.login-invitation-note button[aria-expanded="false"])
-        #login-instruction {
-        min-width: 0;
-        align-self: center;
-        overflow-wrap: anywhere;
-      }
+      #login-instruction {
+      min-width: 0;
+      align-self: center;
+      overflow-wrap: anywhere;
+    }
 
+    .login-access-pane[data-login-compact="true"]
       .login-invited-intro:has(.login-invitation-note button[aria-expanded="false"])
-        .login-invitation-note {
-        min-width: 0;
-        align-self: center;
-      }
+      .login-invitation-note {
+      min-width: 0;
+      align-self: center;
+    }
 
+    .login-access-pane[data-login-compact="true"]
       .login-invited-intro:has(.login-invitation-note button[aria-expanded="false"])
-        .login-invitation-note
-        button {
-        max-width: 8.25rem;
-        text-align: right;
-      }
+      .login-invitation-note
+      button {
+      max-width: 8.25rem;
+      text-align: right;
+    }
 
-      .login-switch {
-        height: 2.75rem !important;
-        padding: 0 !important;
-      }
+    .login-access-pane[data-login-compact="true"] .login-switch {
+      height: 2.75rem !important;
+      padding: 0 !important;
+    }
 
-      .login-code-entry {
-        min-height: 1.5rem;
-        max-width: 17rem;
-      }
+    .login-access-pane[data-login-compact="true"] .login-code-entry {
+      min-height: 1.5rem;
+      max-width: 17rem;
+    }
 
-      .login-code-slot {
-        width: 1rem;
-        height: 1rem !important;
-        background-color: transparent;
-      }
+    .login-access-pane[data-login-compact="true"] .login-code-slot {
+      width: 1rem;
+      height: 1rem !important;
+      background-color: transparent;
+    }
 
-      .login-code-slot > span {
-        width: 0.5rem;
-        height: 0.5rem;
-      }
+    .login-access-pane[data-login-compact="true"] .login-code-slot > span {
+      width: 0.5rem;
+      height: 0.5rem;
+    }
 
-      .login-mode-panel {
-        gap: 0.25rem !important;
-      }
+    .login-access-pane[data-login-compact="true"] .login-mode-panel {
+      gap: 0.25rem !important;
+    }
 
-      .login-keypad-group {
-        margin-top: 0 !important;
-        gap: 0 !important;
-        max-width: 17rem;
-      }
+    .login-access-pane[data-login-compact="true"] .login-keypad-group {
+      margin-top: 0 !important;
+      gap: 0 !important;
+      max-width: 17rem;
+    }
 
-      .login-keypad,
-      .login-keypad > div {
-        gap: 0.375rem !important;
-      }
+    .login-access-pane[data-login-compact="true"] .login-keypad,
+    .login-access-pane[data-login-compact="true"] .login-keypad > div {
+      gap: 0.375rem !important;
+    }
 
-      .login-footer-note {
-        display: none;
-      }
+    .login-access-pane[data-login-compact="true"] .login-footer-note {
+      display: none;
     }
 
     /* Update banners reduce the usable pane on short portrait phones. Keep
        every key inside that pane while retaining generous 56px touch targets. */
-    @container login-access (max-height: 480px) {
-      .login-key {
-        min-height: 3.5rem !important;
-      }
+    .login-access-pane[data-login-short="true"] .login-key {
+      min-height: 3.5rem !important;
     }
   }
 

@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "advisory": "GHSA-mrhx-c7xc-m3w5",
+    "package": "zod",
+    "expires": "2026-11-14",
+    "reason": "Runtime Zod is patched to >=4.6.7. The only remaining affected copy is Zod 3 under the dev-only @vercel/config SDK, which validates trusted repository deployment configuration rather than HTTP/user input. Even the current SDK still requires Zod 3; overriding it to Zod 4 would cross a major API boundary. Re-check for a compatible upstream fix before this short exception expires."
+  }
+]
