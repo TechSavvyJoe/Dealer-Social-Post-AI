@@ -551,6 +551,22 @@ test.describe("Dealer Social Post AI Flow", () => {
             await expect(invitedDealerIdentity).toHaveText("Bob Maxey Ford of Howell");
           }
 
+          // ResizeObserver updates the measured-pane attributes asynchronously.
+          // In particular, inserting an update banner can shrink the scrollport
+          // between its first paint and the next observer delivery in WebKit.
+          await expect
+            .poll(() =>
+              page.locator(".login-access-pane").evaluate((pane) => {
+                const height = Math.floor(pane.getBoundingClientRect().height);
+                return (
+                  (pane.getAttribute("data-login-compact") === "true") ===
+                    height <= 680 &&
+                  (pane.getAttribute("data-login-short") === "true") === height <= 480
+                );
+              }),
+            )
+            .toBe(true);
+
           const geometry = await page.evaluate(() => {
             const keypadButtons = Array.from(
               document.querySelectorAll<HTMLElement>(
