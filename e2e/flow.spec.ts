@@ -465,13 +465,16 @@ test.describe("Dealer Social Post AI Flow", () => {
   for (const viewport of [
     { project: "phone-fold-280", width: 280, height: 653 },
     { project: "phone-320", width: 320, height: 568 },
+    { project: "phone-large-440", width: 669, height: 951 },
     { project: "phone-landscape-844", width: 844, height: 390 },
     { project: "desktop-1440", width: 820, height: 1180 },
     { project: "desktop-1440", width: 1024, height: 500 },
   ]) {
     for (const invited of [false, true]) {
       const updatePromptModes =
-        viewport.width < 400 || viewport.height < 500 ? [false, true] : [false];
+        viewport.width < 400 || viewport.width === 669 || viewport.height < 500
+          ? [false, true]
+          : [false];
       for (const withPendingUpdatePrompt of updatePromptModes) {
         test(`keeps the personal keypad and invitation action visible at ${viewport.width}px (${invited ? "invited" : "uninvited"}${withPendingUpdatePrompt ? ", pending update prompt" : ""})`, async ({
           page,
@@ -519,6 +522,28 @@ test.describe("Dealer Social Post AI Flow", () => {
             name: invited ? "Change dealership" : "Use a private invitation",
           });
           await expect(keypad).toBeVisible();
+          if (viewport.width === 669) {
+            // An unfolded portrait screen must also recover after rotation.
+            await page.setViewportSize({ width: 951, height: 430 });
+            await page.setViewportSize({ width: 669, height: 951 });
+            await expect(page.locator(".login-access-pane")).toHaveCSS(
+              "container-type",
+              "normal",
+            );
+            await expect
+              .poll(() =>
+                page
+                  .getByRole("button", { name: "Digit 0", exact: true })
+                  .evaluate((key) => {
+                    const r = key.getBoundingClientRect();
+                    return (
+                      r.height >= 44 && r.top >= 0 && r.bottom <= window.innerHeight
+                    );
+                  }),
+              )
+              .toBe(true);
+          }
+
           await expect(invitationAction).toBeVisible();
           if (invited) {
             const invitedDealerIdentity = page.locator("#login-instruction");
