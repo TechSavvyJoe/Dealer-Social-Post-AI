@@ -26,7 +26,13 @@ function hostname(value) {
 
 export function validateStagedDeploymentInspection(
   deployment,
-  { expectedUrl, expectedProjectId, expectedProjectName, expectedDeploymentId },
+  {
+    expectedUrl,
+    expectedProjectId,
+    expectedProjectName,
+    expectedDeploymentId,
+    expectedOrgId,
+  },
 ) {
   const expectedHostname = hostname(expectedUrl);
   const deploymentHostname = hostname(deployment?.url || "");
@@ -35,7 +41,10 @@ export function validateStagedDeploymentInspection(
     deploymentHostname !== expectedHostname ||
     !DEPLOYMENT_ID.test(deployment?.id || "") ||
     deployment.id !== expectedDeploymentId ||
+    !/^prj_[A-Za-z0-9]+$/.test(expectedProjectId || "") ||
     deployment?.projectId !== expectedProjectId ||
+    !/^team_[A-Za-z0-9]+$/.test(expectedOrgId || "") ||
+    deployment?.ownerId !== expectedOrgId ||
     deployment?.name !== expectedProjectName ||
     deployment?.target !== "production"
   ) {
@@ -53,6 +62,33 @@ export function validateStagedDeploymentInspection(
   throw new Error("Vercel returned an unknown staged deployment state.");
 }
 
+export function inspectStagedDeployment(options, run = spawnSync) {
+  const { cliVersion, timeoutMs, ...identity } = options;
+  if (
+    !/^\d+\.\d+\.\d+$/.test(cliVersion || "") ||
+    !DEPLOYMENT_ID.test(identity.expectedDeploymentId || "") ||
+    !/^team_[A-Za-z0-9]+$/.test(identity.expectedOrgId || "") ||
+    !Number.isInteger(timeoutMs) ||
+    timeoutMs <= 0 ||
+    timeoutMs > 300_000
+  )
+    throw new Error("Invalid staged inspection request.");
+
+  // `vercel inspect --json` omits projectId and ownerId in CLI 58.4.4.
+  // The authenticated deployment API supplies both; fail closed when the
+  // caller only has access to the API's reduced public response.
+  const endpoint = `/v13/deployments/${identity.expectedDeploymentId}?teamId=${identity.expectedOrgId}`;
+  const inspection = run(
+    "npx",
+    ["--yes", `vercel@${cliVersion}`, "api", endpoint, "--method", "GET", "--raw"],
+    { encoding: "utf8", timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024 },
+  );
+  if (inspection.error || inspection.status !== 0) {
+    throw new Error("Authenticated Vercel deployment inspection failed.");
+  }
+  return validateStagedDeploymentInspection(JSON.parse(inspection.stdout), identity);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const [mode, ...args] = process.argv.slice(2);
@@ -61,32 +97,36 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     let expectedProjectId;
     let expectedProjectName;
     let expectedDeploymentId;
+    let expectedOrgId;
     if (mode === "--inspect") {
-      const [url, cliVersion, deploymentId, projectId, projectName, timeoutMs] = args;
-      const inspection = spawnSync(
-        "npx",
-        ["--yes", `vercel@${cliVersion}`, "inspect", url, "--json"],
-        { encoding: "utf8", timeout: Number(timeoutMs), maxBuffer: 2 * 1024 * 1024 },
-      );
-      if (inspection.error || inspection.status !== 0) process.exit(1);
-      deployment = JSON.parse(inspection.stdout);
-      expectedUrl = url;
-      expectedProjectId = projectId;
-      expectedProjectName = projectName;
-      expectedDeploymentId = deploymentId;
+      const [url, cliVersion, deploymentId, projectId, projectName, timeoutMs, orgId] =
+        args;
+      const result = inspectStagedDeployment({
+        expectedUrl: url,
+        expectedProjectId: projectId,
+        expectedProjectName: projectName,
+        expectedDeploymentId: deploymentId,
+        expectedOrgId: orgId,
+        cliVersion,
+        timeoutMs: Number(timeoutMs),
+      });
+      process.stdout.write(`${result.state} ${result.id}`);
+      process.exit(0);
     } else {
-      const [file, url, projectId, projectName, deploymentId] = [mode, ...args];
+      const [file, url, projectId, projectName, deploymentId, orgId] = [mode, ...args];
       deployment = JSON.parse(readFileSync(file, "utf8"));
       expectedUrl = url;
       expectedProjectId = projectId;
       expectedProjectName = projectName;
       expectedDeploymentId = deploymentId;
+      expectedOrgId = orgId;
     }
     const result = validateStagedDeploymentInspection(deployment, {
       expectedUrl,
       expectedProjectId,
       expectedProjectName,
       expectedDeploymentId,
+      expectedOrgId,
     });
     process.stdout.write(`${result.state} ${result.id}`);
   } catch {

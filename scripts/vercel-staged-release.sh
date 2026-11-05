@@ -242,7 +242,8 @@ wait_for_staged_deployment_id() {
       "$expected_deployment_id" \
       "$EXPECTED_VERCEL_PROJECT_ID" \
       "$EXPECTED_VERCEL_PROJECT_NAME" \
-      "$((remaining * 1000))")" ||
+      "$((remaining * 1000))" \
+      "$EXPECTED_VERCEL_ORG_ID")" ||
       fail "Vercel inspection timed out, returned invalid deployment identity, or reached a terminal state."
     read -r state deployment_id <<< "$result"
     if [[ "$state" = "READY" ]]; then
